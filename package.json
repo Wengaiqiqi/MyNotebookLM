@@ -1,0 +1,39 @@
+{
+  "name": "mynotebooklm",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Local-first AI research assistant for Windows",
+  "main": "out/main/index.js",
+  "scripts": {
+    "dev": "electron-vite dev",
+    "build": "electron-vite build",
+    "typecheck": "tsc -p tsconfig.node.json --noEmit && tsc -p tsconfig.web.json --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:e2e": "playwright test",
+    "package:win": "npm run build && electron-builder --win nsis --x64",
+    "postinstall": "electron-builder install-app-deps"
+  },
+  "dependencies": {
+    "better-sqlite3": "13.0.3",
+    "i18next": "26.4.0",
+    "react": "19.2.8",
+    "react-dom": "19.2.8",
+    "react-i18next": "17.0.12",
+    "zod": "4.4.3"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.62.1",
+    "@types/better-sqlite3": "9.6.0",
+    "@types/react": "19.2.18",
+    "@types/react-dom": "19.2.5",
+    "@vitejs/plugin-react": "5.2.0",
+    "electron": "43.4.1",
+    "electron-builder": "26.15.3",
+    "electron-vite": "5.0.0",
+    "playwright": "1.62.1",
+    "typescript": "7.0.2",
+    "vite": "7.3.6",
+    "vitest": "4.1.11"
+  }
+}
