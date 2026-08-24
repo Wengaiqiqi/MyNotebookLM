@@ -1,2 +1,10 @@
 .worktrees/
 .superpowers/
+node_modules/
+out/
+dist/
+test-results/
+playwright-report/
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal

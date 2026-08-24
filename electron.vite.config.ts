@@ -11,7 +11,7 @@ export default defineConfig({
     }
   },
   preload: {
-    plugins: [externalizeDepsPlugin()],
+    plugins: [externalizeDepsPlugin({ exclude: ["zod"] })],
     build: {
       rollupOptions: {
         input: "src/preload/index.ts"

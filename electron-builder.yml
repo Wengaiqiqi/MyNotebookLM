@@ -1,0 +1,23 @@
+appId: com.wengaiqiqi.mynotebooklm
+productName: MyNotebookLM
+asar: true
+asarUnpack:
+  - "**/*.node"
+files:
+  - out/**
+  - package.json
+extraResources:
+  - from: src/main/db/migrations
+    to: migrations
+win:
+  target:
+    - target: nsis
+      arch: [x64]
+  artifactName: "MyNotebookLM-Setup-${version}.${ext}"
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  deleteAppDataOnUninstall: false

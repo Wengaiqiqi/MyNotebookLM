@@ -1,0 +1,42 @@
+import { expect, test } from "@playwright/test";
+import fs from "node:fs/promises";
+import path from "node:path";
+import { _electron as electron, type ElectronApplication, type Page } from "playwright";
+
+async function launchWithUserData(
+  userDataDir: string
+): Promise<{ app: ElectronApplication; page: Page }> {
+  const app = await electron.launch({
+    args: [path.resolve("out/main/index.js")],
+    env: {
+      ...process.env,
+      NODE_ENV: "test",
+      MYNOTEBOOKLM_USER_DATA_DIR: userDataDir
+    }
+  });
+  return { app, page: await app.firstWindow() };
+}
+
+test("persists a project across desktop restarts", async ({}, testInfo) => {
+  const userDataDir = testInfo.outputPath("user-data");
+  await fs.mkdir(userDataDir, { recursive: true });
+
+  const first = await launchWithUserData(userDataDir);
+  try {
+    expect(await first.app.evaluate(({ app }) => app.getPath("userData"))).toBe(userDataDir);
+    await first.page.getByRole("button", { name: "新建项目" }).first().click();
+    await first.page.getByLabel("项目名称").fill("持久化测试");
+    await first.page.getByRole("button", { name: "确认" }).click();
+    await expect(first.page.getByText("持久化测试").first()).toBeVisible();
+  } finally {
+    await first.app.close();
+  }
+
+  const second = await launchWithUserData(userDataDir);
+  try {
+    await expect(second.page.getByText("持久化测试").first()).toBeVisible();
+    await second.page.screenshot({ path: testInfo.outputPath("restart-persistence.png") });
+  } finally {
+    await second.app.close();
+  }
+});

@@ -11,6 +11,11 @@ import { createMainWindow } from "./window";
 let appDatabase: AppDatabase | undefined;
 let cleanupProjectHandlers: (() => void) | undefined;
 
+const testUserDataDir = process.env["MYNOTEBOOKLM_USER_DATA_DIR"];
+if (process.env["NODE_ENV"] === "test" && testUserDataDir) {
+  app.setPath("userData", testUserDataDir);
+}
+
 app.whenReady().then(async () => {
   const appPaths = getAppPaths(app.getPath("userData"));
   await Promise.all([
@@ -21,7 +26,7 @@ app.whenReady().then(async () => {
   ]);
   const migrationsDir = app.isPackaged
     ? path.join(process.resourcesPath, "migrations")
-    : path.join(app.getAppPath(), "src", "main", "db", "migrations");
+    : path.resolve(__dirname, "../../src/main/db/migrations");
   appDatabase = openAppDatabase(appPaths.database, migrationsDir);
   const projectRepository = new ProjectRepository(appDatabase.connection);
   const projectService = new ProjectService(projectRepository);

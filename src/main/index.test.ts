@@ -1,4 +1,5 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import path from "node:path";
 
 type Callback = (...args: unknown[]) => void;
 
@@ -21,6 +22,7 @@ const mocks = vi.hoisted(() => {
       isPackaged: false,
       whenReady: vi.fn(() => Promise.resolve()),
       getPath: vi.fn(() => "C:\\data"),
+      setPath: vi.fn(),
       getAppPath: vi.fn(() => "C:\\app"),
       on: vi.fn((event: string, callback: Callback) => {
         callbacks.set(event, callback);
@@ -82,6 +84,31 @@ describe("main application composition", () => {
     mocks.callbacks.clear();
   });
 
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it("uses the requested isolated user data directory only in test mode", async () => {
+    vi.stubEnv("NODE_ENV", "test");
+    vi.stubEnv("MYNOTEBOOKLM_USER_DATA_DIR", "C:\\e2e-user-data");
+
+    await import("./index");
+
+    expect(mocks.app.setPath).toHaveBeenCalledWith("userData", "C:\\e2e-user-data");
+    expect(mocks.app.setPath.mock.invocationCallOrder[0]!).toBeLessThan(
+      mocks.app.whenReady.mock.invocationCallOrder[0]!
+    );
+  });
+
+  it("ignores the test user data override in production", async () => {
+    vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv("MYNOTEBOOKLM_USER_DATA_DIR", "C:\\must-not-use");
+
+    await import("./index");
+
+    expect(mocks.app.setPath).not.toHaveBeenCalled();
+  });
+
   it("connects one project service after migration and cleans it up on shutdown", async () => {
     await import("./index");
     await vi.waitFor(() => expect(mocks.createMainWindow).toHaveBeenCalledOnce());
@@ -93,6 +120,10 @@ describe("main application composition", () => {
       "handlers",
       "window"
     ]);
+    expect(mocks.openAppDatabase).toHaveBeenCalledWith(
+      "C:\\data\\MyNotebookLM\\db\\app.sqlite",
+      path.resolve(__dirname, "../../src/main/db/migrations")
+    );
     expect(mocks.ProjectRepository).toHaveBeenCalledOnce();
     expect(mocks.ProjectRepository).toHaveBeenCalledWith(mocks.connection);
     expect(mocks.ProjectService).toHaveBeenCalledOnce();
