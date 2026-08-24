@@ -1,3 +1,4 @@
+import { z } from "zod";
 import { PROJECT_CHANNELS, type DesktopApi } from "../shared/ipc";
 import {
   createProjectInputSchema,
@@ -10,6 +11,8 @@ type IpcInvoker = {
   invoke(channel: string, payload?: unknown): Promise<unknown>;
 };
 
+const removeProjectResponseSchema = z.undefined();
+
 export function createDesktopApi(ipc: IpcInvoker): DesktopApi {
   return {
     projects: {
@@ -21,7 +24,7 @@ export function createDesktopApi(ipc: IpcInvoker): DesktopApi {
       archive: async (input) =>
         projectDtoSchema.parse(await ipc.invoke(PROJECT_CHANNELS.archive, projectIdInputSchema.parse(input))),
       remove: async (input) => {
-        await ipc.invoke(PROJECT_CHANNELS.remove, projectIdInputSchema.parse(input));
+        removeProjectResponseSchema.parse(await ipc.invoke(PROJECT_CHANNELS.remove, projectIdInputSchema.parse(input)));
       }
     }
   };
