@@ -7,6 +7,7 @@ import { ProjectNotFoundError, ProjectRepository } from "./project-repository";
 
 const PROJECT_ID = "11111111-1111-4111-8111-111111111111";
 const UNKNOWN_PROJECT_ID = "22222222-2222-4222-8222-222222222222";
+const OLD_UPDATED_AT = "2000-01-01T00:00:00.000Z";
 
 describe("ProjectRepository", () => {
   let temporaryRoot: string;
@@ -31,10 +32,19 @@ describe("ProjectRepository", () => {
     const created = repository.create({ id: PROJECT_ID, name: "AI 研究" });
     expect(repository.list()).toEqual([created]);
 
+    appDatabase.connection
+      .prepare("UPDATE projects SET updated_at = ? WHERE id = ?")
+      .run(OLD_UPDATED_AT, PROJECT_ID);
     const renamed = repository.rename(PROJECT_ID, "RAG 研究");
     expect(renamed.name).toBe("RAG 研究");
+    expect(Date.parse(renamed.updatedAt)).toBeGreaterThan(Date.parse(OLD_UPDATED_AT));
 
-    expect(repository.archive(PROJECT_ID).archived).toBe(true);
+    appDatabase.connection
+      .prepare("UPDATE projects SET updated_at = ? WHERE id = ?")
+      .run(OLD_UPDATED_AT, PROJECT_ID);
+    const archived = repository.archive(PROJECT_ID);
+    expect(archived.archived).toBe(true);
+    expect(Date.parse(archived.updatedAt)).toBeGreaterThan(Date.parse(OLD_UPDATED_AT));
     expect(repository.list()).toEqual([]);
     expect(repository.list({ includeArchived: true })).toHaveLength(1);
 
