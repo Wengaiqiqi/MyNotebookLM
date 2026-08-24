@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type FormEvent } from "react";
+import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
 import type { ProjectDto } from "../../shared/projects";
 import { changeLanguage, changeTheme, readTheme, type AppLanguage, type AppTheme } from "./i18n";
@@ -7,6 +8,33 @@ type DialogState =
   | { kind: "create" }
   | { kind: "rename"; project: ProjectDto }
   | { kind: "remove"; project: ProjectDto };
+
+type OpenMenu = {
+  projectId: string;
+  top: number;
+  left: number;
+  trigger: HTMLButtonElement;
+};
+
+const menuWidth = 154;
+const menuHeight = 132;
+const menuMargin = 8;
+const menuGap = 6;
+
+function placeProjectMenu(
+  anchor: DOMRect,
+  width = menuWidth,
+  height = menuHeight
+): Pick<OpenMenu, "top" | "left"> {
+  const left = Math.min(
+    Math.max(anchor.right - width, menuMargin),
+    Math.max(menuMargin, window.innerWidth - width - menuMargin)
+  );
+  const top = anchor.bottom + menuGap + height <= window.innerHeight - menuMargin
+    ? anchor.bottom + menuGap
+    : Math.max(menuMargin, anchor.top - menuGap - height);
+  return { top, left };
+}
 
 function formatDate(value: string, language: AppLanguage): string {
   return new Intl.DateTimeFormat(language, {
@@ -24,14 +52,18 @@ export default function App() {
   const [selectedId, setSelectedId] = useState<string>();
   const [error, setError] = useState<string>();
   const [errorTarget, setErrorTarget] = useState<string>();
-  const [openMenuId, setOpenMenuId] = useState<string>();
+  const [openMenu, setOpenMenu] = useState<OpenMenu>();
   const [dialog, setDialog] = useState<DialogState>();
   const [draftName, setDraftName] = useState("");
   const [busy, setBusy] = useState(false);
+  const busyRef = useRef(false);
+  const dialogRef = useRef<DialogState | undefined>(undefined);
   const loaded = useRef(false);
   const nameInput = useRef<HTMLInputElement>(null);
   const confirmButton = useRef<HTMLButtonElement>(null);
   const dialogCard = useRef<HTMLElement>(null);
+  const projectMenu = useRef<HTMLDivElement>(null);
+  dialogRef.current = dialog;
 
   const refreshProjects = useCallback(async () => {
     try {
@@ -71,7 +103,7 @@ export default function App() {
     const handleDialogKey = (event: KeyboardEvent): void => {
       if (event.key === "Escape") {
         event.preventDefault();
-        setDialog(undefined);
+        if (!busyRef.current) setDialog(undefined);
         return;
       }
       if (event.key !== "Tab") return;
@@ -102,75 +134,137 @@ export default function App() {
     };
   }, [dialog]);
 
+  useLayoutEffect(() => {
+    if (!openMenu || !projectMenu.current) return;
+    const measured = projectMenu.current.getBoundingClientRect();
+    const next = placeProjectMenu(
+      openMenu.trigger.getBoundingClientRect(),
+      measured.width || menuWidth,
+      measured.height || menuHeight
+    );
+    if (next.top !== openMenu.top || next.left !== openMenu.left) {
+      setOpenMenu((current) => current ? { ...current, ...next } : current);
+    }
+  }, [openMenu?.projectId, error, errorTarget]);
+
+  useEffect(() => {
+    if (!openMenu) return;
+    projectMenu.current?.querySelector<HTMLButtonElement>("[role=menuitem]")?.focus();
+    const closeMenu = (): void => setOpenMenu(undefined);
+    const handleOutsideMouseDown = (event: MouseEvent): void => {
+      if (
+        event.target instanceof Node
+        && !projectMenu.current?.contains(event.target)
+        && !openMenu.trigger.contains(event.target)
+      ) closeMenu();
+    };
+    const handleMenuKey = (event: KeyboardEvent): void => {
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      closeMenu();
+      openMenu.trigger.focus();
+    };
+
+    window.addEventListener("resize", closeMenu);
+    document.addEventListener("scroll", closeMenu, true);
+    document.addEventListener("mousedown", handleOutsideMouseDown);
+    document.addEventListener("keydown", handleMenuKey);
+    return () => {
+      window.removeEventListener("resize", closeMenu);
+      document.removeEventListener("scroll", closeMenu, true);
+      document.removeEventListener("mousedown", handleOutsideMouseDown);
+      document.removeEventListener("keydown", handleMenuKey);
+    };
+  }, [openMenu]);
+
   const selectedProject = projects.find((project) => project.id === selectedId);
+  const openMenuProject = projects.find((project) => project.id === openMenu?.projectId);
 
   function openCreateDialog(): void {
+    if (busyRef.current || dialogRef.current) return;
     setDraftName("");
     setError(undefined);
     setErrorTarget(undefined);
+    setOpenMenu(undefined);
     setDialog({ kind: "create" });
   }
 
   function openRenameDialog(project: ProjectDto): void {
+    if (busyRef.current || dialogRef.current) return;
     setDraftName(project.name);
     setError(undefined);
     setErrorTarget(undefined);
-    setOpenMenuId(undefined);
+    setOpenMenu(undefined);
     setDialog({ kind: "rename", project });
   }
 
   async function submitName(event: FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
-    if (!dialog || dialog.kind === "remove") return;
+    if (!dialog || dialog.kind === "remove" || busyRef.current) return;
 
+    const activeDialog = dialog;
+    busyRef.current = true;
     setBusy(true);
     setError(undefined);
     setErrorTarget(undefined);
     try {
-      if (dialog.kind === "create") {
+      if (activeDialog.kind === "create") {
         await window.myNotebook.projects.create({ name: draftName });
       } else {
-        await window.myNotebook.projects.rename({ id: dialog.project.id, name: draftName });
+        await window.myNotebook.projects.rename({ id: activeDialog.project.id, name: draftName });
       }
       await refreshProjects();
-      setDialog(undefined);
+      setDialog((current) => current === activeDialog ? undefined : current);
     } catch {
-      setError(t(dialog.kind === "create" ? "error.createProject" : "error.renameProject"));
-      setErrorTarget("dialog");
+      if (dialogRef.current === activeDialog) {
+        setError(t(activeDialog.kind === "create" ? "error.createProject" : "error.renameProject"));
+        setErrorTarget("dialog");
+      }
     } finally {
+      busyRef.current = false;
       setBusy(false);
     }
   }
 
   async function archiveProject(project: ProjectDto): Promise<void> {
+    if (busyRef.current) return;
+    busyRef.current = true;
     setBusy(true);
     setError(undefined);
     setErrorTarget(undefined);
     try {
       await window.myNotebook.projects.archive({ id: project.id });
       await refreshProjects();
-      setOpenMenuId(undefined);
+      setOpenMenu(undefined);
     } catch {
       setError(t("error.archiveProject"));
       setErrorTarget(`project:${project.id}`);
     } finally {
+      busyRef.current = false;
       setBusy(false);
     }
   }
 
   async function removeProject(project: ProjectDto): Promise<void> {
+    if (busyRef.current) return;
+    const activeDialog = dialog;
+    if (activeDialog?.kind !== "remove" || activeDialog.project.id !== project.id) return;
+    busyRef.current = true;
     setBusy(true);
     setError(undefined);
     setErrorTarget(undefined);
     try {
       await window.myNotebook.projects.remove({ id: project.id });
       await refreshProjects();
-      setDialog(undefined);
-      setOpenMenuId(undefined);
+      setDialog((current) => current === activeDialog ? undefined : current);
+      setOpenMenu(undefined);
     } catch {
-      setError(t("error.removeProject"));
-      setErrorTarget("dialog");
+      if (dialogRef.current === activeDialog) {
+        setError(t("error.removeProject"));
+        setErrorTarget("dialog");
+      }
     } finally {
+      busyRef.current = false;
       setBusy(false);
     }
   }
@@ -178,6 +272,14 @@ export default function App() {
   function selectTheme(next: AppTheme): void {
     setTheme(next);
     changeTheme(next);
+  }
+
+  function toggleProjectMenu(projectId: string, trigger: HTMLButtonElement): void {
+    if (busyRef.current || dialogRef.current) return;
+    setOpenMenu((current) => {
+      if (current?.projectId === projectId) return undefined;
+      return { projectId, trigger, ...placeProjectMenu(trigger.getBoundingClientRect()) };
+    });
   }
 
   return (
@@ -191,7 +293,7 @@ export default function App() {
 
         <nav className="project-nav" aria-label={t("project.title")}>
           <h1>{t("project.title")}</h1>
-          <button className="primary-button create-button" type="button" onClick={openCreateDialog}>
+          <button className="primary-button create-button" type="button" disabled={busy} onClick={openCreateDialog}>
             <span aria-hidden="true">＋</span>{t("project.create")}
           </button>
 
@@ -211,7 +313,7 @@ export default function App() {
                   aria-current={project.id === selectedId ? "page" : undefined}
                   onClick={() => {
                     setSelectedId(project.id);
-                    setOpenMenuId(undefined);
+                    setOpenMenu(undefined);
                   }}
                 >
                   <span className="project-icon" aria-hidden="true">□</span>
@@ -225,34 +327,12 @@ export default function App() {
                   type="button"
                   aria-label={`${project.name}: ${t("project.menu")}`}
                   aria-haspopup="menu"
-                  aria-expanded={openMenuId === project.id}
-                  onClick={() => setOpenMenuId((current) => current === project.id ? undefined : project.id)}
+                  aria-expanded={openMenu?.projectId === project.id}
+                  disabled={busy}
+                  onClick={(event) => toggleProjectMenu(project.id, event.currentTarget)}
                 >
                   •••
                 </button>
-                {openMenuId === project.id && (
-                  <div className="project-menu" role="menu">
-                    <button type="button" role="menuitem" onClick={() => openRenameDialog(project)}>
-                      <span aria-hidden="true">✎</span>{t("project.rename")}
-                    </button>
-                    <button type="button" role="menuitem" disabled={busy} onClick={() => void archiveProject(project)}>
-                      <span aria-hidden="true">▣</span>{t("project.archive")}
-                    </button>
-                    <button
-                      className="danger-action"
-                      type="button"
-                      role="menuitem"
-                      onClick={() => {
-                        setError(undefined);
-                        setErrorTarget(undefined);
-                        setDialog({ kind: "remove", project });
-                      }}
-                    >
-                      <span aria-hidden="true">⌫</span>{t("project.remove")}
-                    </button>
-                    {errorTarget === `project:${project.id}` && <p className="inline-error" role="alert">{error}</p>}
-                  </div>
-                )}
               </div>
             ))}
           </div>
@@ -315,7 +395,7 @@ export default function App() {
                 <span className="empty-book" aria-hidden="true">M</span>
                 <h3 id="workspace-title">{t("project.emptyTitle")}</h3>
                 <p>{t("project.emptyBody")}</p>
-                <button className="primary-button" type="button" onClick={openCreateDialog}>{t("project.create")}</button>
+                <button className="primary-button" type="button" disabled={busy} onClick={openCreateDialog}>{t("project.create")}</button>
               </div>
             )}
           </section>
@@ -335,11 +415,44 @@ export default function App() {
       </main>
     </div>
 
+      {openMenu && openMenuProject && !dialog && createPortal(
+        <div
+          ref={projectMenu}
+          className="project-menu"
+          role="menu"
+          style={{ top: openMenu.top, left: openMenu.left }}
+        >
+          <button type="button" role="menuitem" disabled={busy} onClick={() => openRenameDialog(openMenuProject)}>
+            <span aria-hidden="true">✎</span>{t("project.rename")}
+          </button>
+          <button type="button" role="menuitem" disabled={busy} onClick={() => void archiveProject(openMenuProject)}>
+            <span aria-hidden="true">▣</span>{t("project.archive")}
+          </button>
+          <button
+            className="danger-action"
+            type="button"
+            role="menuitem"
+            disabled={busy}
+            onClick={() => {
+              if (busyRef.current) return;
+              setError(undefined);
+              setErrorTarget(undefined);
+              setOpenMenu(undefined);
+              setDialog({ kind: "remove", project: openMenuProject });
+            }}
+          >
+            <span aria-hidden="true">⌫</span>{t("project.remove")}
+          </button>
+          {errorTarget === `project:${openMenuProject.id}` && <p className="inline-error" role="alert">{error}</p>}
+        </div>,
+        document.body
+      )}
+
       {dialog && (
         <div
           className="dialog-layer"
           onMouseDown={(event) => {
-            if (event.target === event.currentTarget) setDialog(undefined);
+            if (event.target === event.currentTarget && !busyRef.current) setDialog(undefined);
           }}
         >
           <section
@@ -363,7 +476,7 @@ export default function App() {
                 </div>
                 {errorTarget === "dialog" && <p className="inline-error dialog-error" role="alert">{error}</p>}
                 <div className="dialog-actions">
-                  <button type="button" disabled={busy} onClick={() => setDialog(undefined)}>{t("common.cancel")}</button>
+                  <button type="button" disabled={busy} onClick={() => { if (!busyRef.current) setDialog(undefined); }}>{t("common.cancel")}</button>
                   <button ref={confirmButton} className="danger-button" type="button" disabled={busy} onClick={() => void removeProject(dialog.project)}>{t("common.confirm")}</button>
                 </div>
               </>
@@ -382,7 +495,7 @@ export default function App() {
                 />
                 {errorTarget === "dialog" && <p className="inline-error dialog-error" role="alert">{error}</p>}
                 <div className="dialog-actions">
-                  <button type="button" disabled={busy} onClick={() => setDialog(undefined)}>{t("common.cancel")}</button>
+                  <button type="button" disabled={busy} onClick={() => { if (!busyRef.current) setDialog(undefined); }}>{t("common.cancel")}</button>
                   <button className="primary-button" type="submit" disabled={busy || !draftName.trim()}>{t("common.confirm")}</button>
                 </div>
               </form>

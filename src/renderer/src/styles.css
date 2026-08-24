@@ -80,7 +80,7 @@ button:disabled { cursor: not-allowed; opacity: .55; }
 .menu-trigger { margin: 12px 4px; border-radius: 7px; color: var(--muted); letter-spacing: 1px; }
 .menu-trigger:hover, .menu-trigger[aria-expanded="true"] { color: var(--accent); background: color-mix(in srgb, var(--accent) 10%, transparent); }
 
-.project-menu { position: absolute; z-index: 20; top: 49px; right: 5px; display: grid; width: 154px; padding: 7px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface); box-shadow: var(--shadow); }
+.project-menu { position: fixed; z-index: 50; display: grid; width: 154px; padding: 7px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface); box-shadow: var(--shadow); }
 .project-menu button { display: flex; align-items: center; gap: 10px; min-height: 38px; padding: 0 10px; border: 0; border-radius: 7px; background: transparent; text-align: left; cursor: pointer; }
 .project-menu button:hover:not(:disabled) { background: var(--surface-soft); }
 .project-menu .danger-action { color: var(--danger); }

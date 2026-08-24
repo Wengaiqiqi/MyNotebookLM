@@ -32,6 +32,7 @@ type ApiDouble = {
   api: DesktopApi;
   list: ReturnType<typeof vi.fn<DesktopApi["projects"]["list"]>>;
   create: ReturnType<typeof vi.fn<DesktopApi["projects"]["create"]>>;
+  rename: ReturnType<typeof vi.fn<DesktopApi["projects"]["rename"]>>;
 };
 
 const roots: Root[] = [];
@@ -39,14 +40,16 @@ const roots: Root[] = [];
 function createApi(projects: ProjectDto[] = []): ApiDouble {
   const list = vi.fn<DesktopApi["projects"]["list"]>().mockResolvedValue(projects);
   const create = vi.fn<DesktopApi["projects"]["create"]>().mockResolvedValue(projectA);
+  const rename = vi.fn<DesktopApi["projects"]["rename"]>().mockResolvedValue(projectA);
   return {
     list,
     create,
+    rename,
     api: {
       projects: {
         list,
         create,
-        rename: vi.fn<DesktopApi["projects"]["rename"]>().mockResolvedValue(projectA),
+        rename,
         archive: vi.fn<DesktopApi["projects"]["archive"]>().mockResolvedValue(projectA),
         remove: vi.fn<DesktopApi["projects"]["remove"]>().mockResolvedValue(undefined)
       }
@@ -68,7 +71,7 @@ async function renderApp(api: DesktopApi): Promise<HTMLElement> {
   return container;
 }
 
-function button(container: HTMLElement, name: string): HTMLButtonElement {
+function button(container: ParentNode, name: string): HTMLButtonElement {
   const match = [...container.querySelectorAll("button")].find(
     (candidate) => {
       const text = candidate.textContent?.trim();
@@ -77,6 +80,16 @@ function button(container: HTMLElement, name: string): HTMLButtonElement {
   );
   if (!(match instanceof HTMLButtonElement)) throw new Error(`Missing button: ${name}`);
   return match;
+}
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((promiseResolve, promiseReject) => {
+    resolve = promiseResolve;
+    reject = promiseReject;
+  });
+  return { promise, resolve, reject };
 }
 
 async function click(element: HTMLElement): Promise<void> {
@@ -158,7 +171,7 @@ describe("App shell behavior", () => {
     if (!menu) throw new Error("Missing project menu");
 
     await click(menu);
-    await click(button(container, "Delete project"));
+    await click(button(document, "Delete project"));
 
     const shell = container.querySelector<HTMLElement>(".app-shell");
     const overlay = container.querySelector<HTMLElement>(".dialog-layer");
@@ -183,6 +196,39 @@ describe("App shell behavior", () => {
     await act(async () => { await Promise.resolve(); });
     expect(container.querySelector("[role=alertdialog]")).toBeNull();
     expect(shell.hasAttribute("inert")).toBe(false);
+  });
+
+  it("locks a deferred mutation to its originating dialog and keeps rejection visible", async () => {
+    const pending = deferred<ProjectDto>();
+    const { api, rename } = createApi([projectA]);
+    rename.mockReturnValueOnce(pending.promise);
+    const container = await renderApp(api);
+    const menu = container.querySelector<HTMLButtonElement>("[aria-haspopup=menu]");
+    if (!menu) throw new Error("Missing project menu");
+
+    await click(menu);
+    await click(button(document, "Rename"));
+    await enterProjectName(container, "Deferred rename");
+    await click(button(container, "Confirm"));
+    const overlay = container.querySelector<HTMLElement>(".dialog-layer");
+    if (!overlay) throw new Error("Missing dialog overlay");
+
+    await act(async () => {
+      document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+      overlay.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
+      await Promise.resolve();
+    });
+    await click(button(container, "New project"));
+
+    expect(container.querySelector("[role=dialog] h2")?.textContent).toBe("Rename");
+    expect(container.querySelector<HTMLInputElement>("#project-name")?.value).toBe("Deferred rename");
+
+    await act(async () => {
+      pending.reject(new Error("rename failed"));
+      await Promise.resolve();
+    });
+    expect(container.querySelector("[role=dialog] h2")?.textContent).toBe("Rename");
+    expect(container.querySelector("[role=dialog] .inline-error")?.textContent).toBe("Could not rename the project.");
   });
 
   it("keeps the project list as the independently scrollable middle region", async () => {
@@ -216,5 +262,49 @@ describe("App shell behavior", () => {
     expect(button(container, "Import sources").disabled).toBe(true);
     expect(button(container, "Ask about this project").disabled).toBe(true);
     expect(container.querySelector(".sources-empty")?.textContent).toContain("No sources yet");
+  });
+
+  it("portals and flips the last project menu inside visible app bounds", async () => {
+    Object.defineProperties(window, {
+      innerWidth: { configurable: true, value: 1100 },
+      innerHeight: { configurable: true, value: 768 }
+    });
+    const projects = Array.from({ length: 20 }, (_, index): ProjectDto => ({
+      ...projectA,
+      id: `11111111-1111-4111-8111-${String(index + 1).padStart(12, "0")}`,
+      name: `Project ${index + 1}`
+    }));
+    const { api } = createApi(projects);
+    const container = await renderApp(api);
+    const triggers = container.querySelectorAll<HTMLButtonElement>("[aria-haspopup=menu]");
+    const lastTrigger = triggers.item(triggers.length - 1);
+    vi.spyOn(lastTrigger, "getBoundingClientRect").mockReturnValue({
+      x: 230,
+      y: 724,
+      top: 724,
+      right: 276,
+      bottom: 760,
+      left: 230,
+      width: 46,
+      height: 36,
+      toJSON: () => ({})
+    });
+
+    await click(lastTrigger);
+
+    const menu = document.querySelector<HTMLElement>("[role=menu]");
+    if (!menu) throw new Error("Missing portaled project menu");
+    const top = Number.parseFloat(menu.style.top);
+    const left = Number.parseFloat(menu.style.left);
+    expect(container.querySelector("[role=menu]")).toBeNull();
+    expect(getComputedStyle(menu).position).toBe("fixed");
+    expect(top).toBeGreaterThanOrEqual(8);
+    expect(top + 132).toBeLessThanOrEqual(window.innerHeight - 8);
+    expect(left).toBeGreaterThanOrEqual(8);
+    expect(left + 154).toBeLessThanOrEqual(window.innerWidth - 8);
+    expect(document.activeElement).toBe(button(document, "Rename"));
+    expect(button(document, "Rename").disabled).toBe(false);
+    expect(button(document, "Archive").disabled).toBe(false);
+    expect(button(document, "Delete project").disabled).toBe(false);
   });
 });
