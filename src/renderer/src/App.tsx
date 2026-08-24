@@ -31,6 +31,7 @@ export default function App() {
   const loaded = useRef(false);
   const nameInput = useRef<HTMLInputElement>(null);
   const confirmButton = useRef<HTMLButtonElement>(null);
+  const dialogCard = useRef<HTMLElement>(null);
 
   const refreshProjects = useCallback(async () => {
     try {
@@ -55,8 +56,50 @@ export default function App() {
 
   useEffect(() => {
     if (!dialog) return;
-    if (dialog.kind === "remove") confirmButton.current?.focus();
-    else nameInput.current?.focus();
+    const card = dialogCard.current;
+    const initialFocus = dialog.kind === "remove" ? confirmButton.current : nameInput.current;
+    initialFocus?.focus();
+
+    const focusableElements = (): HTMLElement[] => card
+      ? [...card.querySelectorAll<HTMLElement>("button:not(:disabled), input:not(:disabled)")]
+      : [];
+    const containFocus = (event: FocusEvent): void => {
+      if (card && event.target instanceof Node && !card.contains(event.target)) {
+        initialFocus?.focus();
+      }
+    };
+    const handleDialogKey = (event: KeyboardEvent): void => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        setDialog(undefined);
+        return;
+      }
+      if (event.key !== "Tab") return;
+
+      const focusable = focusableElements();
+      const first = focusable[0];
+      const last = focusable.at(-1);
+      if (!first || !last) {
+        event.preventDefault();
+        card?.focus();
+      } else if (!card?.contains(document.activeElement)) {
+        event.preventDefault();
+        first.focus();
+      } else if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+
+    document.addEventListener("focusin", containFocus);
+    document.addEventListener("keydown", handleDialogKey);
+    return () => {
+      document.removeEventListener("focusin", containFocus);
+      document.removeEventListener("keydown", handleDialogKey);
+    };
   }, [dialog]);
 
   const selectedProject = projects.find((project) => project.id === selectedId);
@@ -138,7 +181,8 @@ export default function App() {
   }
 
   return (
-    <div className="app-shell">
+    <>
+    <div className="app-shell" inert={dialog ? true : undefined} aria-hidden={dialog ? true : undefined}>
       <aside className="sidebar">
         <div className="brand">
           <span className="brand-mark" aria-hidden="true">M</span>
@@ -243,11 +287,22 @@ export default function App() {
           <section className="research-canvas" aria-labelledby="workspace-title">
             {selectedProject ? (
               <>
-                <div className="research-empty">
-                  <span className="document-icon" aria-hidden="true">◇</span>
+                <div className="workspace-empty">
                   <h3 id="workspace-title">{t("research.workspaceTitle")}</h3>
-                  <p>{t("research.workspaceBody")}</p>
-                  <button type="button" disabled title={t("research.unavailable")}>{t("research.importSources")}</button>
+                  <div className="import-region" aria-label={t("research.importSources")}>
+                    <span className="document-icon" aria-hidden="true">◇</span>
+                    <p>{t("research.workspaceBody")}</p>
+                    <button type="button" disabled title={t("research.unavailable")}>{t("research.importSources")}</button>
+                    <div className="format-grid">
+                      {["PDF", "DOCX", "PPTX", "XLSX", "TXT", "Markdown", "URL", "CSV"].map((format) => (
+                        <button className="format-choice" type="button" disabled key={format}>{format}</button>
+                      ))}
+                    </div>
+                  </div>
+                  <div className="guidance-card">
+                    <span aria-hidden="true">◎</span>
+                    <p>{t("research.unavailable")}</p>
+                  </div>
                 </div>
                 <div className="composer" aria-label={t("research.ask")}>
                   <button className="model-pill" type="button" disabled>NotebookLM⌄</button>
@@ -278,23 +333,23 @@ export default function App() {
           </aside>
         </div>
       </main>
+    </div>
 
       {dialog && (
         <div
           className="dialog-layer"
           onMouseDown={(event) => {
-            if (event.target === event.currentTarget && !busy) setDialog(undefined);
+            if (event.target === event.currentTarget) setDialog(undefined);
           }}
         >
           <section
+            ref={dialogCard}
             className="dialog-card"
             role={dialog.kind === "remove" ? "alertdialog" : "dialog"}
+            tabIndex={-1}
             aria-modal="true"
             aria-labelledby="dialog-title"
             aria-describedby={dialog.kind === "remove" ? "dialog-description" : undefined}
-            onKeyDown={(event) => {
-              if (event.key === "Escape" && !busy) setDialog(undefined);
-            }}
           >
             {dialog.kind === "remove" ? (
               <>
@@ -335,6 +390,6 @@ export default function App() {
           </section>
         </div>
       )}
-    </div>
+    </>
   );
 }

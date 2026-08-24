@@ -17,9 +17,11 @@ await i18n.use(initReactI18next).init({
     "zh-CN": { translation: zhCN }
   }
 });
+document.documentElement.lang = language;
 
 export async function changeLanguage(next: AppLanguage): Promise<void> {
   localStorage.setItem("mynotebooklm.language", next);
+  document.documentElement.lang = next;
   await i18n.changeLanguage(next);
 }
 
