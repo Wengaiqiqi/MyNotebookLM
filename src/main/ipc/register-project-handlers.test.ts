@@ -69,6 +69,17 @@ describe("registerProjectHandlers", () => {
     expect(service.remove).not.toHaveBeenCalled();
   });
 
+  it("rejects a list payload before calling the service", async () => {
+    const ipc = new FakeIpcMain();
+    const service = createService();
+    registerProjectHandlers(ipc, service as unknown as ProjectService);
+
+    await expect(
+      Promise.resolve().then(() => invoke(ipc, PROJECT_CHANNELS.list, {}))
+    ).rejects.toThrow();
+    expect(service.list).not.toHaveBeenCalled();
+  });
+
   it("routes valid calls to the selected service methods", () => {
     const ipc = new FakeIpcMain();
     const service = createService();
@@ -111,6 +122,20 @@ describe("registerProjectHandlers", () => {
         }))
       ).rejects.toThrow();
     }
+  });
+
+  it("rejects a non-undefined remove service result", async () => {
+    const ipc = new FakeIpcMain();
+    const service = createService();
+    service.remove.mockReturnValueOnce("unexpected" as never);
+    registerProjectHandlers(ipc, service as unknown as ProjectService);
+
+    await expect(
+      Promise.resolve().then(() =>
+        invoke(ipc, PROJECT_CHANNELS.remove, { id: project.id })
+      )
+    ).rejects.toThrow();
+    expect(service.remove).toHaveBeenCalledWith({ id: project.id });
   });
 
   it("removes every registered project handler during cleanup", () => {
