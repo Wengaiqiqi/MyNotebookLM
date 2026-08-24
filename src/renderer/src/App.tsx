@@ -9,6 +9,13 @@ type DialogState =
   | { kind: "rename"; project: ProjectDto }
   | { kind: "remove"; project: ProjectDto };
 
+type ErrorKey =
+  | "error.loadProjects"
+  | "error.createProject"
+  | "error.renameProject"
+  | "error.archiveProject"
+  | "error.removeProject";
+
 type OpenMenu = {
   instanceId: number;
   projectId: string;
@@ -55,7 +62,7 @@ export default function App() {
   const [theme, setTheme] = useState<AppTheme>(readTheme);
   const [projects, setProjects] = useState<ProjectDto[]>([]);
   const [selectedId, setSelectedId] = useState<string>();
-  const [error, setError] = useState<string>();
+  const [errorKey, setErrorKey] = useState<ErrorKey>();
   const [errorTarget, setErrorTarget] = useState<string>();
   const [openMenu, setOpenMenu] = useState<OpenMenu>();
   const [dialog, setDialog] = useState<DialogState>();
@@ -68,6 +75,7 @@ export default function App() {
   const openMenuRef = useRef<OpenMenu | undefined>(undefined);
   const menuMutation = useRef<number | undefined>(undefined);
   const menuSequence = useRef(0);
+  const listRequestEpoch = useRef(0);
   const loaded = useRef(false);
   const nameInput = useRef<HTMLInputElement>(null);
   const confirmButton = useRef<HTMLButtonElement>(null);
@@ -75,6 +83,7 @@ export default function App() {
   const projectMenu = useRef<HTMLDivElement>(null);
   dialogRef.current = dialog;
   openMenuRef.current = openMenu;
+  const error = errorKey ? t(errorKey) : undefined;
 
   function restoreFocusAfterClose(target: HTMLElement | undefined): void {
     pendingFocus.current = target;
@@ -98,19 +107,22 @@ export default function App() {
   }
 
   const refreshProjects = useCallback(async () => {
+    const requestEpoch = ++listRequestEpoch.current;
     try {
       const next = await window.myNotebook.projects.list();
+      if (requestEpoch !== listRequestEpoch.current) return;
       setProjects(next);
       setSelectedId((current) =>
         current && next.some((project) => project.id === current) ? current : next[0]?.id
       );
-      setError(undefined);
+      setErrorKey(undefined);
       setErrorTarget(undefined);
     } catch {
-      setError(t("error.loadProjects"));
+      if (requestEpoch !== listRequestEpoch.current) return;
+      setErrorKey("error.loadProjects");
       setErrorTarget("load");
     }
-  }, [t]);
+  }, []);
 
   useEffect(() => {
     if (loaded.current) return;
@@ -184,7 +196,7 @@ export default function App() {
     if (next.top !== openMenu.top || next.left !== openMenu.left) {
       setOpenMenu((current) => current ? { ...current, ...next } : current);
     }
-  }, [openMenu?.projectId, error, errorTarget]);
+  }, [openMenu?.projectId, errorKey, errorTarget]);
 
   useEffect(() => {
     if (!openMenu) return;
@@ -236,7 +248,7 @@ export default function App() {
     if (busyRef.current || dialogRef.current) return;
     dialogOpener.current = opener;
     setDraftName("");
-    setError(undefined);
+    setErrorKey(undefined);
     setErrorTarget(undefined);
     setOpenMenu(undefined);
     setDialog({ kind: "create" });
@@ -246,7 +258,7 @@ export default function App() {
     if (busyRef.current || dialogRef.current) return;
     dialogOpener.current = opener;
     setDraftName(project.name);
-    setError(undefined);
+    setErrorKey(undefined);
     setErrorTarget(undefined);
     setOpenMenu(undefined);
     setDialog({ kind: "rename", project });
@@ -257,9 +269,10 @@ export default function App() {
     if (!dialog || dialog.kind === "remove" || busyRef.current) return;
 
     const activeDialog = dialog;
+    listRequestEpoch.current += 1;
     busyRef.current = true;
     setBusy(true);
-    setError(undefined);
+    setErrorKey(undefined);
     setErrorTarget(undefined);
     try {
       if (activeDialog.kind === "create") {
@@ -272,7 +285,7 @@ export default function App() {
       setDialog((current) => current === activeDialog ? undefined : current);
     } catch {
       if (dialogRef.current === activeDialog) {
-        setError(t(activeDialog.kind === "create" ? "error.createProject" : "error.renameProject"));
+        setErrorKey(activeDialog.kind === "create" ? "error.createProject" : "error.renameProject");
         setErrorTarget("dialog");
       }
     } finally {
@@ -286,9 +299,10 @@ export default function App() {
     const activeMenu = openMenuRef.current;
     if (!activeMenu || activeMenu.projectId !== project.id) return;
     menuMutation.current = activeMenu.instanceId;
+    listRequestEpoch.current += 1;
     busyRef.current = true;
     setBusy(true);
-    setError(undefined);
+    setErrorKey(undefined);
     setErrorTarget(undefined);
     try {
       await window.myNotebook.projects.archive({ id: project.id });
@@ -296,7 +310,7 @@ export default function App() {
       setOpenMenu((current) => current?.instanceId === activeMenu.instanceId ? undefined : current);
     } catch {
       if (openMenuRef.current?.instanceId === activeMenu.instanceId) {
-        setError(t("error.archiveProject"));
+        setErrorKey("error.archiveProject");
         setErrorTarget(`project:${project.id}`);
       }
     } finally {
@@ -310,9 +324,10 @@ export default function App() {
     if (busyRef.current) return;
     const activeDialog = dialog;
     if (activeDialog?.kind !== "remove" || activeDialog.project.id !== project.id) return;
+    listRequestEpoch.current += 1;
     busyRef.current = true;
     setBusy(true);
-    setError(undefined);
+    setErrorKey(undefined);
     setErrorTarget(undefined);
     try {
       await window.myNotebook.projects.remove({ id: project.id });
@@ -322,7 +337,7 @@ export default function App() {
       setOpenMenu(undefined);
     } catch {
       if (dialogRef.current === activeDialog) {
-        setError(t("error.removeProject"));
+        setErrorKey("error.removeProject");
         setErrorTarget("dialog");
       }
     } finally {
@@ -367,7 +382,12 @@ export default function App() {
           {errorTarget === "load" && (
             <div className="inline-error load-error" role="alert">
               <span>{error}</span>
-              <button type="button" aria-label={t("error.loadProjects")} onClick={() => void refreshProjects()}>↻</button>
+              <button
+                type="button"
+                disabled={busy}
+                aria-label={t("error.loadProjects")}
+                onClick={() => { if (!busyRef.current) void refreshProjects(); }}
+              >↻</button>
             </div>
           )}
 
@@ -505,7 +525,7 @@ export default function App() {
             onClick={() => {
               if (busyRef.current) return;
               dialogOpener.current = openMenu.trigger;
-              setError(undefined);
+              setErrorKey(undefined);
               setErrorTarget(undefined);
               setOpenMenu(undefined);
               setDialog({ kind: "remove", project: openMenuProject });

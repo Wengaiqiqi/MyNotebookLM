@@ -137,6 +137,54 @@ describe("App shell behavior", () => {
     expect(container.querySelector('[aria-current="page"]')?.textContent).toContain(projectA.name);
   });
 
+  it("ignores stale retry success and failure after a newer archive rejection", async () => {
+    const oldSuccess = deferred<ProjectDto[]>();
+    const oldFailure = deferred<ProjectDto[]>();
+    const { api, list, archive } = createApi([projectA, projectB]);
+    list
+      .mockResolvedValueOnce([projectA, projectB])
+      .mockRejectedValueOnce(new Error("authoritative refresh failed"))
+      .mockReturnValueOnce(oldSuccess.promise)
+      .mockReturnValueOnce(oldFailure.promise);
+    archive.mockRejectedValueOnce(new Error("archive failed"));
+    const container = await renderApp(api);
+
+    await click(button(container, "New project"));
+    await enterProjectName(container, "Create before retry");
+    await click(button(container, "Confirm"));
+    const retry = button(container, "↻");
+    await click(retry);
+    await click(retry);
+
+    const firstTrigger = container.querySelector<HTMLButtonElement>("[aria-haspopup=menu]");
+    if (!firstTrigger) throw new Error("Missing first project menu trigger");
+    await click(firstTrigger);
+    await click(button(document, "Archive"));
+    expect(document.querySelector("[role=menu] .inline-error")?.textContent).toBe("Could not archive the project.");
+
+    await act(async () => {
+      oldSuccess.resolve([projectB]);
+      await oldSuccess.promise;
+      oldFailure.reject(new Error("old retry failed"));
+      await oldFailure.promise.catch(() => undefined);
+    });
+
+    expect(container.querySelector('.project-select[aria-current="page"]')?.textContent).toContain(projectA.name);
+    expect(firstTrigger.isConnected).toBe(true);
+    expect(firstTrigger.getAttribute("aria-expanded")).toBe("true");
+    expect(document.querySelector("[role=menu] .inline-error")?.textContent).toBe("Could not archive the project.");
+  });
+
+  it("translates a visible error when the language changes", async () => {
+    const { api, list } = createApi();
+    list.mockRejectedValueOnce(new Error("load failed"));
+    const container = await renderApp(api);
+
+    expect(container.querySelector("[role=alert]")?.textContent).toContain("Could not load projects. Try again.");
+    await click(button(container, "中文"));
+    expect(container.querySelector("[role=alert]")?.textContent).toContain("无法加载项目，请重试。");
+  });
+
   it("refreshes after create and renders authoritative list order", async () => {
     const { api, list, create } = createApi();
     list.mockResolvedValueOnce([]).mockResolvedValueOnce([projectB, projectA]);
