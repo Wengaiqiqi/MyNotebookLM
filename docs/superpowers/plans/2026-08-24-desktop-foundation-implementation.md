@@ -6,7 +6,7 @@
 
 **Architecture:** Electron's main process owns local paths, SQLite, project services, and IPC handlers; the sandboxed React renderer can access them only through a narrow typed preload bridge. This plan deliberately stops before model providers, document ingestion, LanceDB, and RAG; those are separate plans that build on the interfaces defined here.
 
-**Tech Stack:** Electron 43.4.1, electron-vite 5.0.0, React 19.2.8, TypeScript 7.0.2, Vite 8.2.2, Vitest 4.1.11, better-sqlite3 13.0.3, Zod 4.4.3, i18next 26.4.0, react-i18next 17.0.12, Playwright 1.62.1, electron-builder 26.15.3, NSIS.
+**Tech Stack:** Electron 43.4.1, electron-vite 5.0.0, React 19.2.8, TypeScript 7.0.2, Vite 7.3.6, Vitest 4.1.11, better-sqlite3 13.0.3, Zod 4.4.3, i18next 26.4.0, react-i18next 17.0.12, Playwright 1.62.1, electron-builder 26.15.3, NSIS.
 
 **Spec:** `docs/superpowers/specs/2026-08-24-mynotebooklm-desktop-design.md`
 
@@ -132,13 +132,13 @@ Create `package.json` with the following scripts and exact dependency versions:
     "@types/better-sqlite3": "9.6.0",
     "@types/react": "19.2.18",
     "@types/react-dom": "19.2.5",
-    "@vitejs/plugin-react": "6.1.0",
+    "@vitejs/plugin-react": "5.2.0",
     "electron": "43.4.1",
     "electron-builder": "26.15.3",
     "electron-vite": "5.0.0",
     "playwright": "1.62.1",
     "typescript": "7.0.2",
-    "vite": "8.2.2",
+    "vite": "7.3.6",
     "vitest": "4.1.11"
   }
 }
