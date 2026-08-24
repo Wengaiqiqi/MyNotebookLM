@@ -33,6 +33,7 @@ type ApiDouble = {
   list: ReturnType<typeof vi.fn<DesktopApi["projects"]["list"]>>;
   create: ReturnType<typeof vi.fn<DesktopApi["projects"]["create"]>>;
   rename: ReturnType<typeof vi.fn<DesktopApi["projects"]["rename"]>>;
+  archive: ReturnType<typeof vi.fn<DesktopApi["projects"]["archive"]>>;
 };
 
 const roots: Root[] = [];
@@ -41,16 +42,18 @@ function createApi(projects: ProjectDto[] = []): ApiDouble {
   const list = vi.fn<DesktopApi["projects"]["list"]>().mockResolvedValue(projects);
   const create = vi.fn<DesktopApi["projects"]["create"]>().mockResolvedValue(projectA);
   const rename = vi.fn<DesktopApi["projects"]["rename"]>().mockResolvedValue(projectA);
+  const archive = vi.fn<DesktopApi["projects"]["archive"]>().mockResolvedValue(projectA);
   return {
     list,
     create,
     rename,
+    archive,
     api: {
       projects: {
         list,
         create,
         rename,
-        archive: vi.fn<DesktopApi["projects"]["archive"]>().mockResolvedValue(projectA),
+        archive,
         remove: vi.fn<DesktopApi["projects"]["remove"]>().mockResolvedValue(undefined)
       }
     }
@@ -229,6 +232,92 @@ describe("App shell behavior", () => {
     });
     expect(container.querySelector("[role=dialog] h2")?.textContent).toBe("Rename");
     expect(container.querySelector("[role=dialog] .inline-error")?.textContent).toBe("Could not rename the project.");
+  });
+
+  it("keeps a deferred archive owned by its menu through every dismissal path", async () => {
+    const pending = deferred<ProjectDto>();
+    const { api, archive } = createApi([projectA, projectB]);
+    archive.mockReturnValueOnce(pending.promise);
+    const container = await renderApp(api);
+    const triggers = container.querySelectorAll<HTMLButtonElement>("[aria-haspopup=menu]");
+    const firstTrigger = triggers.item(0);
+    const secondTrigger = triggers.item(1);
+
+    await click(firstTrigger);
+    const archiveAction = button(document, "Archive");
+    await click(archiveAction);
+    await click(archiveAction);
+    await act(async () => {
+      document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+      container.querySelector<HTMLElement>(".workspace")?.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
+      document.dispatchEvent(new Event("scroll", { bubbles: true }));
+      window.dispatchEvent(new Event("resize"));
+      await Promise.resolve();
+    });
+    await click(secondTrigger);
+
+    expect(archive).toHaveBeenCalledOnce();
+    expect(document.querySelector("[role=menu]")).not.toBeNull();
+    expect(firstTrigger.getAttribute("aria-expanded")).toBe("true");
+    expect(secondTrigger.getAttribute("aria-expanded")).toBe("false");
+
+    await act(async () => {
+      pending.reject(new Error("archive failed"));
+      await Promise.resolve();
+    });
+    expect(document.querySelector("[role=menu] .inline-error")?.textContent).toBe("Could not archive the project.");
+    expect(button(document, "Archive").disabled).toBe(false);
+  });
+
+  it("restores focus to a connected dialog opener on Escape, Cancel, and backdrop", async () => {
+    const { api } = createApi();
+    const container = await renderApp(api);
+    const opener = button(container, "New project");
+
+    opener.focus();
+    await click(opener);
+    await act(async () => {
+      document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+      await Promise.resolve();
+    });
+    expect(document.activeElement).toBe(opener);
+
+    await click(opener);
+    await click(button(container, "Cancel"));
+    expect(document.activeElement).toBe(opener);
+
+    await click(opener);
+    const overlay = container.querySelector<HTMLElement>(".dialog-layer");
+    if (!overlay) throw new Error("Missing dialog overlay");
+    await act(async () => {
+      overlay.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
+      await Promise.resolve();
+    });
+    expect(document.activeElement).toBe(opener);
+  });
+
+  it("restores focus to a connected menu trigger on non-commit dismissals", async () => {
+    const { api } = createApi([projectA]);
+    const container = await renderApp(api);
+    const trigger = container.querySelector<HTMLButtonElement>("[aria-haspopup=menu]");
+    const outside = container.querySelector<HTMLElement>(".workspace");
+    if (!trigger || !outside) throw new Error("Missing menu focus fixtures");
+
+    const dismissAndCheck = async (dismiss: () => void): Promise<void> => {
+      await click(trigger);
+      expect(document.activeElement).toBe(button(document, "Rename"));
+      await act(async () => {
+        dismiss();
+        await Promise.resolve();
+      });
+      expect(document.querySelector("[role=menu]")).toBeNull();
+      expect(document.activeElement).toBe(trigger);
+    };
+
+    await dismissAndCheck(() => outside.dispatchEvent(new MouseEvent("mousedown", { bubbles: true })));
+    await dismissAndCheck(() => document.dispatchEvent(new Event("scroll", { bubbles: true })));
+    await dismissAndCheck(() => window.dispatchEvent(new Event("resize")));
+    await dismissAndCheck(() => document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })));
   });
 
   it("keeps the project list as the independently scrollable middle region", async () => {

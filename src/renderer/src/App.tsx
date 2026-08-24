@@ -10,6 +10,7 @@ type DialogState =
   | { kind: "remove"; project: ProjectDto };
 
 type OpenMenu = {
+  instanceId: number;
   projectId: string;
   top: number;
   left: number;
@@ -44,6 +45,10 @@ function formatDate(value: string, language: AppLanguage): string {
   }).format(new Date(value));
 }
 
+function focusIfAvailable(target: HTMLElement | null | undefined): void {
+  if (target?.isConnected && !target.matches(":disabled")) target.focus();
+}
+
 export default function App() {
   const { t, i18n } = useTranslation();
   const language: AppLanguage = i18n.resolvedLanguage === "en" ? "en" : "zh-CN";
@@ -58,12 +63,39 @@ export default function App() {
   const [busy, setBusy] = useState(false);
   const busyRef = useRef(false);
   const dialogRef = useRef<DialogState | undefined>(undefined);
+  const dialogOpener = useRef<HTMLElement | undefined>(undefined);
+  const pendingFocus = useRef<HTMLElement | undefined>(undefined);
+  const openMenuRef = useRef<OpenMenu | undefined>(undefined);
+  const menuMutation = useRef<number | undefined>(undefined);
+  const menuSequence = useRef(0);
   const loaded = useRef(false);
   const nameInput = useRef<HTMLInputElement>(null);
   const confirmButton = useRef<HTMLButtonElement>(null);
   const dialogCard = useRef<HTMLElement>(null);
   const projectMenu = useRef<HTMLDivElement>(null);
   dialogRef.current = dialog;
+  openMenuRef.current = openMenu;
+
+  function restoreFocusAfterClose(target: HTMLElement | undefined): void {
+    pendingFocus.current = target;
+  }
+
+  function dismissDialog(): void {
+    const activeDialog = dialogRef.current;
+    if (!activeDialog || busyRef.current) return;
+    restoreFocusAfterClose(dialogOpener.current);
+    dialogOpener.current = undefined;
+    setDialog((current) => current === activeDialog ? undefined : current);
+  }
+
+  function dismissMenu(activeMenu: OpenMenu): void {
+    if (
+      menuMutation.current === activeMenu.instanceId
+      || openMenuRef.current?.instanceId !== activeMenu.instanceId
+    ) return;
+    restoreFocusAfterClose(activeMenu.trigger);
+    setOpenMenu((current) => current?.instanceId === activeMenu.instanceId ? undefined : current);
+  }
 
   const refreshProjects = useCallback(async () => {
     try {
@@ -87,6 +119,13 @@ export default function App() {
   }, [refreshProjects]);
 
   useEffect(() => {
+    if (dialog || openMenu || !pendingFocus.current) return;
+    const target = pendingFocus.current;
+    pendingFocus.current = undefined;
+    focusIfAvailable(target);
+  }, [dialog, openMenu]);
+
+  useEffect(() => {
     if (!dialog) return;
     const card = dialogCard.current;
     const initialFocus = dialog.kind === "remove" ? confirmButton.current : nameInput.current;
@@ -103,7 +142,7 @@ export default function App() {
     const handleDialogKey = (event: KeyboardEvent): void => {
       if (event.key === "Escape") {
         event.preventDefault();
-        if (!busyRef.current) setDialog(undefined);
+        dismissDialog();
         return;
       }
       if (event.key !== "Tab") return;
@@ -150,38 +189,52 @@ export default function App() {
   useEffect(() => {
     if (!openMenu) return;
     projectMenu.current?.querySelector<HTMLButtonElement>("[role=menuitem]")?.focus();
-    const closeMenu = (): void => setOpenMenu(undefined);
+    const repositionOrDismiss = (): void => {
+      if (menuMutation.current !== openMenu.instanceId) {
+        dismissMenu(openMenu);
+        return;
+      }
+      const measured = projectMenu.current?.getBoundingClientRect();
+      const next = placeProjectMenu(
+        openMenu.trigger.getBoundingClientRect(),
+        measured?.width || menuWidth,
+        measured?.height || menuHeight
+      );
+      setOpenMenu((current) => current?.instanceId === openMenu.instanceId
+        ? { ...current, ...next }
+        : current);
+    };
     const handleOutsideMouseDown = (event: MouseEvent): void => {
       if (
         event.target instanceof Node
         && !projectMenu.current?.contains(event.target)
         && !openMenu.trigger.contains(event.target)
-      ) closeMenu();
+      ) dismissMenu(openMenu);
     };
     const handleMenuKey = (event: KeyboardEvent): void => {
       if (event.key !== "Escape") return;
       event.preventDefault();
-      closeMenu();
-      openMenu.trigger.focus();
+      dismissMenu(openMenu);
     };
 
-    window.addEventListener("resize", closeMenu);
-    document.addEventListener("scroll", closeMenu, true);
+    window.addEventListener("resize", repositionOrDismiss);
+    document.addEventListener("scroll", repositionOrDismiss, true);
     document.addEventListener("mousedown", handleOutsideMouseDown);
     document.addEventListener("keydown", handleMenuKey);
     return () => {
-      window.removeEventListener("resize", closeMenu);
-      document.removeEventListener("scroll", closeMenu, true);
+      window.removeEventListener("resize", repositionOrDismiss);
+      document.removeEventListener("scroll", repositionOrDismiss, true);
       document.removeEventListener("mousedown", handleOutsideMouseDown);
       document.removeEventListener("keydown", handleMenuKey);
     };
-  }, [openMenu]);
+  }, [openMenu?.instanceId]);
 
   const selectedProject = projects.find((project) => project.id === selectedId);
   const openMenuProject = projects.find((project) => project.id === openMenu?.projectId);
 
-  function openCreateDialog(): void {
+  function openCreateDialog(opener: HTMLElement): void {
     if (busyRef.current || dialogRef.current) return;
+    dialogOpener.current = opener;
     setDraftName("");
     setError(undefined);
     setErrorTarget(undefined);
@@ -189,8 +242,9 @@ export default function App() {
     setDialog({ kind: "create" });
   }
 
-  function openRenameDialog(project: ProjectDto): void {
+  function openRenameDialog(project: ProjectDto, opener: HTMLElement): void {
     if (busyRef.current || dialogRef.current) return;
+    dialogOpener.current = opener;
     setDraftName(project.name);
     setError(undefined);
     setErrorTarget(undefined);
@@ -214,6 +268,7 @@ export default function App() {
         await window.myNotebook.projects.rename({ id: activeDialog.project.id, name: draftName });
       }
       await refreshProjects();
+      if (dialogRef.current === activeDialog) dialogOpener.current = undefined;
       setDialog((current) => current === activeDialog ? undefined : current);
     } catch {
       if (dialogRef.current === activeDialog) {
@@ -228,6 +283,9 @@ export default function App() {
 
   async function archiveProject(project: ProjectDto): Promise<void> {
     if (busyRef.current) return;
+    const activeMenu = openMenuRef.current;
+    if (!activeMenu || activeMenu.projectId !== project.id) return;
+    menuMutation.current = activeMenu.instanceId;
     busyRef.current = true;
     setBusy(true);
     setError(undefined);
@@ -235,11 +293,14 @@ export default function App() {
     try {
       await window.myNotebook.projects.archive({ id: project.id });
       await refreshProjects();
-      setOpenMenu(undefined);
+      setOpenMenu((current) => current?.instanceId === activeMenu.instanceId ? undefined : current);
     } catch {
-      setError(t("error.archiveProject"));
-      setErrorTarget(`project:${project.id}`);
+      if (openMenuRef.current?.instanceId === activeMenu.instanceId) {
+        setError(t("error.archiveProject"));
+        setErrorTarget(`project:${project.id}`);
+      }
     } finally {
+      if (menuMutation.current === activeMenu.instanceId) menuMutation.current = undefined;
       busyRef.current = false;
       setBusy(false);
     }
@@ -256,6 +317,7 @@ export default function App() {
     try {
       await window.myNotebook.projects.remove({ id: project.id });
       await refreshProjects();
+      if (dialogRef.current === activeDialog) dialogOpener.current = undefined;
       setDialog((current) => current === activeDialog ? undefined : current);
       setOpenMenu(undefined);
     } catch {
@@ -278,7 +340,12 @@ export default function App() {
     if (busyRef.current || dialogRef.current) return;
     setOpenMenu((current) => {
       if (current?.projectId === projectId) return undefined;
-      return { projectId, trigger, ...placeProjectMenu(trigger.getBoundingClientRect()) };
+      return {
+        instanceId: ++menuSequence.current,
+        projectId,
+        trigger,
+        ...placeProjectMenu(trigger.getBoundingClientRect())
+      };
     });
   }
 
@@ -293,7 +360,7 @@ export default function App() {
 
         <nav className="project-nav" aria-label={t("project.title")}>
           <h1>{t("project.title")}</h1>
-          <button className="primary-button create-button" type="button" disabled={busy} onClick={openCreateDialog}>
+          <button className="primary-button create-button" type="button" disabled={busy} onClick={(event) => openCreateDialog(event.currentTarget)}>
             <span aria-hidden="true">＋</span>{t("project.create")}
           </button>
 
@@ -395,7 +462,7 @@ export default function App() {
                 <span className="empty-book" aria-hidden="true">M</span>
                 <h3 id="workspace-title">{t("project.emptyTitle")}</h3>
                 <p>{t("project.emptyBody")}</p>
-                <button className="primary-button" type="button" disabled={busy} onClick={openCreateDialog}>{t("project.create")}</button>
+                <button className="primary-button" type="button" disabled={busy} onClick={(event) => openCreateDialog(event.currentTarget)}>{t("project.create")}</button>
               </div>
             )}
           </section>
@@ -422,7 +489,7 @@ export default function App() {
           role="menu"
           style={{ top: openMenu.top, left: openMenu.left }}
         >
-          <button type="button" role="menuitem" disabled={busy} onClick={() => openRenameDialog(openMenuProject)}>
+          <button type="button" role="menuitem" disabled={busy} onClick={() => openRenameDialog(openMenuProject, openMenu.trigger)}>
             <span aria-hidden="true">✎</span>{t("project.rename")}
           </button>
           <button type="button" role="menuitem" disabled={busy} onClick={() => void archiveProject(openMenuProject)}>
@@ -435,6 +502,7 @@ export default function App() {
             disabled={busy}
             onClick={() => {
               if (busyRef.current) return;
+              dialogOpener.current = openMenu.trigger;
               setError(undefined);
               setErrorTarget(undefined);
               setOpenMenu(undefined);
@@ -452,7 +520,7 @@ export default function App() {
         <div
           className="dialog-layer"
           onMouseDown={(event) => {
-            if (event.target === event.currentTarget && !busyRef.current) setDialog(undefined);
+            if (event.target === event.currentTarget) dismissDialog();
           }}
         >
           <section
@@ -476,7 +544,7 @@ export default function App() {
                 </div>
                 {errorTarget === "dialog" && <p className="inline-error dialog-error" role="alert">{error}</p>}
                 <div className="dialog-actions">
-                  <button type="button" disabled={busy} onClick={() => { if (!busyRef.current) setDialog(undefined); }}>{t("common.cancel")}</button>
+                  <button type="button" disabled={busy} onClick={dismissDialog}>{t("common.cancel")}</button>
                   <button ref={confirmButton} className="danger-button" type="button" disabled={busy} onClick={() => void removeProject(dialog.project)}>{t("common.confirm")}</button>
                 </div>
               </>
@@ -495,7 +563,7 @@ export default function App() {
                 />
                 {errorTarget === "dialog" && <p className="inline-error dialog-error" role="alert">{error}</p>}
                 <div className="dialog-actions">
-                  <button type="button" disabled={busy} onClick={() => { if (!busyRef.current) setDialog(undefined); }}>{t("common.cancel")}</button>
+                  <button type="button" disabled={busy} onClick={dismissDialog}>{t("common.cancel")}</button>
                   <button className="primary-button" type="submit" disabled={busy || !draftName.trim()}>{t("common.confirm")}</button>
                 </div>
               </form>
