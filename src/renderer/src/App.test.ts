@@ -269,6 +269,46 @@ describe("App shell behavior", () => {
     expect(button(document, "Archive").disabled).toBe(false);
   });
 
+  it("blocks pointer and keyboard project selection while archive owns its menu", async () => {
+    const pending = deferred<ProjectDto>();
+    const { api, archive } = createApi([projectA, projectB]);
+    archive.mockReturnValueOnce(pending.promise);
+    const container = await renderApp(api);
+    const selects = container.querySelectorAll<HTMLButtonElement>(".project-select");
+    const triggers = container.querySelectorAll<HTMLButtonElement>("[aria-haspopup=menu]");
+    const firstSelect = selects.item(0);
+    const secondSelect = selects.item(1);
+    const firstTrigger = triggers.item(0);
+
+    await click(firstTrigger);
+    await click(button(document, "Archive"));
+    const selectionDisabledWhileBusy = secondSelect.disabled;
+    await act(async () => {
+      secondSelect.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
+      secondSelect.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
+      secondSelect.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      secondSelect.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+      secondSelect.click();
+      secondSelect.dispatchEvent(new KeyboardEvent("keyup", { key: "Enter", bubbles: true }));
+      await Promise.resolve();
+    });
+    await act(async () => {
+      pending.reject(new Error("archive failed"));
+      await Promise.resolve();
+    });
+
+    expect(firstSelect.getAttribute("aria-current")).toBe("page");
+    expect(secondSelect.getAttribute("aria-current")).toBeNull();
+    expect(firstTrigger.getAttribute("aria-expanded")).toBe("true");
+    expect(document.querySelector("[role=menu] .inline-error")?.textContent).toBe("Could not archive the project.");
+    expect(selectionDisabledWhileBusy).toBe(true);
+
+    expect(secondSelect.disabled).toBe(false);
+    await click(secondSelect);
+    expect(secondSelect.getAttribute("aria-current")).toBe("page");
+    expect(document.querySelector("[role=menu]")).toBeNull();
+  });
+
   it("restores focus to a connected dialog opener on Escape, Cancel, and backdrop", async () => {
     const { api } = createApi();
     const container = await renderApp(api);

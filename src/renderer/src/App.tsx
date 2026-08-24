@@ -378,7 +378,9 @@ export default function App() {
                   className="project-select"
                   type="button"
                   aria-current={project.id === selectedId ? "page" : undefined}
+                  disabled={busy}
                   onClick={() => {
+                    if (busyRef.current) return;
                     setSelectedId(project.id);
                     setOpenMenu(undefined);
                   }}
