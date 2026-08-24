@@ -1,11 +1,15 @@
-import { app, BrowserWindow } from "electron";
+import { app, BrowserWindow, ipcMain } from "electron";
 import { mkdir } from "node:fs/promises";
 import path from "node:path";
 import { type AppDatabase, openAppDatabase } from "./db/database";
+import { registerProjectHandlers } from "./ipc/register-project-handlers";
 import { getAppPaths } from "./platform/paths";
+import { ProjectRepository } from "./projects/project-repository";
+import { ProjectService } from "./projects/project-service";
 import { createMainWindow } from "./window";
 
 let appDatabase: AppDatabase | undefined;
+let cleanupProjectHandlers: (() => void) | undefined;
 
 app.whenReady().then(async () => {
   const appPaths = getAppPaths(app.getPath("userData"));
@@ -19,6 +23,9 @@ app.whenReady().then(async () => {
     ? path.join(process.resourcesPath, "migrations")
     : path.join(app.getAppPath(), "src", "main", "db", "migrations");
   appDatabase = openAppDatabase(appPaths.database, migrationsDir);
+  const projectRepository = new ProjectRepository(appDatabase.connection);
+  const projectService = new ProjectService(projectRepository);
+  cleanupProjectHandlers = registerProjectHandlers(ipcMain, projectService);
 
   createMainWindow();
 
@@ -28,6 +35,8 @@ app.whenReady().then(async () => {
 });
 
 app.on("before-quit", () => {
+  cleanupProjectHandlers?.();
+  cleanupProjectHandlers = undefined;
   appDatabase?.close();
   appDatabase = undefined;
 });
