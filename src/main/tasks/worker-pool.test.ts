@@ -34,4 +34,18 @@ describe("worker protocol", () => {
     await expect(pending).rejects.toThrow();
     await pool.close();
   });
+
+  it("replaces a crashed worker and redispatches the durable task payload", async () => {
+    const workers: EventEmitter[] = [];
+    const pool = new WorkerPool(1, new URL("file:///fake"), () => {
+      const worker = Object.assign(new EventEmitter(), { postMessage: () => undefined, terminate: async () => 0 });
+      workers.push(worker); return worker as any;
+    }, (taskId) => taskId === "durable" ? { kind: "text", data: new Uint8Array([1]) } : undefined);
+    const pending = pool.start("durable", "text", new Uint8Array([1]));
+    workers[0]!.emit("error", new Error("crash"));
+    expect(workers).toHaveLength(2);
+    workers[1]!.emit("message", { version: 1, type: "result", taskId: "durable", chunks: [] });
+    await expect(pending).resolves.toMatchObject({ taskId: "durable" });
+    await pool.close();
+  });
 });

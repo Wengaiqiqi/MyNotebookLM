@@ -8,6 +8,7 @@
 - 完整校验 version/type/taskId/chunks result schema；取消在 worker 端标记并丢弃竞态结果。
 - 增加进度节流（每 task 每秒最多 10 次）。
 - 增加 IngestionService 调用链：service 启动共享 WorkerPool，只有成功结果才进入 chunks/revision/task 单事务；worker 失败或取消不写入。
+- 增加 crash 恢复：WorkerPool 从 durable payload loader 重新排队原 task，替换 crashed worker 并复用原 Promise；IngestionService 提供 durable loader 注册接口。
 - 增加 Vite worker bundle 入口。
 
 ## 验证
@@ -16,6 +17,9 @@
 - GREEN：Task 9 聚焦测试：2 文件、6 测试通过。
 - 相关全量：19 文件、140 测试通过；全量：45 文件、434 测试通过。
 - npm run typecheck 通过；npm run build 通过，并生成 out/main/ingestionWorker.js。
+- P1 复审补齐：RED 证明 crash 不会恢复；GREEN 验证替换 worker、重派发 durable task 与 service loader 注册。
+- 本轮聚焦与相关测试通过：Task9 相关 2 文件/8 tests；相关目录 19 文件/142 tests。
+- 全量测试仍有 2 个既有主进程/Task10 失败（43 passed、2 failed、438 total）；未修改其 IPC 文件。typecheck 也仍被既有主进程/Task10 文件错误阻断；本轮新增文件无类型错误。build 通过。
 
 ## 范围
 

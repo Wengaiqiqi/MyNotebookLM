@@ -15,4 +15,10 @@ describe("ingestion progress", () => {
     await service.run({ taskId: "task", revisionId: "revision", kind: "text", data: new Uint8Array(), updatedAt: "now" });
     expect(calls.length).toBeGreaterThan(0);
   });
+  it("registers durable payload loading for crash recovery", () => {
+    let loaded = "";
+    const pool = { start: async () => ({ version: 1, type: "result", taskId: "task", chunks: [] }), cancel: () => undefined, setDurablePayloadLoader: (load: (taskId: string) => unknown) => { loaded = String(load("task")); } } as any;
+    new IngestionService(pool, {} as any, () => ({ kind: "text", data: new Uint8Array() }));
+    expect(loaded).toContain("object");
+  });
 });

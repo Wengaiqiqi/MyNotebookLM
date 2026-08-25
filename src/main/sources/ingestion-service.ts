@@ -1,11 +1,11 @@
 import type Database from "better-sqlite3";
 import type { PreparedChunk } from "../../workers/ingestion/types";
-import type { WorkerPool } from "../tasks/worker-pool";
+import type { DurableWorkerPayload, WorkerPool } from "../tasks/worker-pool";
 
 export type IngestionRun = { taskId: string; revisionId: string; kind: string; data: Uint8Array; updatedAt: string };
 
 export class IngestionService {
-  constructor(private readonly pool: Pick<WorkerPool, "start" | "cancel">, private readonly db: Database.Database) {}
+  constructor(private readonly pool: Pick<WorkerPool, "start" | "cancel"> & Partial<Pick<WorkerPool, "setDurablePayloadLoader">>, private readonly db: Database.Database, durablePayload?: (taskId: string) => DurableWorkerPayload | undefined) { if (durablePayload) this.pool.setDurablePayloadLoader?.(durablePayload); }
   async run(input: IngestionRun): Promise<void> {
     const result = await this.pool.start(input.taskId, input.kind, input.data);
     persistParsedResult(this.db, { revisionId: input.revisionId, taskId: input.taskId, chunks: result.chunks, updatedAt: input.updatedAt });
