@@ -37,8 +37,8 @@ export function stageFile(input: { root: string; sourceId: string; revisionId: s
     try { closeSync(fd); } catch (error) { if (operationError === undefined) operationError = error; }
     if (operationError !== undefined) throw operationError;
     linkSync(tempPath, finalPath);
-    unlinkSync(tempPath);
     tempCreated = false;
+    try { unlinkSync(tempPath); } catch { /* linkSync committed; cleanup failure is not a commit failure */ }
     return { path: finalPath, hash };
   } catch (error) {
     if (tempCreated) { try { rmSync(tempPath, { force: true }); } catch { /* preserve the operation error */ } }

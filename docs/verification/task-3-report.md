@@ -1,7 +1,7 @@
 # Task 3 修复报告
 
 日期：2026-08-26
-范围：受管存储根目录的 symlink/reparse point 防护与原子文件写入（P1 最终复审）
+范围：受管存储根目录的 symlink/reparse point 防护与原子文件写入（P2 最终复审）
 
 ## P1 修复
 
@@ -15,8 +15,8 @@
 
 ## 验证
 
-- 聚焦：`src/main/sources/managed-files.test.ts`，10 tests passed。
-- 相关全量：`src/main/sources`，5 files / 37 tests passed。
+ - 聚焦：`src/main/sources/managed-files.test.ts`，11 tests passed。
+ - 相关全量：`src/main/sources`，5 files / 38 tests passed。
 - TypeScript：`npm run typecheck` 通过。
 - `git diff --check`：通过（仅 Git 提示工作树换行符将转换为 CRLF）。
 - 仓库全量：41 files / 410 tests passed，1 个既有的 `docx-parser.test.ts` 转换语法错误导致 suite 失败；该错误位于本任务范围外。
@@ -26,3 +26,6 @@
 - `src/main/sources/managed-files.ts`
 - `src/main/sources/managed-files.test.ts`
 - `docs/verification/task-3-report.md`
+## P2 最终复审修复
+
+linkSync 成功即视为提交完成；后续 unlinkSync 临时文件清理失败只会被吞掉并保留已提交的 content，不会再向调用方报告提交失败。新增测试模拟提交后清理失败并验证成功返回与内容可读。

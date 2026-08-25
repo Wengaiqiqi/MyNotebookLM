@@ -5,6 +5,7 @@ import path from "node:path";
 
 let failFsync = false;
 let failClose = false;
+let failUnlink = false;
 let observeRename: ((from: string, to: string) => void) | undefined;
 vi.mock("node:fs", async () => {
   const actual = await vi.importActual<typeof import("node:fs")>("node:fs");
@@ -12,6 +13,7 @@ vi.mock("node:fs", async () => {
     ...actual,
     fsyncSync: (fd: number) => { if (failFsync) throw new Error("fsync failed"); return actual.fsyncSync(fd); },
     closeSync: (fd: number) => { if (failClose) throw new Error("close failed"); return actual.closeSync(fd); },
+    unlinkSync: (filePath: string) => { if (failUnlink) throw new Error("unlink failed"); return actual.unlinkSync(filePath); },
     renameSync: (from: string, to: string) => { observeRename?.(from, to); return actual.renameSync(from, to); },
   };
 });
@@ -114,6 +116,15 @@ describe("managed files", () => {
     stageFile({ root, sourceId: "source-1", revisionId: "revision-1", bytes: first });
     expect(() => stageFile({ root, sourceId: "source-1", revisionId: "revision-1", bytes: Buffer.from("second") })).toThrow();
     expect(readFileSync(path.join(root, "source-1", "revision-1", "content"))).toEqual(first);
+  });
+
+  it("returns success when cleanup fails after the final link commits", () => {
+    const root = mkdtempSync(path.join(tmpdir(), "managed-"));
+    failUnlink = true;
+    try {
+      const result = stageFile({ root, sourceId: "source-1", revisionId: "revision-1", bytes: Buffer.from("committed") });
+      expect(readFileSync(result.path, "utf8")).toBe("committed");
+    } finally { failUnlink = false; }
   });
 
   it("rejects an existing reparse-like path when realpath escapes its lexical path", () => {
