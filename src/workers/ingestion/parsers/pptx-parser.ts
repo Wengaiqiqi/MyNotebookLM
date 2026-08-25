@@ -28,7 +28,12 @@ export async function parsePptx(input: Uint8Array | ArrayBuffer): Promise<Docume
     const rel = arr(relationships?.Relationships?.Relationship).find((item: any) => String(item?.["@_Type"] ?? "").endsWith(type.replace(/^\//, "")));
     if (!rel?.["@_Target"]) return undefined;
     const target = String(rel["@_Target"]);
-    return target.startsWith("../") ? "ppt/" + target.slice(3) : "ppt/slides/" + target;
+    if (/^[a-z][a-z0-9+.-]*:/i.test(target) || target.startsWith("/") || target.includes("\\")) return undefined;
+    const base = name.slice(0, name.lastIndexOf("/"));
+    const parts = (base + "/" + target).split("/"); const safe: string[] = [];
+    for (const part of parts) { if (!part || part === ".") continue; if (part === "..") { if (!safe.length) return undefined; safe.pop(); } else safe.push(part); }
+    const resolved = safe.join("/");
+    return resolved.startsWith("ppt/") ? resolved : undefined;
   };
   const slideNames = Object.keys(zip.files).filter((name) => /^ppt\/slides\/slide\d+\.xml$/.test(name)).sort((a, b) => Number(a.match(/\d+/)?.[0]) - Number(b.match(/\d+/)?.[0]));
   const blocks: DocumentBlock[] = [];

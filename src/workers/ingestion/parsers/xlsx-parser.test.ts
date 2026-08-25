@@ -16,6 +16,16 @@ describe("parseXlsx", () => {
     const wb = new ExcelJS.Workbook(); const ws = wb.addWorksheet("Data");
     ws.addRow(["A"]); ws.addRow([]); ws.addRow(["C"]);
     const blocks = await parseXlsx(await wb.xlsx.writeBuffer());
-    expect(blocks[0]?.locator).toEqual({ kind: "row", sheet: "Data", startRow: 1, endRow: 3 });
+    expect(blocks.map((block) => block.locator)).toEqual([
+      { kind: "row", sheet: "Data", startRow: 1, endRow: 1 },
+      { kind: "row", sheet: "Data", startRow: 3, endRow: 3 }
+    ]);
+  });
+
+  it("does not expose an uncached formula as executable or object text", async () => {
+    const wb = new ExcelJS.Workbook(); const ws = wb.addWorksheet("Data");
+    ws.getCell("A1").value = { formula: 'HYPERLINK("https://evil","open")' };
+    const blocks = await parseXlsx(await wb.xlsx.writeBuffer());
+    expect(blocks[0]?.text).toBe("");
   });
 });
