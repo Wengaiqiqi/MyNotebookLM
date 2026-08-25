@@ -32,13 +32,14 @@ const zhCN = {
   },
   research: {
     workspaceTitle: "导入资料，开始你的研究",
-    workspaceBody: "资料导入与研究对话将在后续步骤中提供。",
     importSources: "导入资料",
     sources: "来源与引用",
     noSourcesTitle: "暂无来源",
     noSourcesBody: "导入的来源与引用内容将在这里显示。",
     ask: "针对这个项目提问",
-    unavailable: "添加来源后可用"
+    sourceImportUnavailable: "资料导入将在后续步骤中提供。",
+    researchChatUnavailable: "研究对话将在资料导入功能提供后可用。",
+    settingsUnavailable: "设置将在后续步骤中提供。"
   }
 } as const;
 

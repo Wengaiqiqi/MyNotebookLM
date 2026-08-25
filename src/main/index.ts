@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain } from "electron";
+import { app, BrowserWindow, ipcMain, Menu } from "electron";
 import { mkdir } from "node:fs/promises";
 import path from "node:path";
 import { type AppDatabase, openAppDatabase } from "./db/database";
@@ -32,6 +32,7 @@ app.whenReady().then(async () => {
   const projectService = new ProjectService(projectRepository);
   cleanupProjectHandlers = registerProjectHandlers(ipcMain, projectService);
 
+  Menu.setApplicationMenu(null);
   createMainWindow();
 
   app.on("activate", () => {

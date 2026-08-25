@@ -30,6 +30,7 @@ const mocks = vi.hoisted(() => {
       quit: vi.fn()
     },
     getAllWindows: vi.fn(() => []),
+    setApplicationMenu: vi.fn(() => events.push("menu")),
     mkdir: vi.fn(() => Promise.resolve()),
     getAppPaths: vi.fn(() => ({
       root: "C:\\data\\MyNotebookLM",
@@ -62,6 +63,7 @@ const mocks = vi.hoisted(() => {
 vi.mock("electron", () => ({
   app: mocks.app,
   BrowserWindow: { getAllWindows: mocks.getAllWindows },
+  Menu: { setApplicationMenu: mocks.setApplicationMenu },
   ipcMain: mocks.ipcMain
 }));
 vi.mock("node:fs/promises", () => ({ mkdir: mocks.mkdir }));
@@ -109,7 +111,7 @@ describe("main application composition", () => {
     expect(mocks.app.setPath).not.toHaveBeenCalled();
   });
 
-  it("connects one project service after migration and cleans it up on shutdown", async () => {
+  it("removes the application menu before creating any window", async () => {
     await import("./index");
     await vi.waitFor(() => expect(mocks.createMainWindow).toHaveBeenCalledOnce());
 
@@ -118,8 +120,17 @@ describe("main application composition", () => {
       "repository",
       "service",
       "handlers",
+      "menu",
       "window"
     ]);
+    expect(mocks.setApplicationMenu).toHaveBeenCalledOnce();
+    expect(mocks.setApplicationMenu).toHaveBeenCalledWith(null);
+  });
+
+  it("connects one project service after migration and cleans it up on shutdown", async () => {
+    await import("./index");
+    await vi.waitFor(() => expect(mocks.createMainWindow).toHaveBeenCalledOnce());
+
     expect(mocks.openAppDatabase).toHaveBeenCalledWith(
       "C:\\data\\MyNotebookLM\\db\\app.sqlite",
       path.resolve(__dirname, "../../src/main/db/migrations")

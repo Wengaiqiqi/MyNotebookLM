@@ -32,13 +32,14 @@ const en = {
   },
   research: {
     workspaceTitle: "Bring in sources to begin your research",
-    workspaceBody: "Source import and research chat will be available in a later step.",
     importSources: "Import sources",
     sources: "Sources and citations",
     noSourcesTitle: "No sources yet",
     noSourcesBody: "Imported sources and citations will appear here.",
     ask: "Ask about this project",
-    unavailable: "Available after sources are added"
+    sourceImportUnavailable: "Source import will be available in a later step.",
+    researchChatUnavailable: "Research chat will be available after source import.",
+    settingsUnavailable: "Settings will be available in a later step."
   }
 } as const;
 

@@ -24,6 +24,12 @@ test("persists a project across desktop restarts", async ({}, testInfo) => {
   const first = await launchWithUserData(userDataDir);
   try {
     expect(await first.app.evaluate(({ app }) => app.getPath("userData"))).toBe(userDataDir);
+    expect(
+      await first.app.evaluate(({ BrowserWindow, Menu }) => ({
+        applicationMenu: Menu.getApplicationMenu(),
+        menuBarVisible: BrowserWindow.getAllWindows()[0]?.isMenuBarVisible()
+      }))
+    ).toEqual({ applicationMenu: null, menuBarVisible: false });
     await first.page.getByRole("button", { name: "新建项目" }).first().click();
     await first.page.getByLabel("项目名称").fill("持久化测试");
     await first.page.getByRole("button", { name: "确认" }).click();

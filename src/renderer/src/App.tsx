@@ -200,7 +200,7 @@ export default function App() {
 
   useEffect(() => {
     if (!openMenu) return;
-    projectMenu.current?.querySelector<HTMLButtonElement>("[role=menuitem]")?.focus();
+    projectMenu.current?.querySelector<HTMLButtonElement>("button")?.focus();
     const repositionOrDismiss = (): void => {
       if (menuMutation.current !== openMenu.instanceId) {
         dismissMenu(openMenu);
@@ -415,8 +415,8 @@ export default function App() {
                   className="menu-trigger"
                   type="button"
                   aria-label={`${project.name}: ${t("project.menu")}`}
-                  aria-haspopup="menu"
                   aria-expanded={openMenu?.projectId === project.id}
+                  aria-controls={openMenu?.projectId === project.id ? `project-actions-${project.id}` : undefined}
                   disabled={busy}
                   onClick={(event) => toggleProjectMenu(project.id, event.currentTarget)}
                 >
@@ -428,7 +428,7 @@ export default function App() {
         </nav>
 
         <footer className="sidebar-footer">
-          <button className="settings-button" type="button" disabled title={t("research.unavailable")}>
+          <button className="settings-button" type="button" disabled title={t("research.settingsUnavailable")}>
             <span aria-hidden="true">⚙</span>{t("app.settings")}
           </button>
           <div className="preference-row" role="group" aria-label={t("common.language")}>
@@ -460,8 +460,8 @@ export default function App() {
                   <h3 id="workspace-title">{t("research.workspaceTitle")}</h3>
                   <div className="import-region" aria-label={t("research.importSources")}>
                     <span className="document-icon" aria-hidden="true">◇</span>
-                    <p>{t("research.workspaceBody")}</p>
-                    <button type="button" disabled title={t("research.unavailable")}>{t("research.importSources")}</button>
+                    <p>{t("research.sourceImportUnavailable")}</p>
+                    <button type="button" disabled title={t("research.sourceImportUnavailable")}>{t("research.importSources")}</button>
                     <div className="format-grid">
                       {["PDF", "DOCX", "PPTX", "XLSX", "TXT", "Markdown", "URL", "CSV"].map((format) => (
                         <button className="format-choice" type="button" disabled key={format}>{format}</button>
@@ -470,13 +470,13 @@ export default function App() {
                   </div>
                   <div className="guidance-card">
                     <span aria-hidden="true">◎</span>
-                    <p>{t("research.unavailable")}</p>
+                    <p>{t("research.researchChatUnavailable")}</p>
                   </div>
                 </div>
                 <div className="composer" aria-label={t("research.ask")}>
                   <button className="model-pill" type="button" disabled>NotebookLM⌄</button>
                   <button className="ask-button" type="button" disabled>{t("research.ask")}</button>
-                  <span>{t("research.unavailable")}</span>
+                  <span>{t("research.researchChatUnavailable")}</span>
                 </div>
               </>
             ) : (
@@ -507,20 +507,21 @@ export default function App() {
       {openMenu && openMenuProject && !dialog && createPortal(
         <div
           ref={projectMenu}
-          className="project-menu"
-          role="menu"
+          id={`project-actions-${openMenuProject.id}`}
+          className="project-popover"
+          role="group"
+          aria-label={t("project.menu")}
           style={{ top: openMenu.top, left: openMenu.left }}
         >
-          <button type="button" role="menuitem" disabled={busy} onClick={() => openRenameDialog(openMenuProject, openMenu.trigger)}>
+          <button type="button" disabled={busy} onClick={() => openRenameDialog(openMenuProject, openMenu.trigger)}>
             <span aria-hidden="true">✎</span>{t("project.rename")}
           </button>
-          <button type="button" role="menuitem" disabled={busy} onClick={() => void archiveProject(openMenuProject)}>
+          <button type="button" disabled={busy} onClick={() => void archiveProject(openMenuProject)}>
             <span aria-hidden="true">▣</span>{t("project.archive")}
           </button>
           <button
             className="danger-action"
             type="button"
-            role="menuitem"
             disabled={busy}
             onClick={() => {
               if (busyRef.current) return;

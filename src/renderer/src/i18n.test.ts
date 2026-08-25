@@ -47,9 +47,10 @@ describe("locale resources", () => {
       "research.importSources",
       "research.noSourcesBody",
       "research.noSourcesTitle",
+      "research.researchChatUnavailable",
+      "research.settingsUnavailable",
+      "research.sourceImportUnavailable",
       "research.sources",
-      "research.unavailable",
-      "research.workspaceBody",
       "research.workspaceTitle"
     ]);
   });

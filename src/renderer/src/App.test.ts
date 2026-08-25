@@ -156,11 +156,11 @@ describe("App shell behavior", () => {
     await click(retry);
     await click(retry);
 
-    const firstTrigger = container.querySelector<HTMLButtonElement>("[aria-haspopup=menu]");
+    const firstTrigger = container.querySelector<HTMLButtonElement>(".menu-trigger");
     if (!firstTrigger) throw new Error("Missing first project menu trigger");
     await click(firstTrigger);
     await click(button(document, "Archive"));
-    expect(document.querySelector("[role=menu] .inline-error")?.textContent).toBe("Could not archive the project.");
+    expect(document.querySelector(".project-popover .inline-error")?.textContent).toBe("Could not archive the project.");
 
     await act(async () => {
       oldSuccess.resolve([projectB]);
@@ -172,7 +172,7 @@ describe("App shell behavior", () => {
     expect(container.querySelector('.project-select[aria-current="page"]')?.textContent).toContain(projectA.name);
     expect(firstTrigger.isConnected).toBe(true);
     expect(firstTrigger.getAttribute("aria-expanded")).toBe("true");
-    expect(document.querySelector("[role=menu] .inline-error")?.textContent).toBe("Could not archive the project.");
+    expect(document.querySelector(".project-popover .inline-error")?.textContent).toBe("Could not archive the project.");
   });
 
   it("translates a visible error when the language changes", async () => {
@@ -218,7 +218,7 @@ describe("App shell behavior", () => {
   it("blocks the background and contains focus until Escape dismisses delete", async () => {
     const { api } = createApi([projectA]);
     const container = await renderApp(api);
-    const menu = container.querySelector<HTMLButtonElement>("[aria-haspopup=menu]");
+    const menu = container.querySelector<HTMLButtonElement>(".menu-trigger");
     if (!menu) throw new Error("Missing project menu");
 
     await click(menu);
@@ -254,7 +254,7 @@ describe("App shell behavior", () => {
     const { api, rename } = createApi([projectA]);
     rename.mockReturnValueOnce(pending.promise);
     const container = await renderApp(api);
-    const menu = container.querySelector<HTMLButtonElement>("[aria-haspopup=menu]");
+    const menu = container.querySelector<HTMLButtonElement>(".menu-trigger");
     if (!menu) throw new Error("Missing project menu");
 
     await click(menu);
@@ -287,7 +287,7 @@ describe("App shell behavior", () => {
     const { api, archive } = createApi([projectA, projectB]);
     archive.mockReturnValueOnce(pending.promise);
     const container = await renderApp(api);
-    const triggers = container.querySelectorAll<HTMLButtonElement>("[aria-haspopup=menu]");
+    const triggers = container.querySelectorAll<HTMLButtonElement>(".menu-trigger");
     const firstTrigger = triggers.item(0);
     const secondTrigger = triggers.item(1);
 
@@ -305,7 +305,7 @@ describe("App shell behavior", () => {
     await click(secondTrigger);
 
     expect(archive).toHaveBeenCalledOnce();
-    expect(document.querySelector("[role=menu]")).not.toBeNull();
+    expect(document.querySelector(".project-popover")).not.toBeNull();
     expect(firstTrigger.getAttribute("aria-expanded")).toBe("true");
     expect(secondTrigger.getAttribute("aria-expanded")).toBe("false");
 
@@ -313,7 +313,7 @@ describe("App shell behavior", () => {
       pending.reject(new Error("archive failed"));
       await Promise.resolve();
     });
-    expect(document.querySelector("[role=menu] .inline-error")?.textContent).toBe("Could not archive the project.");
+    expect(document.querySelector(".project-popover .inline-error")?.textContent).toBe("Could not archive the project.");
     expect(button(document, "Archive").disabled).toBe(false);
   });
 
@@ -323,7 +323,7 @@ describe("App shell behavior", () => {
     archive.mockReturnValueOnce(pending.promise);
     const container = await renderApp(api);
     const selects = container.querySelectorAll<HTMLButtonElement>(".project-select");
-    const triggers = container.querySelectorAll<HTMLButtonElement>("[aria-haspopup=menu]");
+    const triggers = container.querySelectorAll<HTMLButtonElement>(".menu-trigger");
     const firstSelect = selects.item(0);
     const secondSelect = selects.item(1);
     const firstTrigger = triggers.item(0);
@@ -348,7 +348,7 @@ describe("App shell behavior", () => {
     expect(firstSelect.getAttribute("aria-current")).toBe("page");
     expect(secondSelect.getAttribute("aria-current")).toBeNull();
     expect(firstTrigger.getAttribute("aria-expanded")).toBe("true");
-    expect(document.querySelector("[role=menu] .inline-error")?.textContent).toBe("Could not archive the project.");
+    expect(document.querySelector(".project-popover .inline-error")?.textContent).toBe("Could not archive the project.");
     expect(selectionDisabledWhileBusy).toBe(true);
 
     expect(secondSelect.disabled).toBe(false);
@@ -387,7 +387,7 @@ describe("App shell behavior", () => {
   it("restores focus to a connected menu trigger on non-commit dismissals", async () => {
     const { api } = createApi([projectA]);
     const container = await renderApp(api);
-    const trigger = container.querySelector<HTMLButtonElement>("[aria-haspopup=menu]");
+    const trigger = container.querySelector<HTMLButtonElement>(".menu-trigger");
     const outside = container.querySelector<HTMLElement>(".workspace");
     if (!trigger || !outside) throw new Error("Missing menu focus fixtures");
 
@@ -398,7 +398,7 @@ describe("App shell behavior", () => {
         dismiss();
         await Promise.resolve();
       });
-      expect(document.querySelector("[role=menu]")).toBeNull();
+      expect(document.querySelector(".project-popover")).toBeNull();
       expect(document.activeElement).toBe(trigger);
     };
 
@@ -441,7 +441,46 @@ describe("App shell behavior", () => {
     expect(container.querySelector(".sources-empty")?.textContent).toContain("No sources yet");
   });
 
-  it("portals and flips the last project menu inside visible app bounds", async () => {
+  it("renders distinct deferred messages for source import, research chat, and settings", async () => {
+    const { api } = createApi([projectA]);
+    const container = await renderApp(api);
+    const importButton = button(container, "Import sources");
+    const settings = button(container, "Settings");
+
+    expect(importButton.title).toBe("Source import will be available in a later step.");
+    expect(container.querySelector(".workspace-empty p")?.textContent).toBe(
+      "Source import will be available in a later step."
+    );
+    expect(container.querySelector(".composer span")?.textContent).toBe(
+      "Research chat will be available after source import."
+    );
+    expect(settings.title).toBe("Settings will be available in a later step.");
+
+    await click(button(container, "中文"));
+
+    expect(importButton.title).toBe("资料导入将在后续步骤中提供。");
+    expect(container.querySelector(".composer span")?.textContent).toBe(
+      "研究对话将在资料导入功能提供后可用。"
+    );
+    expect(settings.title).toBe("设置将在后续步骤中提供。");
+  });
+
+  it("uses a labelled ordinary popover for project actions", async () => {
+    const { api } = createApi([projectA]);
+    const container = await renderApp(api);
+    const trigger = container.querySelector<HTMLButtonElement>(".menu-trigger");
+    if (!trigger) throw new Error("Missing project menu trigger");
+
+    await click(trigger);
+
+    const popover = document.querySelector<HTMLElement>(".project-popover");
+    expect(popover?.getAttribute("role")).toBe("group");
+    expect(popover?.getAttribute("aria-label")).toBe("Project actions");
+    expect(popover?.querySelectorAll("button[role]")).toHaveLength(0);
+    expect(document.querySelector("[role=menu]")).toBeNull();
+  });
+
+  it("portals and flips the last project action popover inside visible app bounds", async () => {
     Object.defineProperties(window, {
       innerWidth: { configurable: true, value: 1100 },
       innerHeight: { configurable: true, value: 768 }
@@ -453,7 +492,7 @@ describe("App shell behavior", () => {
     }));
     const { api } = createApi(projects);
     const container = await renderApp(api);
-    const triggers = container.querySelectorAll<HTMLButtonElement>("[aria-haspopup=menu]");
+    const triggers = container.querySelectorAll<HTMLButtonElement>(".menu-trigger");
     const lastTrigger = triggers.item(triggers.length - 1);
     vi.spyOn(lastTrigger, "getBoundingClientRect").mockReturnValue({
       x: 230,
@@ -469,12 +508,12 @@ describe("App shell behavior", () => {
 
     await click(lastTrigger);
 
-    const menu = document.querySelector<HTMLElement>("[role=menu]");
-    if (!menu) throw new Error("Missing portaled project menu");
-    const top = Number.parseFloat(menu.style.top);
-    const left = Number.parseFloat(menu.style.left);
-    expect(container.querySelector("[role=menu]")).toBeNull();
-    expect(getComputedStyle(menu).position).toBe("fixed");
+    const popover = document.querySelector<HTMLElement>(".project-popover");
+    if (!popover) throw new Error("Missing portaled project action popover");
+    const top = Number.parseFloat(popover.style.top);
+    const left = Number.parseFloat(popover.style.left);
+    expect(container.querySelector(".project-popover")).toBeNull();
+    expect(getComputedStyle(popover).position).toBe("fixed");
     expect(top).toBeGreaterThanOrEqual(8);
     expect(top + 132).toBeLessThanOrEqual(window.innerHeight - 8);
     expect(left).toBeGreaterThanOrEqual(8);

@@ -20,6 +20,7 @@ export function createMainWindow(): BrowserWindow {
     height: 900,
     minWidth: 1100,
     minHeight: 700,
+    frame: true,
     show: false,
     webPreferences: {
       preload: path.join(__dirname, "../preload/index.js"),
