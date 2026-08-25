@@ -18,4 +18,13 @@ describe("parseMarkdown", () => {
     const blocks = parseMarkdown("```ts\nconst x = 1;\n```\n");
     expect(blocks[0]).toEqual({ kind: "paragraph", text: "const x = 1;", locator: { kind: "offset", start: 0, end: 23 } });
   });
+
+  it("uses original UTF-16 half-open offsets for BOM and CRLF input", () => {
+    const source = "\uFEFF# Title\r\n\r\n```\r\ncode\r\n```\r\n";
+    expect(parseMarkdown(source)).toContainEqual({
+      kind: "paragraph",
+      text: "code",
+      locator: { kind: "offset", start: 12, end: 28 }
+    });
+  });
 });
