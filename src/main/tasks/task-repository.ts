@@ -69,8 +69,15 @@ export type TaskTransition = {
   updatedAt: string;
 };
 
+export type TaskRepositoryHooks = {
+  beforeTransitionWrite?: (id: string, expectedState: "queued" | "running") => void;
+};
+
 export class TaskRepository {
-  constructor(private readonly db: Database.Database) {}
+  constructor(
+    private readonly db: Database.Database,
+    private readonly hooks: TaskRepositoryHooks = {}
+  ) {}
 
   create(input: {
     id: string;
@@ -124,6 +131,7 @@ export class TaskRepository {
       const attempt = input.attempt;
       const errorCode = input.error?.code ?? null;
       const errorMessage = input.error?.messageKey ?? null;
+      this.hooks.beforeTransitionWrite?.(input.id, input.expectedState);
       const result = this.db.prepare(`
         UPDATE tasks
         SET state = ?, stage = ?, progress_1000 = COALESCE(?, progress_1000),

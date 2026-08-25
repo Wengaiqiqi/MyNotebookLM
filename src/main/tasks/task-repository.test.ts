@@ -187,24 +187,32 @@ describe("TaskRepository", () => {
     expect(fresh).toEqual([]);
   });
 
-  it("compare-and-swaps against the persisted state inside a transaction", () => {
+  it("rejects a stale writer that would clobber a concurrent completion", () => {
     createTask();
+    repository.transition({
+      id: TASK_ID,
+      expectedState: "queued",
+      nextState: "running",
+      stage: "parsing",
+      updatedAt: "2026-08-25T00:00:00.001Z"
+    });
+
+    // A second, independent SQLite connection lets a concurrent actor write
+    // at the exact read-check-then-write window that the transition hook
+    // exposes. The actor's write commits on its own, so it is not rolled back
+    // by the transition's own transaction.
     const secondConnection = new Database(path.join(temporaryRoot, "app.db"));
     secondConnection.pragma("busy_timeout = 5000");
     try {
-      repository.transition({
-        id: TASK_ID,
-        expectedState: "queued",
-        nextState: "running",
-        stage: "parsing",
-        updatedAt: "2026-08-25T00:00:00.001Z"
+      const hooked = new TaskRepository(appDatabase.connection, {
+        beforeTransitionWrite: () => {
+          secondConnection.prepare(
+            "UPDATE tasks SET state = 'completed', updated_at = ? WHERE id = ?"
+          ).run("2026-08-25T00:00:01.000Z", TASK_ID);
+        }
       });
 
-      secondConnection.prepare(
-        "UPDATE tasks SET state = 'completed', updated_at = ? WHERE id = ?"
-      ).run("2026-08-25T00:00:01.000Z", TASK_ID);
-
-      expect(() => repository.transition({
+      expect(() => hooked.transition({
         id: TASK_ID,
         expectedState: "running",
         nextState: "running",
