@@ -46,4 +46,18 @@ describe("managed files", () => {
       .toThrow();
     expect(readdirSync(dir)).toEqual(["content"]);
   });
+
+  it("never opens a pre-existing linked staging file", () => {
+    const root = mkdtempSync(path.join(tmpdir(), "managed-"));
+    const outside = mkdtempSync(path.join(tmpdir(), "outside-"));
+    const dir = path.join(root, "source-1", "revision-1");
+    const target = path.join(outside, "target");
+    mkdirSync(dir, { recursive: true });
+    mkdirSync(target);
+    symlinkSync(target, path.join(dir, "content"), "junction");
+
+    expect(() => stageFile({ root, sourceId: "source-1", revisionId: "revision-1", bytes: Buffer.from("nope") }))
+      .toThrow();
+    expect(readdirSync(target)).toHaveLength(0);
+  });
 });
