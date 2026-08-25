@@ -17,6 +17,7 @@ import {
   credentialInputSchema,
   credentialProfileInputSchema,
   credentialStatusDtoSchema,
+  defaultModelRoutesDtoSchema,
   deleteModelProfileInputSchema,
   discoverModelsInputSchema,
   modelDescriptorSchema,
@@ -24,6 +25,7 @@ import {
   modelProfileListDtoSchema,
   modelTestResultDtoSchema,
   saveModelProfileInputSchema,
+  setDefaultModelRouteInputSchema,
   testModelInputSchema
 } from "../shared/models";
 import {
@@ -45,6 +47,7 @@ type IpcInvoker = {
 const removeProjectResponseSchema = z.undefined();
 const settingsResultSchema = resultSchema(appSettingsDtoSchema);
 const profileListResultSchema = resultSchema(modelProfileListDtoSchema);
+const defaultRoutesResultSchema = resultSchema(defaultModelRoutesDtoSchema);
 const profileResultSchema = resultSchema(modelProfileDtoSchema);
 const deleteProfileResultSchema = resultSchema(z.undefined());
 const discoveryResultSchema = resultSchema(modelDescriptorSchema.array());
@@ -103,6 +106,19 @@ export function createDesktopApi(ipc: IpcInvoker): DesktopApi {
         MODEL_CHANNELS.listProfiles,
         z.undefined(),
         profileListResultSchema
+      ),
+      getDefaultRoutes: () => invokeResult(
+        ipc,
+        MODEL_CHANNELS.getDefaultRoutes,
+        z.undefined(),
+        defaultRoutesResultSchema
+      ),
+      setDefaultRoute: (input) => invokeResult(
+        ipc,
+        MODEL_CHANNELS.setDefaultRoute,
+        setDefaultModelRouteInputSchema,
+        defaultRoutesResultSchema,
+        input
       ),
       saveProfile: (input) => invokeResult(
         ipc,

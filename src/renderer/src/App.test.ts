@@ -7,6 +7,7 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { DesktopApi } from "../../shared/ipc";
+import type { BuiltInModelProfileDto } from "../../shared/models";
 import type { ProjectDto } from "../../shared/projects";
 import App from "./App";
 import { changeLanguage, changeTheme } from "./i18n";
@@ -28,6 +29,30 @@ const projectB: ProjectDto = {
   updatedAt: "2026-08-24T01:00:00.000Z"
 };
 
+const builtInEmbedding: BuiltInModelProfileDto = {
+  id: "00000000-0000-4000-8000-000000000001",
+  name: "Multilingual E5 Small",
+  provider: "local",
+  capability: "embedding",
+  baseUrl: "",
+  modelId: "Xenova/multilingual-e5-small",
+  enabled: true,
+  dimension: 384,
+  distance: "cosine",
+  pooling: "mean",
+  normalized: true,
+  preprocessingVersion: "e5-query-passage-v1",
+  metadata: {
+    dimension: 384,
+    distance: "cosine",
+    pooling: "mean",
+    normalized: true,
+    preprocessingVersion: "e5-query-passage-v1"
+  },
+  editable: false,
+  requiresCredential: false
+};
+
 type ApiDouble = {
   api: DesktopApi;
   list: ReturnType<typeof vi.fn<DesktopApi["projects"]["list"]>>;
@@ -35,11 +60,18 @@ type ApiDouble = {
   rename: ReturnType<typeof vi.fn<DesktopApi["projects"]["rename"]>>;
   archive: ReturnType<typeof vi.fn<DesktopApi["projects"]["archive"]>>;
   setTitleOverlayTheme: ReturnType<typeof vi.fn<DesktopApi["titleOverlay"]["setTheme"]>>;
+  getSettings: ReturnType<typeof vi.fn<DesktopApi["settings"]["get"]>>;
+  updateSettings: ReturnType<typeof vi.fn<DesktopApi["settings"]["update"]>>;
+  listProfiles: ReturnType<typeof vi.fn<DesktopApi["models"]["listProfiles"]>>;
+  getDefaultRoutes: ReturnType<typeof vi.fn<DesktopApi["models"]["getDefaultRoutes"]>>;
+  setDefaultRoute: ReturnType<typeof vi.fn<DesktopApi["models"]["setDefaultRoute"]>>;
+  saveProfile: ReturnType<typeof vi.fn<DesktopApi["models"]["saveProfile"]>>;
+  testModel: ReturnType<typeof vi.fn<DesktopApi["models"]["test"]>>;
 };
 
 const roots: Root[] = [];
 
-function createApi(projects: ProjectDto[] = []): ApiDouble {
+function createApi(projects: ProjectDto[] = [], onboardingCompleted = true): ApiDouble {
   const list = vi.fn<DesktopApi["projects"]["list"]>().mockResolvedValue(projects);
   const create = vi.fn<DesktopApi["projects"]["create"]>().mockResolvedValue(projectA);
   const rename = vi.fn<DesktopApi["projects"]["rename"]>().mockResolvedValue(projectA);
@@ -48,12 +80,59 @@ function createApi(projects: ProjectDto[] = []): ApiDouble {
     ok: true,
     value: undefined
   });
+  const getSettings = vi.fn<DesktopApi["settings"]["get"]>().mockResolvedValue({
+    ok: true,
+    value: { onboardingCompleted, locale: "en", theme: "light" }
+  });
+  const updateSettings = vi.fn<DesktopApi["settings"]["update"]>().mockImplementation(async (input) => ({
+    ok: true,
+    value: {
+      onboardingCompleted: input.onboardingCompleted ?? onboardingCompleted,
+      locale: input.locale ?? "en",
+      theme: input.theme ?? "light"
+    }
+  }));
+  const listProfiles = vi.fn<DesktopApi["models"]["listProfiles"]>().mockResolvedValue({
+    ok: true,
+    value: { profiles: [], builtInProfiles: [], credentials: [] }
+  });
+  const getDefaultRoutes = vi.fn<DesktopApi["models"]["getDefaultRoutes"]>().mockResolvedValue({
+    ok: true,
+    value: onboardingCompleted
+      ? { generationProfileId: projectA.id, embeddingProfileId: projectB.id }
+      : {}
+  });
+  const setDefaultRoute = vi.fn<DesktopApi["models"]["setDefaultRoute"]>().mockImplementation(async (input) => ({
+    ok: true,
+    value: input.capability === "generation"
+      ? { generationProfileId: input.profileId }
+      : { embeddingProfileId: input.profileId }
+  }));
+  const saveProfile = vi.fn<DesktopApi["models"]["saveProfile"]>().mockImplementation(async ({ profile }) => ({
+    ok: true,
+    value: {
+      ...profile,
+      createdAt: "2026-08-25T00:00:00.000Z",
+      updatedAt: "2026-08-25T00:00:00.000Z"
+    }
+  }));
+  const testModel = vi.fn<DesktopApi["models"]["test"]>().mockImplementation(async ({ profile }) => ({
+    ok: true,
+    value: { modelId: profile.modelId, capability: profile.capability, verifiedBy: "probe" }
+  }));
   return {
     list,
     create,
     rename,
     archive,
     setTitleOverlayTheme,
+    getSettings,
+    updateSettings,
+    listProfiles,
+    getDefaultRoutes,
+    setDefaultRoute,
+    saveProfile,
+    testModel,
     api: {
       projects: {
         list,
@@ -63,27 +142,20 @@ function createApi(projects: ProjectDto[] = []): ApiDouble {
         remove: vi.fn<DesktopApi["projects"]["remove"]>().mockResolvedValue(undefined)
       },
       settings: {
-        get: vi.fn<DesktopApi["settings"]["get"]>().mockResolvedValue({
-          ok: true,
-          value: { onboardingCompleted: false, locale: "en", theme: "light" }
-        }),
-        update: vi.fn<DesktopApi["settings"]["update"]>().mockResolvedValue({
-          ok: true,
-          value: { onboardingCompleted: false, locale: "en", theme: "light" }
-        })
+        get: getSettings,
+        update: updateSettings
       },
       models: {
-        listProfiles: vi.fn<DesktopApi["models"]["listProfiles"]>().mockResolvedValue({
-          ok: true,
-          value: { profiles: [], builtInProfiles: [], credentials: [] }
-        }),
-        saveProfile: vi.fn<DesktopApi["models"]["saveProfile"]>(),
+        listProfiles,
+        getDefaultRoutes,
+        setDefaultRoute,
+        saveProfile,
         deleteProfile: vi.fn<DesktopApi["models"]["deleteProfile"]>(),
         discover: vi.fn<DesktopApi["models"]["discover"]>().mockResolvedValue({
           ok: true,
           value: []
         }),
-        test: vi.fn<DesktopApi["models"]["test"]>()
+        test: testModel
       },
       credentials: {
         set: vi.fn<DesktopApi["credentials"]["set"]>(),
@@ -151,6 +223,25 @@ async function enterProjectName(container: HTMLElement, name: string): Promise<v
   });
 }
 
+function labelledField<T extends HTMLInputElement | HTMLSelectElement>(
+  container: ParentNode,
+  label: string
+): T {
+  const element = [...container.querySelectorAll<T>("input, select")]
+    .find((candidate) => candidate.labels?.[0]?.firstChild?.textContent?.trim() === label);
+  if (!element) throw new Error(`Missing field: ${label}`);
+  return element;
+}
+
+async function setField(element: HTMLInputElement | HTMLSelectElement, value: string): Promise<void> {
+  await act(async () => {
+    Object.getOwnPropertyDescriptor(Object.getPrototypeOf(element), "value")?.set?.call(element, value);
+    element.dispatchEvent(new Event("change", { bubbles: true }));
+    element.dispatchEvent(new Event("input", { bubbles: true }));
+    await Promise.resolve();
+  });
+}
+
 beforeEach(async () => {
   vi.stubGlobal("React", React);
   (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -167,6 +258,97 @@ afterEach(async () => {
 });
 
 describe("App shell behavior", () => {
+  it("gates project loading on persisted onboarding and opens first launch for a fresh profile", async () => {
+    const pending = deferred<Awaited<ReturnType<DesktopApi["settings"]["get"]>>>();
+    const { api, getSettings, list } = createApi([], false);
+    getSettings.mockReturnValueOnce(pending.promise);
+
+    const container = await renderApp(api);
+    expect(list).not.toHaveBeenCalled();
+    expect(container.textContent).not.toContain("Start a new research project");
+
+    await act(async () => {
+      pending.resolve({
+        ok: true,
+        value: { onboardingCompleted: false, locale: "en", theme: "light" }
+      });
+      await pending.promise;
+      await Promise.resolve();
+    });
+
+    expect(container.textContent).toContain("Welcome to MyNotebookLM");
+    expect(container.textContent).not.toContain("Start a new research project");
+    expect(list).not.toHaveBeenCalled();
+  });
+
+  it("persists skip before entering the app and exposes settings repair actions", async () => {
+    const { api, updateSettings, list } = createApi([projectA], false);
+    const container = await renderApp(api);
+
+    await click(button(container, "Configure later"));
+
+    expect(updateSettings).toHaveBeenCalledWith({ onboardingCompleted: true });
+    expect(list).toHaveBeenCalledOnce();
+    const repairs = [...container.querySelectorAll("button")]
+      .filter((candidate) => candidate.textContent?.trim() === "Open settings");
+    expect(repairs.length).toBeGreaterThanOrEqual(2);
+    await click(repairs[0]!);
+    expect(container.textContent).toContain("Model services");
+  });
+
+  it("keeps onboarding open and announces a sanitized settings persistence error", async () => {
+    const { api, updateSettings, list } = createApi([], false);
+    updateSettings.mockResolvedValueOnce({
+      ok: false,
+      error: { code: "INTERNAL", messageKey: "errors.internal", recoverable: false }
+    });
+    const container = await renderApp(api);
+
+    await click(button(container, "Configure later"));
+
+    expect(container.querySelector("[role=alert]")?.textContent).toBe("The model service request failed.");
+    expect(container.textContent).toContain("Welcome to MyNotebookLM");
+    expect(list).not.toHaveBeenCalled();
+  });
+
+  it("opens model settings from the real sidebar button", async () => {
+    const { api, listProfiles, getDefaultRoutes } = createApi([], true);
+    const container = await renderApp(api);
+
+    await click(button(container, "Settings"));
+
+    expect(container.textContent).toContain("Model services");
+    expect(listProfiles).toHaveBeenCalledOnce();
+    expect(getDefaultRoutes).toHaveBeenCalledTimes(2);
+  });
+
+  it("validates and saves editable profiles before explicitly persisting both routes", async () => {
+    const { api, listProfiles, testModel, saveProfile, setDefaultRoute, updateSettings } =
+      createApi([], false);
+    listProfiles.mockResolvedValueOnce({
+      ok: true,
+      value: { profiles: [], builtInProfiles: [builtInEmbedding], credentials: [] }
+    });
+    const container = await renderApp(api);
+    const forms = container.querySelectorAll<HTMLElement>(".model-profile-form");
+    expect(forms).toHaveLength(2);
+
+    await setField(labelledField<HTMLSelectElement>(forms[0]!, "Provider"), "ollama");
+    await click(button(forms[0]!, "Enter model name manually"));
+    await setField(labelledField<HTMLInputElement>(forms[0]!, "Model name"), "llama3.2");
+    await setField(labelledField<HTMLSelectElement>(forms[1]!, "Provider"), "local");
+    await click(button(container, "Finish and start"));
+
+    expect(testModel).toHaveBeenCalledOnce();
+    expect(saveProfile).toHaveBeenCalledOnce();
+    expect(setDefaultRoute).toHaveBeenNthCalledWith(1, expect.objectContaining({ capability: "generation" }));
+    expect(setDefaultRoute).toHaveBeenNthCalledWith(2, {
+      capability: "embedding",
+      profileId: builtInEmbedding.id
+    });
+    expect(updateSettings).toHaveBeenCalledWith({ onboardingCompleted: true });
+  });
+
   it("loads projects once under React Strict Mode", async () => {
     const { api, list } = createApi([projectA]);
 
@@ -489,7 +671,11 @@ describe("App shell behavior", () => {
   });
 
   it("synchronizes a restored dark theme to the title overlay on startup", async () => {
-    const { api, setTitleOverlayTheme } = createApi();
+    const { api, setTitleOverlayTheme, getSettings } = createApi();
+    getSettings.mockResolvedValueOnce({
+      ok: true,
+      value: { onboardingCompleted: true, locale: "en", theme: "dark" }
+    });
     changeTheme("dark");
 
     await renderApp(api);
@@ -522,7 +708,7 @@ describe("App shell behavior", () => {
     expect(container.querySelector(".sources-empty")?.textContent).toContain("No sources yet");
   });
 
-  it("renders distinct deferred messages for source import, research chat, and settings", async () => {
+  it("renders distinct deferred messages while keeping settings actionable", async () => {
     const { api } = createApi([projectA]);
     const container = await renderApp(api);
     const importButton = button(container, "Import sources");
@@ -535,7 +721,8 @@ describe("App shell behavior", () => {
     expect(container.querySelector(".composer span")?.textContent).toBe(
       "Research chat will be available after source import."
     );
-    expect(settings.title).toBe("Settings will be available in a later step.");
+    expect(settings.disabled).toBe(false);
+    expect(settings.title).toBe("");
 
     await click(button(container, "中文"));
 
@@ -543,7 +730,7 @@ describe("App shell behavior", () => {
     expect(container.querySelector(".composer span")?.textContent).toBe(
       "研究对话将在资料导入功能提供后可用。"
     );
-    expect(settings.title).toBe("设置将在后续步骤中提供。");
+    expect(settings.textContent).toContain("设置");
   });
 
   it("uses a labelled ordinary popover for project actions", async () => {

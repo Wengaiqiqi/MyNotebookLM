@@ -2,7 +2,10 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState, type FormEve
 import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
 import type { ProjectDto } from "../../shared/projects";
+import type { DefaultModelRoutesDto } from "../../shared/models";
 import { changeLanguage, changeTheme, readTheme, type AppLanguage, type AppTheme } from "./i18n";
+import FirstLaunch, { type ModelSettingsData } from "./model-settings/FirstLaunch";
+import SettingsView from "./model-settings/SettingsView";
 
 type DialogState =
   | { kind: "create" }
@@ -60,6 +63,10 @@ export default function App() {
   const { t, i18n } = useTranslation();
   const language: AppLanguage = i18n.resolvedLanguage === "en" ? "en" : "zh-CN";
   const [theme, setTheme] = useState<AppTheme>(readTheme);
+  const [view, setView] = useState<"loading" | "onboarding" | "projects" | "settings">("loading");
+  const [modelData, setModelData] = useState<ModelSettingsData>();
+  const [routes, setRoutes] = useState<DefaultModelRoutesDto>({});
+  const [startupError, setStartupError] = useState(false);
   const [projects, setProjects] = useState<ProjectDto[]>([]);
   const [selectedId, setSelectedId] = useState<string>();
   const [errorKey, setErrorKey] = useState<ErrorKey>();
@@ -77,6 +84,7 @@ export default function App() {
   const menuSequence = useRef(0);
   const listRequestEpoch = useRef(0);
   const loaded = useRef(false);
+  const settingsReturnView = useRef<"onboarding" | "projects">("projects");
   const nameInput = useRef<HTMLInputElement>(null);
   const confirmButton = useRef<HTMLButtonElement>(null);
   const dialogCard = useRef<HTMLElement>(null);
@@ -125,11 +133,42 @@ export default function App() {
     }
   }, []);
 
+  const loadModelData = useCallback(async (): Promise<ModelSettingsData | undefined> => {
+    const [profileResult, routeResult] = await Promise.all([
+      window.myNotebook.models.listProfiles(),
+      window.myNotebook.models.getDefaultRoutes()
+    ]);
+    if (!profileResult.ok || !routeResult.ok) return undefined;
+    const data = { profiles: profileResult.value, routes: routeResult.value };
+    setModelData(data);
+    setRoutes(routeResult.value);
+    return data;
+  }, []);
+
   useEffect(() => {
     if (loaded.current) return;
     loaded.current = true;
-    void refreshProjects();
-  }, [refreshProjects]);
+    void (async () => {
+      const result = await window.myNotebook.settings.get();
+      if (!result.ok) {
+        setStartupError(true);
+        return;
+      }
+      setTheme(result.value.theme);
+      changeTheme(result.value.theme);
+      await changeLanguage(result.value.locale);
+      if (!result.value.onboardingCompleted) {
+        const data = await loadModelData();
+        if (!data) setStartupError(true);
+        else setView("onboarding");
+        return;
+      }
+      const routeResult = await window.myNotebook.models.getDefaultRoutes();
+      if (routeResult.ok) setRoutes(routeResult.value);
+      setView("projects");
+      await refreshProjects();
+    })();
+  }, [loadModelData, refreshProjects]);
 
   useEffect(() => {
     if (syncedTitleOverlayTheme.current === theme) return;
@@ -356,6 +395,38 @@ export default function App() {
   function selectTheme(next: AppTheme): void {
     setTheme(next);
     changeTheme(next);
+    if (view !== "loading") void window.myNotebook.settings.update({ theme: next });
+  }
+
+  function selectLanguage(next: AppLanguage): void {
+    void changeLanguage(next);
+    if (view !== "loading") void window.myNotebook.settings.update({ locale: next });
+  }
+
+  async function openSettings(): Promise<void> {
+    if (view === "loading") return;
+    settingsReturnView.current = view === "onboarding" ? "onboarding" : "projects";
+    const data = await loadModelData();
+    if (data) setView("settings");
+  }
+
+  async function finishOnboarding(): Promise<string | undefined> {
+    const result = await window.myNotebook.settings.update({ onboardingCompleted: true });
+    if (!result.ok) return result.error.messageKey;
+    const routeResult = await window.myNotebook.models.getDefaultRoutes();
+    if (!routeResult.ok) return routeResult.error.messageKey;
+    setRoutes(routeResult.value);
+    setView("projects");
+    await refreshProjects();
+    return undefined;
+  }
+
+  async function finishSettings(): Promise<string | undefined> {
+    const data = await loadModelData();
+    if (!data) return "model.errors.request";
+    setView(settingsReturnView.current);
+    if (settingsReturnView.current === "projects" && projects.length === 0) await refreshProjects();
+    return undefined;
   }
 
   function toggleProjectMenu(projectId: string, trigger: HTMLButtonElement): void {
@@ -382,7 +453,7 @@ export default function App() {
 
         <nav className="project-nav" aria-label={t("project.title")}>
           <h1>{t("project.title")}</h1>
-          <button className="primary-button create-button title-no-drag" type="button" disabled={busy} onClick={(event) => openCreateDialog(event.currentTarget)}>
+          <button className="primary-button create-button title-no-drag" type="button" disabled={busy || view !== "projects"} onClick={(event) => openCreateDialog(event.currentTarget)}>
             <span aria-hidden="true">＋</span>{t("project.create")}
           </button>
 
@@ -435,13 +506,13 @@ export default function App() {
         </nav>
 
         <footer className="sidebar-footer">
-          <button className="settings-button" type="button" disabled title={t("research.settingsUnavailable")}>
+          <button className="settings-button" type="button" aria-current={view === "settings" ? "page" : undefined} disabled={view === "loading"} onClick={() => void openSettings()}>
             <span aria-hidden="true">⚙</span>{t("app.settings")}
           </button>
           <div className="preference-row" role="group" aria-label={t("common.language")}>
-            <button type="button" aria-pressed={language === "zh-CN"} onClick={() => void changeLanguage("zh-CN")}>中文</button>
+            <button type="button" aria-pressed={language === "zh-CN"} onClick={() => selectLanguage("zh-CN")}>中文</button>
             <span aria-hidden="true">|</span>
-            <button type="button" aria-pressed={language === "en"} onClick={() => void changeLanguage("en")}>EN</button>
+            <button type="button" aria-pressed={language === "en"} onClick={() => selectLanguage("en")}>EN</button>
           </div>
           <div className="preference-row" role="group" aria-label={t("common.theme")}>
             <button type="button" aria-pressed={theme === "light"} onClick={() => selectTheme("light")}>{t("common.light")}</button>
@@ -451,6 +522,19 @@ export default function App() {
         </footer>
       </aside>
 
+      {view === "onboarding" && modelData ? (
+        <FirstLaunch data={modelData} onComplete={finishOnboarding} onSkip={finishOnboarding} />
+      ) : view === "settings" && modelData ? (
+        <SettingsView
+          data={modelData}
+          onCancel={() => setView(settingsReturnView.current)}
+          onSaved={finishSettings}
+        />
+      ) : view === "loading" ? (
+        <main className="workspace loading-workspace title-drag-region">
+          {startupError && <p role="alert">{t("model.errors.request")}</p>}
+        </main>
+      ) : (
       <main className="workspace">
         <header className="workspace-header title-drag-region">
           <div>
@@ -468,7 +552,11 @@ export default function App() {
                   <div className="import-region" aria-label={t("research.importSources")}>
                     <span className="document-icon" aria-hidden="true">◇</span>
                     <p>{t("research.sourceImportUnavailable")}</p>
-                    <button type="button" disabled title={t("research.sourceImportUnavailable")}>{t("research.importSources")}</button>
+                    {routes.embeddingProfileId ? (
+                      <button type="button" disabled title={t("research.sourceImportUnavailable")}>{t("research.importSources")}</button>
+                    ) : (
+                      <button type="button" onClick={() => void openSettings()}>{t("common.openSettings")}</button>
+                    )}
                     <div className="format-grid">
                       {["PDF", "DOCX", "PPTX", "XLSX", "TXT", "Markdown", "URL", "CSV"].map((format) => (
                         <button className="format-choice" type="button" disabled key={format}>{format}</button>
@@ -478,11 +566,16 @@ export default function App() {
                   <div className="guidance-card">
                     <span aria-hidden="true">◎</span>
                     <p>{t("research.researchChatUnavailable")}</p>
+                    {!routes.generationProfileId && <button type="button" onClick={() => void openSettings()}>{t("common.openSettings")}</button>}
                   </div>
                 </div>
                 <div className="composer" aria-label={t("research.ask")}>
-                  <button className="model-pill" type="button" disabled>NotebookLM⌄</button>
-                  <button className="ask-button" type="button" disabled>{t("research.ask")}</button>
+                  <button className="model-pill" type="button" disabled={Boolean(routes.generationProfileId)} onClick={() => void openSettings()}>
+                    {routes.generationProfileId ? "NotebookLM⌄" : t("common.openSettings")}
+                  </button>
+                  <button className="ask-button" type="button" disabled={Boolean(routes.generationProfileId)} onClick={() => void openSettings()}>
+                    {routes.generationProfileId ? t("research.ask") : t("common.openSettings")}
+                  </button>
                   <span>{t("research.researchChatUnavailable")}</span>
                 </div>
               </>
@@ -499,7 +592,12 @@ export default function App() {
           <aside className="sources-panel" aria-label={t("research.sources")}>
             <header>
               <h3>{t("research.sources")}</h3>
-              <button type="button" disabled aria-label={t("research.importSources")}>＋</button>
+              <button
+                type="button"
+                disabled={Boolean(routes.embeddingProfileId)}
+                aria-label={routes.embeddingProfileId ? t("research.importSources") : t("common.openSettings")}
+                onClick={() => void openSettings()}
+              >＋</button>
             </header>
             <div className="sources-empty">
               <span aria-hidden="true">□＋</span>
@@ -509,6 +607,7 @@ export default function App() {
           </aside>
         </div>
       </main>
+      )}
     </div>
 
       {openMenu && openMenuProject && !dialog && createPortal(

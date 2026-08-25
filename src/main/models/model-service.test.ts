@@ -4,6 +4,8 @@ import type {
   UpdateAppSettingsInput
 } from "../../shared/settings";
 import type {
+  ModelRouteDto,
+  ModelTaskKind,
   ModelProfileDto,
   ModelProfileInput,
   ProviderKind
@@ -53,6 +55,7 @@ class FakeSettingsRepository {
     theme: "light"
   };
   readonly profiles = new Map<string, ModelProfileDto>();
+  readonly routes = new Map<ModelTaskKind, ModelRouteDto[]>();
   readonly events: string[] = [];
 
   getSettings(): AppSettingsDto {
@@ -86,6 +89,16 @@ class FakeSettingsRepository {
   deleteProfile(id: string): void {
     this.events.push("delete-profile");
     this.profiles.delete(id);
+  }
+
+  getRoute(taskKind: ModelTaskKind): ModelRouteDto[] {
+    return this.routes.get(taskKind) ?? [];
+  }
+
+  replaceRoute(taskKind: ModelTaskKind, profileIds: readonly string[]): ModelRouteDto[] {
+    const routes = profileIds.map((profileId, position) => ({ taskKind, profileId, position }));
+    this.routes.set(taskKind, routes);
+    return routes;
   }
 }
 
@@ -157,6 +170,61 @@ describe("createModelProvider", () => {
 });
 
 describe("ModelService", () => {
+  it("reads and explicitly sets generation and built-in embedding default routes", async () => {
+    const { service, repository, factory } = setup();
+    repository.profiles.set(PROFILE_ID, dto(profile));
+
+    await expect(service.getDefaultRoutes()).resolves.toEqual({
+      ok: true,
+      value: {}
+    });
+    await expect(service.setDefaultRoute({
+      capability: "generation",
+      profileId: PROFILE_ID
+    })).resolves.toEqual({
+      ok: true,
+      value: { generationProfileId: PROFILE_ID }
+    });
+    expect([...repository.routes.entries()]).toEqual([
+      ["chat", [{ taskKind: "chat", profileId: PROFILE_ID, position: 0 }]],
+      ["note-title", [{ taskKind: "note-title", profileId: PROFILE_ID, position: 0 }]],
+      ["summary", [{ taskKind: "summary", profileId: PROFILE_ID, position: 0 }]],
+      ["key-points", [{ taskKind: "key-points", profileId: PROFILE_ID, position: 0 }]],
+      ["qa", [{ taskKind: "qa", profileId: PROFILE_ID, position: 0 }]],
+      ["custom-transformation", [{ taskKind: "custom-transformation", profileId: PROFILE_ID, position: 0 }]]
+    ]);
+
+    await expect(service.setDefaultRoute({
+      capability: "embedding",
+      profileId: BUILT_IN_LOCAL_EMBEDDING_PROFILE_ID
+    })).resolves.toEqual({
+      ok: true,
+      value: {
+        generationProfileId: PROFILE_ID,
+        embeddingProfileId: BUILT_IN_LOCAL_EMBEDDING_PROFILE_ID
+      }
+    });
+    expect(repository.routes.get("embedding")).toEqual([{
+      taskKind: "embedding",
+      profileId: BUILT_IN_LOCAL_EMBEDDING_PROFILE_ID,
+      position: 0
+    }]);
+    expect(factory).not.toHaveBeenCalled();
+  });
+
+  it("rejects missing and wrong-capability default route profiles", async () => {
+    const { service } = setup();
+
+    await expect(service.setDefaultRoute({
+      capability: "generation",
+      profileId: BUILT_IN_LOCAL_EMBEDDING_PROFILE_ID
+    })).resolves.toMatchObject({ ok: false, error: { code: "VALIDATION" } });
+    await expect(service.setDefaultRoute({
+      capability: "generation",
+      profileId: OTHER_PROFILE_ID
+    })).resolves.toMatchObject({ ok: false, error: { code: "NOT_FOUND" } });
+  });
+
   it("returns settings updates as safe results", async () => {
     const { service } = setup();
 

@@ -78,6 +78,16 @@ export const modelRouteDtoSchema = z.object({
   profileId: z.uuid()
 }).strict();
 
+export const defaultModelRoutesDtoSchema = z.object({
+  generationProfileId: z.uuid().optional(),
+  embeddingProfileId: z.uuid().optional()
+}).strict();
+
+export const setDefaultModelRouteInputSchema = z.object({
+  capability: modelCapabilitySchema,
+  profileId: z.uuid()
+}).strict();
+
 export const modelDescriptorSchema = z.object({
   id: z.string().trim().min(1).max(200),
   displayName: z.string().trim().min(1).max(200),
@@ -201,6 +211,8 @@ export type EmbeddingMetadata = Readonly<z.infer<typeof embeddingMetadataSchema>
 export type ModelProfileInput = z.infer<typeof modelProfileInputSchema>;
 export type ModelProfileDto = z.infer<typeof modelProfileDtoSchema>;
 export type ModelRouteDto = z.infer<typeof modelRouteDtoSchema>;
+export type DefaultModelRoutesDto = z.infer<typeof defaultModelRoutesDtoSchema>;
+export type SetDefaultModelRouteInput = z.infer<typeof setDefaultModelRouteInputSchema>;
 export type ModelDescriptorDto = z.infer<typeof modelDescriptorSchema>;
 export type DiscoverModelsInput = z.infer<typeof discoverModelsInputSchema>;
 export type TestModelInput = z.infer<typeof testModelInputSchema>;

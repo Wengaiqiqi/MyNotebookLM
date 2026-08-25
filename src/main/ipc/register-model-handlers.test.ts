@@ -34,6 +34,7 @@ const descriptors = [{
   capabilities: ["generation" as const],
   capabilityEvidence: "authoritative" as const
 }];
+const routes = { generationProfileId: PROFILE_ID };
 const validationFailure = {
   ok: false,
   error: { code: "VALIDATION", messageKey: "errors.validation", recoverable: false }
@@ -75,6 +76,8 @@ function createService() {
       builtInProfiles: [],
       credentials: [credentialStatus]
     })),
+    getDefaultRoutes: vi.fn(async () => ok(routes)),
+    setDefaultRoute: vi.fn(async () => ok(routes)),
     saveProfile: vi.fn(async () => ok(profileDto)),
     deleteProfile: vi.fn(async () => ok(undefined)),
     discover: vi.fn(async () => ok(descriptors)),
@@ -122,6 +125,11 @@ describe("registerModelHandlers", () => {
     await invoke(ipc, SETTINGS_CHANNELS.get);
     await invoke(ipc, SETTINGS_CHANNELS.update, { theme: "dark" });
     await invoke(ipc, MODEL_CHANNELS.listProfiles);
+    await invoke(ipc, MODEL_CHANNELS.getDefaultRoutes);
+    await invoke(ipc, MODEL_CHANNELS.setDefaultRoute, {
+      capability: "generation",
+      profileId: PROFILE_ID
+    });
     await invoke(ipc, MODEL_CHANNELS.saveProfile, { profile, apiKey: "secret" });
     await invoke(ipc, MODEL_CHANNELS.deleteProfile, { id: PROFILE_ID });
     await invoke(ipc, MODEL_CHANNELS.discover, discoveryInput);
@@ -132,6 +140,11 @@ describe("registerModelHandlers", () => {
     expect(service.getSettings).toHaveBeenCalledWith();
     expect(service.updateSettings).toHaveBeenCalledWith({ theme: "dark" });
     expect(service.listProfiles).toHaveBeenCalledWith();
+    expect(service.getDefaultRoutes).toHaveBeenCalledWith();
+    expect(service.setDefaultRoute).toHaveBeenCalledWith({
+      capability: "generation",
+      profileId: PROFILE_ID
+    });
     expect(service.saveProfile).toHaveBeenCalledWith({ profile, apiKey: "secret" });
     expect(service.deleteProfile).toHaveBeenCalledWith({ id: PROFILE_ID });
     expect(service.discover).toHaveBeenCalledWith(discoveryInput);
@@ -144,6 +157,8 @@ describe("registerModelHandlers", () => {
     [SETTINGS_CHANNELS.get, {}, "getSettings"],
     [SETTINGS_CHANNELS.update, {}, "updateSettings"],
     [MODEL_CHANNELS.listProfiles, {}, "listProfiles"],
+    [MODEL_CHANNELS.getDefaultRoutes, {}, "getDefaultRoutes"],
+    [MODEL_CHANNELS.setDefaultRoute, { capability: "generation", profileId: "bad" }, "setDefaultRoute"],
     [MODEL_CHANNELS.saveProfile, { profile: { ...profile, name: "" } }, "saveProfile"],
     [MODEL_CHANNELS.deleteProfile, { id: "not-a-uuid" }, "deleteProfile"],
     [MODEL_CHANNELS.discover, { ...discoveryInput, baseUrl: "http://localhost:1234" }, "discover"],
@@ -163,6 +178,8 @@ describe("registerModelHandlers", () => {
     [SETTINGS_CHANNELS.get, undefined, "getSettings"],
     [SETTINGS_CHANNELS.update, { theme: "dark" }, "updateSettings"],
     [MODEL_CHANNELS.listProfiles, undefined, "listProfiles"],
+    [MODEL_CHANNELS.getDefaultRoutes, undefined, "getDefaultRoutes"],
+    [MODEL_CHANNELS.setDefaultRoute, { capability: "generation", profileId: PROFILE_ID }, "setDefaultRoute"],
     [MODEL_CHANNELS.saveProfile, { profile }, "saveProfile"],
     [MODEL_CHANNELS.deleteProfile, { id: PROFILE_ID }, "deleteProfile"],
     [MODEL_CHANNELS.discover, discoveryInput, "discover"],

@@ -3,16 +3,19 @@ import type { AppErrorDto, Result } from "../../shared/app-errors";
 import {
   credentialInputSchema,
   credentialProfileInputSchema,
+  defaultModelRoutesDtoSchema,
   deleteModelProfileInputSchema,
   discoverModelsInputSchema,
   modelDescriptorSchema,
   builtInModelProfileDtoSchema,
   modelProfileInputSchema,
   saveModelProfileInputSchema,
+  setDefaultModelRouteInputSchema,
   testModelInputSchema,
   type CredentialInput,
   type CredentialProfileInput,
   type CredentialStatusDto,
+  type DefaultModelRoutesDto,
   type DeleteModelProfileInput,
   type DiscoverModelsInput,
   type ModelCapability,
@@ -22,6 +25,7 @@ import {
   type ModelTestResultDto,
   type ProviderKind,
   type SaveModelProfileInput,
+  type SetDefaultModelRouteInput,
   type TestModelInput
 } from "../../shared/models";
 import {
@@ -105,6 +109,19 @@ function credentialBindingError<T>(): Result<T> {
   return errorResult(appError("VALIDATION", "errors.credentialBinding"));
 }
 
+function capabilityError<T>(): Result<T> {
+  return errorResult(appError("VALIDATION", "errors.modelCapability"));
+}
+
+const generationTasks = [
+  "chat",
+  "note-title",
+  "summary",
+  "key-points",
+  "qa",
+  "custom-transformation"
+] as const;
+
 function canonicalProviderBaseUrl(baseUrl: string): string {
   const address = new URL(baseUrl);
   address.pathname = address.pathname.replace(/\/+$/, "");
@@ -163,6 +180,50 @@ export class ModelService {
           }))
         }
       };
+    } catch (reason) {
+      return resultFromError(reason);
+    }
+  }
+
+  async getDefaultRoutes(): Promise<Result<DefaultModelRoutesDto>> {
+    try {
+      const generationProfileId = this.settings.getRoute("chat")[0]?.profileId;
+      const embeddingProfileId = this.settings.getRoute("embedding")[0]?.profileId;
+      return {
+        ok: true,
+        value: defaultModelRoutesDtoSchema.parse({
+          ...(generationProfileId ? { generationProfileId } : {}),
+          ...(embeddingProfileId ? { embeddingProfileId } : {})
+        })
+      };
+    } catch (reason) {
+      return resultFromError(reason);
+    }
+  }
+
+  async setDefaultRoute(
+    input: SetDefaultModelRouteInput
+  ): Promise<Result<DefaultModelRoutesDto>> {
+    let parsed: SetDefaultModelRouteInput;
+    try {
+      parsed = setDefaultModelRouteInputSchema.parse(input);
+    } catch (reason) {
+      return resultFromError(reason);
+    }
+    if (isBuiltInLocalEmbeddingProfile(parsed.profileId)) {
+      if (parsed.capability !== "embedding") return capabilityError();
+    } else {
+      const profile = this.settings.getProfile(parsed.profileId);
+      if (!profile) return notFound();
+      if (profile.capability !== parsed.capability) return capabilityError();
+    }
+    try {
+      if (parsed.capability === "embedding") {
+        this.settings.replaceRoute("embedding", [parsed.profileId]);
+      } else {
+        for (const task of generationTasks) this.settings.replaceRoute(task, [parsed.profileId]);
+      }
+      return this.getDefaultRoutes();
     } catch (reason) {
       return resultFromError(reason);
     }

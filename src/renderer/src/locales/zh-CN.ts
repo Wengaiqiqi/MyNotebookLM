@@ -21,7 +21,59 @@ const zhCN = {
     language: "语言",
     theme: "主题",
     light: "浅色",
-    dark: "深色"
+    dark: "深色",
+    save: "保存更改",
+    saving: "正在保存…",
+    openSettings: "打开设置"
+  },
+  model: {
+    generation: { title: "生成模型", description: "用于对话、总结与内容生成" },
+    embedding: { title: "嵌入模型", description: "用于本地索引与语义检索" },
+    newProfile: { generation: "新生成模型配置", embedding: "新嵌入模型配置" },
+    savedProfile: "已保存配置",
+    newProfileOption: "新建配置",
+    provider: "提供商",
+    providers: {
+      openai: "OpenAI",
+      "openai-compatible": "OpenAI Compatible",
+      anthropic: "Anthropic",
+      gemini: "Gemini",
+      ollama: "Ollama",
+      local: "内置本地模型"
+    },
+    apiAddress: "API 地址",
+    apiKey: "API Key",
+    showApiKey: "显示 API Key",
+    hideApiKey: "隐藏 API Key",
+    getModels: "获取模型",
+    fetching: "正在获取…",
+    fetchSuccess: "获取成功",
+    model: "模型",
+    modelName: "模型名称",
+    chooseModel: "选择模型",
+    manualModel: "手动输入模型名称",
+    chooseDiscovered: "选择已获取模型",
+    validation: {
+      apiKey: "请输入 API Key。",
+      address: "请输入有效的 HTTP 或 HTTPS API 地址。",
+      complete: "请同时配置有效的生成模型与嵌入模型。"
+    },
+    errors: { request: "模型服务请求失败。" }
+  },
+  onboarding: {
+    title: "欢迎使用 MyNotebookLM",
+    subtitle: "配置模型后即可开启高效的研究与写作之旅。",
+    finish: "完成并开始使用",
+    skip: "稍后配置模型",
+    localCredential: "凭据仅保存在本机"
+  },
+  settings: {
+    title: "设置",
+    subtitle: "管理模型、数据与应用偏好",
+    general: "通用",
+    languageAppearance: "语言与外观",
+    modelServices: "模型服务",
+    dataIndex: "数据与索引"
   },
   error: {
     loadProjects: "无法加载项目，请重试。",

@@ -14,6 +14,7 @@ import {
   credentialInputSchema,
   credentialProfileInputSchema,
   credentialStatusDtoSchema,
+  defaultModelRoutesDtoSchema,
   deleteModelProfileInputSchema,
   discoverModelsInputSchema,
   modelDescriptorSchema,
@@ -21,6 +22,7 @@ import {
   modelProfileListDtoSchema,
   modelTestResultDtoSchema,
   saveModelProfileInputSchema,
+  setDefaultModelRouteInputSchema,
   testModelInputSchema
 } from "../../shared/models";
 import {
@@ -34,6 +36,7 @@ type IpcMainLike = Pick<IpcMain, "handle" | "removeHandler">;
 const undefinedSchema = z.undefined();
 const settingsResultSchema = resultSchema(appSettingsDtoSchema);
 const profileListResultSchema = resultSchema(modelProfileListDtoSchema);
+const defaultRoutesResultSchema = resultSchema(defaultModelRoutesDtoSchema);
 const profileResultSchema = resultSchema(modelProfileDtoSchema);
 const deleteResultSchema = resultSchema(undefinedSchema);
 const discoveryResultSchema = resultSchema(modelDescriptorSchema.array());
@@ -70,6 +73,16 @@ export function registerModelHandlers(
   );
   ipc.handle(MODEL_CHANNELS.listProfiles, (_event, input) =>
     validatedCall(undefinedSchema, profileListResultSchema, input, () => service.listProfiles())
+  );
+  ipc.handle(MODEL_CHANNELS.getDefaultRoutes, (_event, input) =>
+    validatedCall(undefinedSchema, defaultRoutesResultSchema, input, () =>
+      service.getDefaultRoutes()
+    )
+  );
+  ipc.handle(MODEL_CHANNELS.setDefaultRoute, (_event, input) =>
+    validatedCall(setDefaultModelRouteInputSchema, defaultRoutesResultSchema, input, (parsed) =>
+      service.setDefaultRoute(parsed)
+    )
   );
   ipc.handle(MODEL_CHANNELS.saveProfile, (_event, input) =>
     validatedCall(saveModelProfileInputSchema, profileResultSchema, input, (parsed) =>

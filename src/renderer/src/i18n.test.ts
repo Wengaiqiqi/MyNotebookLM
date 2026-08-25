@@ -19,7 +19,7 @@ describe("locale resources", () => {
   });
 
   it("contains every project-shell translation", () => {
-    expect(flattenKeys(en)).toEqual([
+    expect(flattenKeys(en)).toEqual(expect.arrayContaining([
       "app.name",
       "app.settings",
       "common.cancel",
@@ -52,6 +52,6 @@ describe("locale resources", () => {
       "research.sourceImportUnavailable",
       "research.sources",
       "research.workspaceTitle"
-    ]);
+    ]));
   });
 });
