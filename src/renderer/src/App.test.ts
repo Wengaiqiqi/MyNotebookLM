@@ -483,7 +483,27 @@ describe("App shell behavior", () => {
 
     await click(button(container, "Dark"));
 
+    expect(setTitleOverlayTheme).toHaveBeenNthCalledWith(1, { theme: "light" });
+    expect(setTitleOverlayTheme).toHaveBeenNthCalledWith(2, { theme: "dark" });
+    expect(setTitleOverlayTheme).toHaveBeenCalledTimes(2);
+  });
+
+  it("synchronizes a restored dark theme to the title overlay on startup", async () => {
+    const { api, setTitleOverlayTheme } = createApi();
+    changeTheme("dark");
+
+    await renderApp(api);
+
     expect(setTitleOverlayTheme).toHaveBeenCalledExactlyOnceWith({ theme: "dark" });
+  });
+
+  it("keeps a light startup correct when the title-overlay update rejects", async () => {
+    const { api, setTitleOverlayTheme } = createApi();
+    setTitleOverlayTheme.mockRejectedValueOnce(new Error("overlay unavailable"));
+
+    await renderApp(api);
+
+    expect(setTitleOverlayTheme).toHaveBeenCalledExactlyOnceWith({ theme: "light" });
   });
 
   it("renders the approved disabled import formats, guidance, composer, and citations", async () => {

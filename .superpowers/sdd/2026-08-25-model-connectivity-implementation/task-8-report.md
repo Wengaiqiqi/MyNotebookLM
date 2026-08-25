@@ -40,3 +40,9 @@ Implemented and verified.
 ## Concerns
 
 No blocking concerns. The title-overlay operation deliberately accepts only the two existing application themes and exposes no Electron object or arbitrary color input.
+
+## Review round 1 remediation
+
+- RED: `npm test -- --run src/renderer/src/App.test.ts` failed 3 tests: initial light/dark rendering did not synchronize the native overlay, and the click-only path was the only caller.
+- GREEN: focused App/window/preload tests passed (3 files, 54 tests); `npm run typecheck` passed; the full suite passed (23 files, 231 tests); `git diff --check` reported no whitespace errors apart from existing CRLF notices.
+- Synchronization now runs in one `useEffect` keyed by the effective theme. A ref prevents Strict Mode effect replay from duplicating the same operation, and rejected bridge calls are caught deliberately. The theme click now changes only the React/document theme; the effect handles initial restoration and all subsequent effective changes.

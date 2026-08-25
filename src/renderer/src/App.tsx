@@ -81,6 +81,7 @@ export default function App() {
   const confirmButton = useRef<HTMLButtonElement>(null);
   const dialogCard = useRef<HTMLElement>(null);
   const projectMenu = useRef<HTMLDivElement>(null);
+  const syncedTitleOverlayTheme = useRef<AppTheme | undefined>(undefined);
   dialogRef.current = dialog;
   openMenuRef.current = openMenu;
   const error = errorKey ? t(errorKey) : undefined;
@@ -129,6 +130,12 @@ export default function App() {
     loaded.current = true;
     void refreshProjects();
   }, [refreshProjects]);
+
+  useEffect(() => {
+    if (syncedTitleOverlayTheme.current === theme) return;
+    syncedTitleOverlayTheme.current = theme;
+    void window.myNotebook.titleOverlay.setTheme({ theme }).catch(() => undefined);
+  }, [theme]);
 
   useEffect(() => {
     if (dialog || openMenu || !pendingFocus.current) return;
@@ -349,7 +356,6 @@ export default function App() {
   function selectTheme(next: AppTheme): void {
     setTheme(next);
     changeTheme(next);
-    void window.myNotebook.titleOverlay.setTheme({ theme: next });
   }
 
   function toggleProjectMenu(projectId: string, trigger: HTMLButtonElement): void {
