@@ -1,6 +1,6 @@
 # Foundation UI Visual Contract
 
-Approved screens: first launch, empty project, project list, and model settings.
+Approved screens: first launch, empty project, project list, create project, and model settings.
 
 Layout: left project navigation, central workspace, source citations on the right where relevant, and settings in the navigation footer.
 
@@ -17,6 +17,8 @@ Model configuration:
 - Each model may be selected from the fetched dropdown or entered manually.
 - The settings center can change both generation and embedding configuration after onboarding.
 
-Project interactions: rename, archive, and delete are available from a project overflow menu. Destructive confirmation dialogs are centered in the usable application area with a dimmed backdrop.
+Window chrome: the application surface extends through the title area. Native Windows minimize, maximize, and close controls are embedded into that surface without a separate title-bar color band.
 
-Implementation must be compared with these images using a real Windows screenshot. No podcast, audio, speech, or microphone interface is part of this approved foundation.
+Project interactions: rename, archive, and delete are available from a project overflow menu. Every create, rename, delete, and confirmation dialog is centered against the complete application viewport with a full-window dimmed backdrop.
+
+Implementation must be compared with these images using a real Windows screenshot. No podcast, audio, speech, or microphone interface is part of the approved product.
