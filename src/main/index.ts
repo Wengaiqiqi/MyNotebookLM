@@ -1,4 +1,5 @@
 import { app, BrowserWindow, ipcMain, Menu } from "electron";
+import { randomUUID } from "node:crypto";
 import { mkdir } from "node:fs/promises";
 import path from "node:path";
 import { type AppDatabase, openAppDatabase } from "./db/database";
@@ -12,6 +13,11 @@ import { getAppPaths } from "./platform/paths";
 import { ProjectRepository } from "./projects/project-repository";
 import { ProjectService } from "./projects/project-service";
 import { SettingsRepository } from "./settings/settings-repository";
+import { TaskRepository } from "./tasks/task-repository";
+import { TaskService } from "./tasks/task-service";
+import { WorkerPool } from "./tasks/worker-pool";
+import { IngestionService } from "./sources/ingestion-service";
+import { MainSourceService } from "./sources/main-source-service";
 import { createMainWindow, registerTitleOverlayHandler } from "./window";
 
 let appDatabase: AppDatabase | undefined;
@@ -42,11 +48,17 @@ app.whenReady().then(async () => {
   const settingsRepository = new SettingsRepository(appDatabase.connection);
   const credentialStore = new CredentialStore(appDatabase.connection, new SafeStorageAdapter());
   const modelService = new ModelService(settingsRepository, credentialStore);
+  const taskService = new TaskService(new TaskRepository(appDatabase.connection), { now: () => new Date().toISOString(), random: Math.random, id: randomUUID });
+  const ingestionService = new IngestionService(new WorkerPool(), appDatabase.connection);
+  const sourceService = new MainSourceService(appDatabase.connection, taskService, ingestionService);
   cleanupProjectHandlers = registerProjectHandlers(ipcMain, projectService);
   cleanupModelHandlers = registerModelHandlers(ipcMain, modelService);
   if (typeof (ipcMain as { handle?: unknown }).handle === "function") {
     cleanupSourceHandlers = registerSourceHandlers(ipcMain, {
-      listSources: () => [], listTasks: () => []
+      listSources: sourceService.listSources.bind(sourceService), listTasks: sourceService.listTasks.bind(sourceService),
+      importFile: sourceService.importFile.bind(sourceService), importUrl: sourceService.importUrl.bind(sourceService),
+      removeSource: sourceService.removeSource.bind(sourceService), retryTask: sourceService.retryTask.bind(sourceService),
+      cancelTask: sourceService.cancelTask.bind(sourceService), ownsSource: sourceService.ownsSource.bind(sourceService), ownsTask: sourceService.ownsTask.bind(sourceService)
     });
   }
   cleanupTitleOverlayHandler = registerTitleOverlayHandler(ipcMain);

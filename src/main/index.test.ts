@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import path from "node:path";
+import { createTaskUpdateFanout, subscribeWindowToTaskUpdates } from "./task-updates";
 
 type Callback = (...args: unknown[]) => void;
 
@@ -232,5 +233,20 @@ describe("main application composition", () => {
 
     mocks.callbacks.get("window-all-closed")?.();
     expect(mocks.app.quit).toHaveBeenCalledOnce();
+  });
+
+  it("fans out task updates only to live windows subscribed to the project", async () => {
+    const send = vi.fn();
+    const on = vi.fn();
+    const removeListener = vi.fn();
+    const task = { id: "00000000-0000-4000-8000-000000000001", projectId: "00000000-0000-4000-8000-000000000002", sourceId: null, kind: "ingest", state: "running", stage: "parsing", progress: 10, attempt: 0, error: null, idempotencyKey: null, createdAt: "2026-01-01T00:00:00.000Z", updatedAt: "2026-01-01T00:00:00.000Z" } as const;
+    const live = { webContents: { isDestroyed: () => false, send, on, removeListener } };
+    const dead = { webContents: { isDestroyed: () => true, send, on, removeListener } };
+    createTaskUpdateFanout([live, dead])(task);
+    expect(send).toHaveBeenCalledWith("tasks:v1:update:" + task.projectId, task);
+    const cleanup = subscribeWindowToTaskUpdates(live, vi.fn());
+    expect(on).toHaveBeenCalledWith("destroyed", expect.any(Function));
+    cleanup();
+    expect(removeListener).toHaveBeenCalledWith("destroyed", expect.any(Function));
   });
 });

@@ -6,6 +6,15 @@ function ipc() { const handlers = new Map<string, (...args: any[]) => any>(); re
 const projectId = "11111111-1111-4111-8111-111111111111";
 
 describe("source IPC handlers", () => {
+  it("requires project ownership before mutating a source or task", async () => {
+    const handlers = new Map<string, (...args: any[]) => any>();
+    const ipc = { handle: (name: string, fn: any) => handlers.set(name, fn), removeHandler: vi.fn() } as any;
+    const service = { listSources: vi.fn(() => []), listTasks: vi.fn(() => []), ownsSource: vi.fn(() => false), removeSource: vi.fn(() => undefined), retryTask: vi.fn(() => undefined), cancelTask: vi.fn(() => undefined), importFile: vi.fn(), importUrl: vi.fn() };
+    registerSourceHandlers(ipc, service);
+    const result = await handlers.get(SOURCE_CHANNELS.remove)!({}, { projectId: "00000000-0000-4000-8000-000000000001", sourceId: "00000000-0000-4000-8000-000000000002" });
+    expect(result.ok).toBe(false);
+    expect(service.removeSource).not.toHaveBeenCalled();
+  });
   it("does not read Electron dialog while registering when file selection is unused", () => {
     expect(() => registerSourceHandlers(ipc() as any, { listSources: () => [], listTasks: () => [] } as any, undefined as any)).not.toThrow();
   });
