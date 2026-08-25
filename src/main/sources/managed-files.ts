@@ -5,6 +5,9 @@ function safe(root: string, target: string): string { const r = path.resolve(roo
 function mkdirSafe(root: string, dir: string): void {
   const relative = path.relative(path.resolve(root), path.resolve(dir));
   let current = path.resolve(root);
+  const rootStat = lstatSync(current);
+  if (rootStat.isSymbolicLink()) throw new Error("reparse point or symbolic link in storage path");
+  if (!rootStat.isDirectory()) throw new Error("storage root is not a directory");
   for (const segment of relative ? relative.split(path.sep) : []) {
     current = path.join(current, segment);
     try {

@@ -24,6 +24,17 @@ describe("managed files", () => {
     expect(readdirSync(outside)).toHaveLength(0);
   });
 
+  it("rejects a symlinked storage root before writing through it", () => {
+    const realRoot = mkdtempSync(path.join(tmpdir(), "managed-real-"));
+    const parent = mkdtempSync(path.join(tmpdir(), "managed-parent-"));
+    const root = path.join(parent, "root");
+    symlinkSync(realRoot, root, "junction");
+
+    expect(() => stageFile({ root, sourceId: "source-1", revisionId: "revision-1", bytes: Buffer.from("nope") }))
+      .toThrow(/reparse|symbolic link|symlink/i);
+    expect(readdirSync(realRoot)).toHaveLength(0);
+  });
+
   it("removes the temporary file when the final destination cannot be replaced", () => {
     const root = mkdtempSync(path.join(tmpdir(), "managed-"));
     const dir = path.join(root, "source-1", "revision-1");
