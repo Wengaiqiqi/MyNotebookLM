@@ -1,7 +1,18 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { mkdirSync, mkdtempSync, readFileSync, readdirSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
+
+let failFsync = false;
+let observeRename: ((from: string, to: string) => void) | undefined;
+vi.mock("node:fs", async () => {
+  const actual = await vi.importActual<typeof import("node:fs")>("node:fs");
+  return {
+    ...actual,
+    fsyncSync: (fd: number) => { if (failFsync) throw new Error("fsync failed"); return actual.fsyncSync(fd); },
+    renameSync: (from: string, to: string) => { observeRename?.(from, to); return actual.renameSync(from, to); },
+  };
+});
 import { stageFile } from "./managed-files";
 
 describe("managed files", () => {
@@ -59,5 +70,31 @@ describe("managed files", () => {
     expect(() => stageFile({ root, sourceId: "source-1", revisionId: "revision-1", bytes: Buffer.from("nope") }))
       .toThrow();
     expect(readdirSync(target)).toHaveLength(0);
+  });
+
+  it("cleans up after fsync failure and can retry without a final file", () => {
+    const root = mkdtempSync(path.join(tmpdir(), "managed-"));
+    const bytes = Buffer.from("retry me");
+    failFsync = true;
+    try {
+      expect(() => stageFile({ root, sourceId: "source-1", revisionId: "revision-1", bytes })).toThrow("fsync failed");
+    } finally { failFsync = false; }
+    const dir = path.join(root, "source-1", "revision-1");
+    expect(readdirSync(dir)).toEqual([]);
+    expect(stageFile({ root, sourceId: "source-1", revisionId: "revision-1", bytes }).path)
+      .toBe(path.join(dir, "content"));
+    expect(readFileSync(path.join(dir, "content"))).toEqual(bytes);
+  });
+
+  it("does not expose content until the staged file is renamed", () => {
+    const root = mkdtempSync(path.join(tmpdir(), "managed-"));
+    const dir = path.join(root, "source-1", "revision-1");
+    observeRename = (from, to) => {
+      expect(readdirSync(dir)).not.toContain("content");
+    };
+
+    stageFile({ root, sourceId: "source-1", revisionId: "revision-1", bytes: Buffer.from("atomic") });
+    expect(readFileSync(path.join(dir, "content"), "utf8")).toBe("atomic");
+    observeRename = undefined;
   });
 });

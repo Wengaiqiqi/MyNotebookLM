@@ -1,5 +1,5 @@
-import { createHash } from "node:crypto";
-import { closeSync, lstatSync, mkdirSync, openSync, rmSync, writeSync, fsyncSync } from "node:fs";
+import { createHash, randomUUID } from "node:crypto";
+import { closeSync, fsyncSync, lstatSync, mkdirSync, openSync, renameSync, rmSync, writeSync } from "node:fs";
 import path from "node:path";
 function safe(root: string, target: string): string { const r = path.resolve(root), t = path.resolve(target); if (t !== r && !t.startsWith(r + path.sep)) throw new Error("path escapes storage root"); return t; }
 function mkdirSafe(root: string, dir: string): void {
@@ -25,6 +25,17 @@ export function stageFile(input: { root: string; sourceId: string; revisionId: s
   const dir = safe(input.root, path.join(input.root, input.sourceId, input.revisionId)); mkdirSafe(input.root, dir);
   const finalPath = safe(dir, path.join(dir, "content"));
   const hash = createHash("sha256").update(input.bytes).digest("hex");
-  try { const fd = openSync(finalPath, "wx"); try { writeSync(fd, input.bytes); fsyncSync(fd); } finally { closeSync(fd); } return { path: finalPath, hash }; }
-  catch (error) { throw error; }
+  const tempPath = safe(dir, path.join(dir, `.content-${randomUUID()}.tmp`));
+  let tempCreated = false;
+  try {
+    const fd = openSync(tempPath, "wx");
+    tempCreated = true;
+    try { writeSync(fd, input.bytes); fsyncSync(fd); } finally { closeSync(fd); }
+    renameSync(tempPath, finalPath);
+    tempCreated = false;
+    return { path: finalPath, hash };
+  } catch (error) {
+    if (tempCreated) rmSync(tempPath, { force: true });
+    throw error;
+  }
 }
