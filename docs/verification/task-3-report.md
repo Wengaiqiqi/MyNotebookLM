@@ -28,6 +28,10 @@
 - `docs/verification/task-3-report.md`
 ## P2 最终复审修复
 
+本次 P2 最终复审修复资源生命周期：写入或 fsync 失败后仍进入关闭阶段；closeSync 首次失败时保留首个操作错误并立即再次尝试关闭 fd。只有关闭尝试完成后才清理本次生成的临时文件，因此清理不再依赖一次失败的 close 已经释放句柄；若第二次关闭也失败，仍保留原始错误并按现有语义尽力清理。
+
+新增回归测试验证 fsync 与 close 同时失败时保留原始 fsync 错误，且 closeSync 被调用两次。该测试在旧实现上先 RED，再在上述生命周期实现后 GREEN。
+
 linkSync 成功即视为提交完成；后续 unlinkSync 临时文件清理失败只会被吞掉并保留已提交的 content，不会再向调用方报告提交失败。新增测试模拟提交后清理失败并验证成功返回与内容可读。
 
 本次 P2 最终复审修复 mkdirSafe 的并发首次创建竞争：检查到 ENOENT 后若 mkdirSync 竞争性返回 EEXIST，重新执行 lstat/realpath，确认目标仍为安全的真实目录后继续；其他异常、非目录、符号链接或 reparse 路径仍拒绝。新增并发创建获胜回归测试。

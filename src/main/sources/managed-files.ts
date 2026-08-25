@@ -42,7 +42,14 @@ export function stageFile(input: { root: string; sourceId: string; revisionId: s
     tempCreated = true;
     let operationError: unknown;
     try { writeSync(fd, input.bytes); fsyncSync(fd); } catch (error) { operationError = error; }
-    try { closeSync(fd); } catch (error) { if (operationError === undefined) operationError = error; }
+    try {
+      closeSync(fd);
+    } catch (error) {
+      if (operationError === undefined) operationError = error;
+      // A failed close is not proof that the descriptor is still open. Retry once
+      // so cleanup never relies on an unverified Windows handle state.
+      try { closeSync(fd); } catch { /* preserve the first operation error */ }
+    }
     if (operationError !== undefined) throw operationError;
     linkSync(tempPath, finalPath);
     tempCreated = false;

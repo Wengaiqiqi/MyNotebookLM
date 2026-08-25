@@ -5,6 +5,7 @@ import path from "node:path";
 
 let failFsync = false;
 let failClose = false;
+let closeAttempts = 0;
 let failUnlink = false;
 let failMkdirWithEexistOnce = false;
 let observeRename: ((from: string, to: string) => void) | undefined;
@@ -13,7 +14,11 @@ vi.mock("node:fs", async () => {
   return {
     ...actual,
     fsyncSync: (fd: number) => { if (failFsync) throw new Error("fsync failed"); return actual.fsyncSync(fd); },
-    closeSync: (fd: number) => { if (failClose) throw new Error("close failed"); return actual.closeSync(fd); },
+    closeSync: (fd: number) => {
+      closeAttempts++;
+      if (failClose) { failClose = false; throw new Error("close failed"); }
+      return actual.closeSync(fd);
+    },
     unlinkSync: (filePath: string) => { if (failUnlink) throw new Error("unlink failed"); return actual.unlinkSync(filePath); },
     mkdirSync: (directory: string, options?: Parameters<typeof actual.mkdirSync>[1]) => {
       if (failMkdirWithEexistOnce) {
@@ -121,9 +126,10 @@ describe("managed files", () => {
 
   it("keeps the original write error when close also fails and cleans the temporary file", () => {
     const root = mkdtempSync(path.join(tmpdir(), "managed-"));
-    failFsync = true; failClose = true;
+    failFsync = true; failClose = true; closeAttempts = 0;
     try { expect(() => stageFile({ root, sourceId: "source-1", revisionId: "revision-1", bytes: Buffer.from("nope") })).toThrow("fsync failed"); }
     finally { failFsync = false; failClose = false; }
+    expect(closeAttempts).toBe(2);
     expect(readdirSync(path.join(root, "source-1", "revision-1"))).toEqual([]);
   });
 
