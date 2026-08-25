@@ -7,6 +7,7 @@ describe("parsePdf", () => {
     const blocks = await parsePdf(new Uint8Array(readFileSync("src/test/fixtures/documents/sample.pdf")));
     expect(blocks).toEqual([
       { kind: "paragraph", text: "Page one", locator: { kind: "page", page: 1 } },
+      { kind: "paragraph", text: "", locator: { kind: "page", page: 2 } },
       { kind: "paragraph", text: "Page three", locator: { kind: "page", page: 3 } }
     ]);
   });

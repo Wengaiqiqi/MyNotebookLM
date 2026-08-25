@@ -10,7 +10,7 @@ export async function parsePdf(data: Uint8Array): Promise<DocumentBlock[]> {
     const page = await pdf.getPage(pageNumber);
     const content = await page.getTextContent();
     const text = normalize(content.items.map((item) => "str" in item ? item.str : "").join(" "));
-    if (text) blocks.push({ kind: "paragraph", text, locator: { kind: "page", page: pageNumber } });
+    blocks.push({ kind: "paragraph", text, locator: { kind: "page", page: pageNumber } });
   }
   return blocks;
 }
