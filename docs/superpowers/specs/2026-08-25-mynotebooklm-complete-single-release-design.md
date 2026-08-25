@@ -2,7 +2,7 @@
 
 日期：2026-08-25
 
-状态：待用户书面复核
+状态：用户已批准（2026-08-25）
 基础规格：`docs/superpowers/specs/2026-08-24-mynotebooklm-desktop-design.md`
 
 ## 1. 决策与优先级
