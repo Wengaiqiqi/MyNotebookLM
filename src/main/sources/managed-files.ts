@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
-import { closeSync, fsyncSync, lstatSync, mkdirSync, openSync, renameSync, rmSync, writeSync } from "node:fs";
+import { closeSync, fsyncSync, lstatSync, mkdirSync, openSync, realpathSync, rmSync, unlinkSync, writeSync, linkSync } from "node:fs";
 import path from "node:path";
 function safe(root: string, target: string): string { const r = path.resolve(root), t = path.resolve(target); if (t !== r && !t.startsWith(r + path.sep)) throw new Error("path escapes storage root"); return t; }
 function mkdirSafe(root: string, dir: string): void {
@@ -7,12 +7,14 @@ function mkdirSafe(root: string, dir: string): void {
   let current = path.resolve(root);
   const rootStat = lstatSync(current);
   if (rootStat.isSymbolicLink()) throw new Error("reparse point or symbolic link in storage path");
+  if (path.resolve(realpathSync(current)) !== current) throw new Error("reparse point or symbolic link in storage path");
   if (!rootStat.isDirectory()) throw new Error("storage root is not a directory");
   for (const segment of relative ? relative.split(path.sep) : []) {
     current = path.join(current, segment);
     try {
       const stat = lstatSync(current);
       if (stat.isSymbolicLink()) throw new Error("reparse point or symbolic link in storage path");
+      if (path.resolve(realpathSync(current)) !== current) throw new Error("reparse point or symbolic link in storage path");
       if (stat.isDirectory()) continue;
       throw new Error("non-directory in storage path");
     } catch (error) {
@@ -30,12 +32,16 @@ export function stageFile(input: { root: string; sourceId: string; revisionId: s
   try {
     const fd = openSync(tempPath, "wx");
     tempCreated = true;
-    try { writeSync(fd, input.bytes); fsyncSync(fd); } finally { closeSync(fd); }
-    renameSync(tempPath, finalPath);
+    let operationError: unknown;
+    try { writeSync(fd, input.bytes); fsyncSync(fd); } catch (error) { operationError = error; }
+    try { closeSync(fd); } catch (error) { if (operationError === undefined) operationError = error; }
+    if (operationError !== undefined) throw operationError;
+    linkSync(tempPath, finalPath);
+    unlinkSync(tempPath);
     tempCreated = false;
     return { path: finalPath, hash };
   } catch (error) {
-    if (tempCreated) rmSync(tempPath, { force: true });
+    if (tempCreated) { try { rmSync(tempPath, { force: true }); } catch { /* preserve the operation error */ } }
     throw error;
   }
 }

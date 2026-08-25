@@ -1,15 +1,17 @@
 import { describe, expect, it, vi } from "vitest";
-import { mkdirSync, mkdtempSync, readFileSync, readdirSync, symlinkSync } from "node:fs";
+import { closeSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
 let failFsync = false;
+let failClose = false;
 let observeRename: ((from: string, to: string) => void) | undefined;
 vi.mock("node:fs", async () => {
   const actual = await vi.importActual<typeof import("node:fs")>("node:fs");
   return {
     ...actual,
     fsyncSync: (fd: number) => { if (failFsync) throw new Error("fsync failed"); return actual.fsyncSync(fd); },
+    closeSync: (fd: number) => { if (failClose) throw new Error("close failed"); return actual.closeSync(fd); },
     renameSync: (from: string, to: string) => { observeRename?.(from, to); return actual.renameSync(from, to); },
   };
 });
@@ -96,5 +98,28 @@ describe("managed files", () => {
     stageFile({ root, sourceId: "source-1", revisionId: "revision-1", bytes: Buffer.from("atomic") });
     expect(readFileSync(path.join(dir, "content"), "utf8")).toBe("atomic");
     observeRename = undefined;
+  });
+
+  it("keeps the original write error when close also fails and cleans the temporary file", () => {
+    const root = mkdtempSync(path.join(tmpdir(), "managed-"));
+    failFsync = true; failClose = true;
+    try { expect(() => stageFile({ root, sourceId: "source-1", revisionId: "revision-1", bytes: Buffer.from("nope") })).toThrow("fsync failed"); }
+    finally { failFsync = false; failClose = false; }
+    expect(readdirSync(path.join(root, "source-1", "revision-1"))).toEqual([]);
+  });
+
+  it("preserves existing content on repeated commits", () => {
+    const root = mkdtempSync(path.join(tmpdir(), "managed-"));
+    const first = Buffer.from("first");
+    stageFile({ root, sourceId: "source-1", revisionId: "revision-1", bytes: first });
+    expect(() => stageFile({ root, sourceId: "source-1", revisionId: "revision-1", bytes: Buffer.from("second") })).toThrow();
+    expect(readFileSync(path.join(root, "source-1", "revision-1", "content"))).toEqual(first);
+  });
+
+  it("rejects an existing reparse-like path when realpath escapes its lexical path", () => {
+    const root = mkdtempSync(path.join(tmpdir(), "managed-"));
+    const outside = mkdtempSync(path.join(tmpdir(), "outside-"));
+    symlinkSync(outside, path.join(root, "source-1"), "junction");
+    expect(() => stageFile({ root, sourceId: "source-1", revisionId: "revision-1", bytes: Buffer.from("nope") })).toThrow(/reparse|symbolic link|symlink/i);
   });
 });
