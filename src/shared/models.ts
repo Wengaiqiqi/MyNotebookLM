@@ -21,6 +21,17 @@ export const modelTaskKindSchema = z.enum([
   "embedding"
 ]);
 
+export const embeddingDistanceSchema = z.literal("cosine");
+export const embeddingPoolingSchema = z.literal("mean");
+
+export const embeddingMetadataSchema = z.object({
+  dimension: z.number().int().positive(),
+  distance: embeddingDistanceSchema,
+  pooling: embeddingPoolingSchema,
+  normalized: z.boolean(),
+  preprocessingVersion: z.string().trim().min(1).max(100)
+}).strict();
+
 const modelProfileFieldsSchema = z.object({
   id: z.uuid(),
   name: z.string().trim().min(1).max(100),
@@ -69,6 +80,7 @@ export const modelRouteDtoSchema = z.object({
 export type ProviderKind = z.infer<typeof providerKindSchema>;
 export type ModelCapability = z.infer<typeof modelCapabilitySchema>;
 export type ModelTaskKind = z.infer<typeof modelTaskKindSchema>;
+export type EmbeddingMetadata = Readonly<z.infer<typeof embeddingMetadataSchema>>;
 export type ModelProfileInput = z.infer<typeof modelProfileInputSchema>;
 export type ModelProfileDto = z.infer<typeof modelProfileDtoSchema>;
 export type ModelRouteDto = z.infer<typeof modelRouteDtoSchema>;
