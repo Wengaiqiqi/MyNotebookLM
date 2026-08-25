@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8">
+<title>安全导入：分布式系统演进</title>
+<meta name="author" content="测试作者">
+</head>
+<body>
+<article>
+<h1>第一章 概览</h1>
+<p>本文介绍分布式系统的发展脉络及其对现代应用的约束。</p>
+<h2>1.1 一致性模型</h2>
+<p>一致性模型决定了副本之间何时可见写入，是系统设计的第一原则。</p>
+<p>线性一致性提供最强的可达性保证，但代价是更高的延迟。</p>
+<script>document.write('<p>恶意脚本</p>');</script>
+<style>.hidden{display:none}</style>
+<iframe src="https://tracker.example/track" width="1" height="1"></iframe>
+<img src="https://ads.example/pixel.gif">
+<form action="https://evil.example/collect"><input name="data"></form>
+<h2>1.2 一致性约束</h2>
+<p>当应用要求强一致时，必须优先选用可容忍分区但保持线性一致的系统。</p>
+</article>
+</body></html>
