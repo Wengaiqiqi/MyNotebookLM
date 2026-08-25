@@ -6,7 +6,7 @@ Packaging: intentionally not run
 
 ## Security correction
 
-- Added migration `003_credential_binding.sql`. Every credential row now carries a non-null provider and canonical base URL. Existing rows are backfilled from their persisted profile, including canonical root and trailing-slash addresses.
+- Added migration `003_credential_binding.sql`. Every new credential row carries a non-null provider and canonical base URL. Pre-003 ciphertext is discarded during upgrade because its historical endpoint cannot be proven; affected profiles report no credential until the user explicitly re-enters the key.
 - Credential replacement encryption completes before any database mutation. The profile update and prepared encrypted credential write then execute synchronously in one transaction on the shared SQLite connection.
 - Every stored-secret read compares the durable binding with both the persisted profile and the requested canonical connection before DPAPI decryption. A mismatch fails closed without decrypting or constructing a provider request.
 - The renderer contract remains unchanged: it receives only `hasCredential` and the fixed mask, never encrypted bytes or binding metadata.
@@ -17,6 +17,7 @@ Packaging: intentionally not run
 - Injected encryption failure leaves the old profile and old secret unchanged.
 - Injected credential `INSERT` failure rolls back the preceding profile update.
 - Reopening the database after the injected transaction failure preserves the old pair; a request for the attacker endpoint is rejected before provider construction.
+- An interrupted v2 state with an attacker endpoint and an old unbound ciphertext upgrades with `hasCredential: false`. The legacy bytes are never decrypted or sent, and an explicit post-upgrade replacement creates the first usable bound credential.
 - Endpoint/provider edits with a stored key and no replacement remain rejected. Name/model-only edits retain the existing credential.
 
 ## Keyless provider correction
@@ -28,7 +29,8 @@ Packaging: intentionally not run
 
 - Focused credential/model/settings/form suite: 14 files, 192 tests passed.
 - Gate A suite: 16 files, 220 tests passed.
-- Full Vitest suite: 25 files, 289 tests passed.
+- Round-two migration focus: 5 files, 55 tests passed.
+- Full Vitest suite: 26 files, 290 tests passed.
 - Strict TypeScript typecheck: passed.
 - Production Electron build: passed.
 - Electron E2E: 5 tests passed, including model/route persistence across restart.

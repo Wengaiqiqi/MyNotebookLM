@@ -120,7 +120,7 @@ describe("openAppDatabase", () => {
     connection.close();
   });
 
-  it("backfills durable bindings for credentials saved before migration 003", () => {
+  it("drops unbound credentials saved before migration 003", () => {
     writeFileSync(path.join(migrationsDir, "002_settings_models.sql"), settingsModelsMigration);
     const beforeBinding = openAppDatabase(databaseFile, migrationsDir);
     beforeBinding.connection.prepare(`
@@ -159,18 +159,9 @@ describe("openAppDatabase", () => {
 
     const migrated = openAppDatabase(databaseFile, migrationsDir);
     try {
-      expect(migrated.connection.prepare(`
-        SELECT provider, base_url FROM credentials WHERE profile_id = ?
-      `).get("11111111-1111-4111-8111-111111111111")).toEqual({
-        provider: "openai-compatible",
-        base_url: "https://models.example.test/v1"
-      });
-      expect(migrated.connection.prepare(`
-        SELECT provider, base_url FROM credentials WHERE profile_id = ?
-      `).get("22222222-2222-4222-8222-222222222222")).toEqual({
-        provider: "gemini",
-        base_url: "https://generativelanguage.googleapis.com/"
-      });
+      expect(migrated.connection.prepare(
+        "SELECT profile_id FROM credentials ORDER BY profile_id"
+      ).all()).toEqual([]);
     } finally {
       migrated.close();
     }
