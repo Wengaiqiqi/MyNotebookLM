@@ -1,0 +1,9 @@
+import type Database from "better-sqlite3";
+import type { PreparedChunk } from "../../workers/ingestion/types";
+export function throttleProgress(_taskId: string, emit: (value: number) => void, now = Date.now): (value: number) => void {
+  let window = -1, count = 0;
+  return (value) => { const current = Math.floor(now() / 1000); if (current !== window) { window = current; count = 0; } if (count++ < 10) emit(value); };
+}
+export function persistParsedResult(db: Database.Database, input: { revisionId: string; taskId: string; chunks: PreparedChunk[]; updatedAt: string }): void {
+  db.transaction(() => { const insert = db.prepare("INSERT INTO source_chunks(revision_id, ordinal, content_hash, text, locator_json) VALUES (?, ?, ?, ?, ?)"); for (const chunk of input.chunks) insert.run(input.revisionId, chunk.ordinal, chunk.contentHash, chunk.text, JSON.stringify(chunk.locator)); db.prepare("UPDATE source_revisions SET state = 'awaiting_embedding' WHERE id = ?").run(input.revisionId); db.prepare("UPDATE tasks SET stage = 'awaiting_embedding', state = 'running', progress_1000 = 1000, updated_at = ? WHERE id = ? AND state = 'running'").run(input.updatedAt, input.taskId); })();
+}
