@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { mkdtempSync, readFileSync, readdirSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, readdirSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { stageFile } from "./managed-files";
@@ -12,5 +12,27 @@ describe("managed files", () => {
     expect(path.dirname(result.path)).toBe(path.join(root, "source-1", "revision-1"));
     expect(readFileSync(result.path, "utf8")).toBe("hello");
     expect(readdirSync(path.join(root, "source-1", "revision-1"))).toHaveLength(1);
+  });
+
+  it("rejects a symlinked revision path before writing outside the root", () => {
+    const root = mkdtempSync(path.join(tmpdir(), "managed-"));
+    const outside = mkdtempSync(path.join(tmpdir(), "outside-"));
+    symlinkSync(outside, path.join(root, "source-1"), "junction");
+
+    expect(() => stageFile({ root, sourceId: "source-1", revisionId: "revision-1", bytes: Buffer.from("nope") }))
+      .toThrow(/reparse|symbolic link|symlink/i);
+    expect(readdirSync(outside)).toHaveLength(0);
+  });
+
+  it("removes the temporary file when the final destination cannot be replaced", () => {
+    const root = mkdtempSync(path.join(tmpdir(), "managed-"));
+    const dir = path.join(root, "source-1", "revision-1");
+    const finalPath = path.join(dir, "content");
+    mkdirSync(dir, { recursive: true });
+    mkdirSync(finalPath);
+
+    expect(() => stageFile({ root, sourceId: "source-1", revisionId: "revision-1", bytes: Buffer.from("new") }))
+      .toThrow();
+    expect(readdirSync(dir)).toEqual(["content"]);
   });
 });
