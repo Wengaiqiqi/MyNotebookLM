@@ -44,9 +44,11 @@ app.whenReady().then(async () => {
   const modelService = new ModelService(settingsRepository, credentialStore);
   cleanupProjectHandlers = registerProjectHandlers(ipcMain, projectService);
   cleanupModelHandlers = registerModelHandlers(ipcMain, modelService);
-  cleanupSourceHandlers = registerSourceHandlers(ipcMain, {
-    listSources: () => [], listTasks: () => []
-  });
+  if (typeof (ipcMain as { handle?: unknown }).handle === "function") {
+    cleanupSourceHandlers = registerSourceHandlers(ipcMain, {
+      listSources: () => [], listTasks: () => []
+    });
+  }
   cleanupTitleOverlayHandler = registerTitleOverlayHandler(ipcMain);
 
   Menu.setApplicationMenu(null);

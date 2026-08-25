@@ -6,6 +6,9 @@ function ipc() { const handlers = new Map<string, (...args: any[]) => any>(); re
 const projectId = "11111111-1111-4111-8111-111111111111";
 
 describe("source IPC handlers", () => {
+  it("does not read Electron dialog while registering when file selection is unused", () => {
+    expect(() => registerSourceHandlers(ipc() as any, { listSources: () => [], listTasks: () => [] } as any, undefined as any)).not.toThrow();
+  });
   it("rejects a token from another project and invalid retry", async () => {
     const bus = ipc();
     const service = { resolveDialogToken: vi.fn().mockReturnValue({ projectId: "other", path: "x.txt" }), retryTask: vi.fn() };

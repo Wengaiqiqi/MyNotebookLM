@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
-import { dialog, type IpcMain } from "electron";
+import * as electron from "electron";
+import type { IpcMain } from "electron";
 import { z } from "zod";
 import { SOURCE_CHANNELS } from "../../shared/ipc";
 import { sourceDtoSchema } from "../../shared/sources";
@@ -8,15 +9,15 @@ import { internalFailure, validationFailure } from "../../shared/app-errors";
 
 type Ipc = Pick<IpcMain, "handle" | "removeHandler">;
 type Service = { listSources(projectId: string): unknown[]; listTasks(projectId: string): unknown[]; importFile?: (x: { projectId: string; path: string }) => unknown; importUrl?: (x: { projectId: string; url: string }) => unknown; removeSource?: (x: { projectId: string; sourceId: string }) => unknown; retryTask?: (x: { projectId: string; sourceId: string }) => unknown; cancelTask?: (x: { projectId: string; taskId: string }) => unknown; };
-type Dialog = Pick<typeof dialog, "showOpenDialog">;
+type Dialog = Pick<typeof electron.dialog, "showOpenDialog">;
 const project = z.object({ projectId: z.uuid() }).strict();
 const token = z.object({ projectId: z.uuid(), dialogToken: z.string().trim().min(1) }).strict();
 const source = z.object({ projectId: z.uuid(), sourceId: z.uuid() }).strict();
 const task = z.object({ projectId: z.uuid(), taskId: z.uuid() }).strict();
-export function registerSourceHandlers(ipc: Ipc, service: Service, dialogs: Dialog = dialog): () => void {
+export function registerSourceHandlers(ipc: Ipc, service: Service, dialogs?: Dialog): () => void {
   const tokens = new Map<string, { projectId: string; path: string }>();
   const safe = (schema: z.ZodType, call: (input: any) => unknown, input: unknown) => { const parsed = schema.safeParse(input); if (!parsed.success) return validationFailure(); try { const value = call(parsed.data); return { ok: true as const, value }; } catch { return internalFailure(); } };
-  ipc.handle(SOURCE_CHANNELS.chooseFiles, async (_event, input) => { const parsed = project.safeParse(input); if (!parsed.success) return null; const picked = await dialogs.showOpenDialog({ properties: ["openFile", "multiSelections"] }); if (picked.canceled) return null; return picked.filePaths.map((path) => { const dialogToken = randomUUID(); tokens.set(dialogToken, { projectId: parsed.data.projectId, path }); return dialogToken; }); });
+  ipc.handle(SOURCE_CHANNELS.chooseFiles, async (_event, input) => { const parsed = project.safeParse(input); if (!parsed.success) return null; const picked = await (dialogs ?? electron.dialog).showOpenDialog({ properties: ["openFile", "multiSelections"] }); if (picked.canceled) return null; return picked.filePaths.map((path) => { const dialogToken = randomUUID(); tokens.set(dialogToken, { projectId: parsed.data.projectId, path }); return dialogToken; }); });
   ipc.handle(SOURCE_CHANNELS.importFile, (_event, input) => safe(token, (value) => { const entry = tokens.get(value.dialogToken); if (!entry || entry.projectId !== value.projectId) return validationFailure(); tokens.delete(value.dialogToken); return service.importFile?.({ projectId: value.projectId, path: entry.path }); }, input));
   ipc.handle(SOURCE_CHANNELS.importUrl, (_event, input) => safe(z.object({ projectId: z.uuid(), url: z.url() }).strict(), (value) => service.importUrl?.(value), input));
   ipc.handle(SOURCE_CHANNELS.list, (_event, input) => { const value = project.parse(input); return z.array(sourceDtoSchema).parse(service.listSources(value.projectId)); });
