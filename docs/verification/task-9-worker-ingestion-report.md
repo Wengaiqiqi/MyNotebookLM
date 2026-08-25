@@ -4,18 +4,19 @@
 
 - 增加版本号为 1 的 worker start/cancel 协议校验与默认并发计算。
 - 增加 worker entry，复用现有文本、Markdown、CSV parser 和 chunker。
-- 增加 worker pool：5 秒硬终止、取消转发、异常后释放 worker。
+- 增加真实 WorkerPool 生命周期：并发槽位与 FIFO 排队、worker 工厂边界、5 秒硬终止、监听器/worker 清理、异常/exit 释放槽位。
+- 完整校验 version/type/taskId/chunks result schema；取消在 worker 端标记并丢弃竞态结果。
 - 增加进度节流（每 task 每秒最多 10 次）。
-- 增加解析结果的单事务写入：chunks、revision 状态和 task running/awaiting_embedding 同步更新。
+- 增加 IngestionService 调用链：service 启动共享 WorkerPool，只有成功结果才进入 chunks/revision/task 单事务；worker 失败或取消不写入。
 - 增加 Vite worker bundle 入口。
 
 ## 验证
 
-- RED：新增测试在实现前因目标模块不存在而失败。
-- GREEN：Task 9 聚焦测试通过，2 个测试文件、3 个测试全部通过。
-- git diff --check 通过（仅报告换行转换提示）。
-- npm run typecheck 的剩余失败来自预先存在的 Task 10 文件缺失：src/main/ipc/register-source-handlers.test.ts 引用尚未实现的 register-source-handlers 与 SOURCE_CHANNELS；Task 9 文件无类型错误。
+- RED：先运行新增 WorkerPool 生命周期测试，旧实现直接 new Worker，无法提供排队/可控槽位/完整 schema seam，测试失败；随后实现 GREEN。
+- GREEN：Task 9 聚焦测试：2 文件、6 测试通过。
+- 相关全量：19 文件、140 测试通过；全量：45 文件、434 测试通过。
+- npm run typecheck 通过；npm run build 通过，并生成 out/main/ingestionWorker.js。
 
 ## 范围
 
-只修改了 Task 9 指定源码、Vite 配置和本报告；未修改 Task 10 文件，也未执行 reset/checkout。
+工作树：D:\fix\mynotebokklm\.worktrees\desktop-foundation。保留了已有无关改动；未修改 Task 10 IPC 文件，也未执行 reset/checkout。
