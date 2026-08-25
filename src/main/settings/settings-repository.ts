@@ -16,6 +16,10 @@ import {
   type AppSettingsDto,
   type UpdateAppSettingsInput
 } from "../../shared/settings";
+import {
+  BUILT_IN_LOCAL_EMBEDDING_PROFILE,
+  isBuiltInLocalEmbeddingProfile
+} from "../models/local-embedding-profile";
 
 type SettingsRow = {
   onboarding_completed: 0 | 1;
@@ -162,6 +166,12 @@ export class SettingsRepository {
       : "generation";
 
     this.db.transaction(() => {
+      if (profileIds.some(isBuiltInLocalEmbeddingProfile)
+        && !this.getProfile(BUILT_IN_LOCAL_EMBEDDING_PROFILE.id)) {
+        const { id, name, provider, capability, baseUrl, modelId, enabled } =
+          BUILT_IN_LOCAL_EMBEDDING_PROFILE;
+        this.saveProfile({ id, name, provider, capability, baseUrl, modelId, enabled });
+      }
       const profiles = profileIds.map((id) => this.getProfile(id));
       if (profiles.some((profile) => !profile)) throw new Error("Route profile not found");
       if (profiles.some((profile) => profile!.capability !== requiredCapability)) {

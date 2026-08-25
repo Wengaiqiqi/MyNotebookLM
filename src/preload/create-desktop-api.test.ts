@@ -1,5 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
-import { PROJECT_CHANNELS, type DesktopApi } from "../shared/ipc";
+import {
+  CREDENTIAL_CHANNELS,
+  MODEL_CHANNELS,
+  PROJECT_CHANNELS,
+  SETTINGS_CHANNELS,
+  type DesktopApi
+} from "../shared/ipc";
 import { createDesktopApi } from "./create-desktop-api";
 
 const project = {
@@ -11,13 +17,153 @@ const project = {
 };
 
 const projectId = { id: project.id };
+const profile = {
+  id: "11111111-1111-4111-8111-111111111111",
+  name: "Primary",
+  provider: "openai" as const,
+  capability: "generation" as const,
+  baseUrl: "https://api.openai.com/v1",
+  modelId: "gpt-test",
+  enabled: true
+};
+const profileDto = {
+  ...profile,
+  createdAt: "2026-08-25T00:00:00.000Z",
+  updatedAt: "2026-08-25T00:00:00.000Z"
+};
+const credentialStatus = { profileId: profile.id, hasCredential: true, mask: "••••••••" };
+
+function ok<T>(value: T) {
+  return { ok: true as const, value };
+}
 
 describe("createDesktopApi", () => {
-  it("exposes only named project commands", () => {
+  it("preserves project commands while exposing only the named model settings groups", () => {
     const api = createDesktopApi({ invoke: vi.fn() });
 
-    expect(Object.keys(api)).toEqual(["projects"]);
+    expect(Object.keys(api)).toEqual(["projects", "settings", "models", "credentials"]);
     expect(Object.keys(api.projects)).toEqual(["list", "create", "rename", "archive", "remove"]);
+    expect(Object.keys(api.settings)).toEqual(["get", "update"]);
+    expect(Object.keys(api.models)).toEqual([
+      "listProfiles",
+      "saveProfile",
+      "deleteProfile",
+      "discover",
+      "test"
+    ]);
+    expect(Object.keys(api.credentials)).toEqual(["set", "remove"]);
+  });
+
+  it("routes all model settings commands through versioned channels", async () => {
+    const settings = { onboardingCompleted: false, locale: "zh-CN" as const, theme: "light" as const };
+    const profileList = {
+      profiles: [profileDto],
+      builtInProfiles: [],
+      credentials: [credentialStatus]
+    };
+    const descriptors = [{ id: "gpt-test", displayName: "GPT Test", capabilities: ["generation" as const] }];
+    const invoke = vi.fn()
+      .mockResolvedValueOnce(ok(settings))
+      .mockResolvedValueOnce(ok({ ...settings, theme: "dark" as const }))
+      .mockResolvedValueOnce(ok(profileList))
+      .mockResolvedValueOnce(ok(profileDto))
+      .mockResolvedValueOnce(ok(undefined))
+      .mockResolvedValueOnce(ok(descriptors))
+      .mockResolvedValueOnce(ok({
+        modelId: profile.modelId,
+        capability: profile.capability,
+        verifiedBy: "discovery" as const
+      }))
+      .mockResolvedValueOnce(ok(credentialStatus))
+      .mockResolvedValueOnce(ok({ profileId: profile.id, hasCredential: false }));
+    const api = createDesktopApi({ invoke });
+    const discoveryInput = {
+      profileId: profile.id,
+      provider: profile.provider,
+      capability: profile.capability,
+      baseUrl: profile.baseUrl
+    };
+
+    await api.settings.get();
+    await api.settings.update({ theme: "dark" });
+    await api.models.listProfiles();
+    await api.models.saveProfile({ profile, apiKey: "secret" });
+    await api.models.deleteProfile({ id: profile.id });
+    await api.models.discover(discoveryInput);
+    await api.models.test({ profile });
+    await api.credentials.set({ profileId: profile.id, apiKey: "secret" });
+    await api.credentials.remove({ profileId: profile.id });
+
+    expect(invoke).toHaveBeenNthCalledWith(1, SETTINGS_CHANNELS.get);
+    expect(invoke).toHaveBeenNthCalledWith(2, SETTINGS_CHANNELS.update, { theme: "dark" });
+    expect(invoke).toHaveBeenNthCalledWith(3, MODEL_CHANNELS.listProfiles);
+    expect(invoke).toHaveBeenNthCalledWith(4, MODEL_CHANNELS.saveProfile, { profile, apiKey: "secret" });
+    expect(invoke).toHaveBeenNthCalledWith(5, MODEL_CHANNELS.deleteProfile, { id: profile.id });
+    expect(invoke).toHaveBeenNthCalledWith(6, MODEL_CHANNELS.discover, discoveryInput);
+    expect(invoke).toHaveBeenNthCalledWith(7, MODEL_CHANNELS.test, { profile });
+    expect(invoke).toHaveBeenNthCalledWith(8, CREDENTIAL_CHANNELS.set, {
+      profileId: profile.id,
+      apiKey: "secret"
+    });
+    expect(invoke).toHaveBeenNthCalledWith(9, CREDENTIAL_CHANNELS.remove, {
+      profileId: profile.id
+    });
+  });
+
+  it.each([
+    ["settings update", (api: DesktopApi) => api.settings.update({} as never)],
+    ["profile save", (api: DesktopApi) => api.models.saveProfile({ profile: { ...profile, name: "" } })],
+    ["oversized profile address", (api: DesktopApi) => api.models.saveProfile({
+      profile: { ...profile, baseUrl: `https://${"a".repeat(2_049)}.test` }
+    })],
+    ["profile delete", (api: DesktopApi) => api.models.deleteProfile({ id: "not-a-uuid" })],
+    ["discovery", (api: DesktopApi) => api.models.discover({
+      provider: "openai",
+      capability: "generation",
+      baseUrl: "http://localhost:1234"
+    })],
+    ["model test", (api: DesktopApi) => api.models.test({ profile: { ...profile, modelId: "" } })],
+    ["credential set", (api: DesktopApi) => api.credentials.set({ profileId: profile.id, apiKey: " " })],
+    ["credential remove", (api: DesktopApi) => api.credentials.remove({ profileId: "not-a-uuid" })]
+  ])("rejects invalid %s input before IPC", async (_command, call) => {
+    const invoke = vi.fn();
+
+    await expect(call(createDesktopApi({ invoke }))).rejects.toThrow();
+    expect(invoke).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["settings get", (api: DesktopApi) => api.settings.get()],
+    ["settings update", (api: DesktopApi) => api.settings.update({ theme: "dark" })],
+    ["profile list", (api: DesktopApi) => api.models.listProfiles()],
+    ["profile save", (api: DesktopApi) => api.models.saveProfile({ profile })],
+    ["profile delete", (api: DesktopApi) => api.models.deleteProfile({ id: profile.id })],
+    ["discovery", (api: DesktopApi) => api.models.discover({
+      provider: profile.provider,
+      capability: profile.capability,
+      baseUrl: profile.baseUrl
+    })],
+    ["model test", (api: DesktopApi) => api.models.test({ profile })],
+    ["credential set", (api: DesktopApi) => api.credentials.set({ profileId: profile.id, apiKey: "secret" })],
+    ["credential remove", (api: DesktopApi) => api.credentials.remove({ profileId: profile.id })]
+  ])("rejects malformed %s IPC results", async (_command, call) => {
+    const invoke = vi.fn().mockResolvedValue({ ok: true, value: { unexpected: true } });
+
+    await expect(call(createDesktopApi({ invoke }))).rejects.toThrow();
+  });
+
+  it("accepts a strictly validated application error result", async () => {
+    const failure = {
+      ok: false as const,
+      error: { code: "AUTH" as const, messageKey: "errors.authentication", recoverable: false }
+    };
+    const api = createDesktopApi({ invoke: vi.fn().mockResolvedValue(failure) });
+
+    await expect(api.models.discover({
+      provider: profile.provider,
+      capability: profile.capability,
+      baseUrl: profile.baseUrl
+    })).resolves.toEqual(failure);
   });
 
   it("routes every project command through its selected channel", async () => {

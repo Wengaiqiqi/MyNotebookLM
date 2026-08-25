@@ -32,3 +32,10 @@ export type AppErrorDto = z.infer<typeof appErrorDtoSchema>;
 export type Result<T> =
   | { ok: true; value: T }
   | { ok: false; error: AppErrorDto };
+
+export function resultSchema<T extends z.ZodType>(valueSchema: T) {
+  return z.discriminatedUnion("ok", [
+    z.object({ ok: z.literal(true), value: valueSchema }).strict(),
+    z.object({ ok: z.literal(false), error: appErrorDtoSchema }).strict()
+  ]);
+}

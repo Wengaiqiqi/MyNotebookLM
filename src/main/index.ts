@@ -5,14 +5,17 @@ import { type AppDatabase, openAppDatabase } from "./db/database";
 import { CredentialStore } from "./credentials/credential-store";
 import { SafeStorageAdapter } from "./credentials/safe-storage-adapter";
 import { registerProjectHandlers } from "./ipc/register-project-handlers";
+import { registerModelHandlers } from "./ipc/register-model-handlers";
+import { ModelService } from "./models/model-service";
 import { getAppPaths } from "./platform/paths";
 import { ProjectRepository } from "./projects/project-repository";
 import { ProjectService } from "./projects/project-service";
+import { SettingsRepository } from "./settings/settings-repository";
 import { createMainWindow } from "./window";
 
 let appDatabase: AppDatabase | undefined;
 let cleanupProjectHandlers: (() => void) | undefined;
-let credentialStore: CredentialStore | undefined;
+let cleanupModelHandlers: (() => void) | undefined;
 
 const testUserDataDir = process.env["MYNOTEBOOKLM_USER_DATA_DIR"];
 if (process.env["NODE_ENV"] === "test" && testUserDataDir) {
@@ -33,8 +36,11 @@ app.whenReady().then(async () => {
   appDatabase = openAppDatabase(appPaths.database, migrationsDir);
   const projectRepository = new ProjectRepository(appDatabase.connection);
   const projectService = new ProjectService(projectRepository);
-  credentialStore = new CredentialStore(appDatabase.connection, new SafeStorageAdapter());
+  const settingsRepository = new SettingsRepository(appDatabase.connection);
+  const credentialStore = new CredentialStore(appDatabase.connection, new SafeStorageAdapter());
+  const modelService = new ModelService(settingsRepository, credentialStore);
   cleanupProjectHandlers = registerProjectHandlers(ipcMain, projectService);
+  cleanupModelHandlers = registerModelHandlers(ipcMain, modelService);
 
   Menu.setApplicationMenu(null);
   createMainWindow();
@@ -47,7 +53,8 @@ app.whenReady().then(async () => {
 app.on("before-quit", () => {
   cleanupProjectHandlers?.();
   cleanupProjectHandlers = undefined;
-  credentialStore = undefined;
+  cleanupModelHandlers?.();
+  cleanupModelHandlers = undefined;
   appDatabase?.close();
   appDatabase = undefined;
 });

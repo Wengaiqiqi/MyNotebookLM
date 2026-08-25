@@ -5,6 +5,9 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { openAppDatabase, type AppDatabase } from "../db/database";
 import { modelProfileInputSchema } from "../../shared/models";
 import { SettingsRepository } from "./settings-repository";
+import {
+  BUILT_IN_LOCAL_EMBEDDING_PROFILE_ID
+} from "../models/local-embedding-profile";
 
 const GENERATION_ID = "11111111-1111-4111-8111-111111111111";
 const FALLBACK_ID = "22222222-2222-4222-8222-222222222222";
@@ -126,6 +129,16 @@ describe("SettingsRepository", () => {
 
     expect(() => repository.replaceRoute("embedding", [GENERATION_ID])).toThrow(/capability/i);
     expect(repository.getRoute("embedding")).toEqual([]);
+  });
+
+  it("allows the built-in local model to be selected as the embedding route", () => {
+    expect(repository.replaceRoute("embedding", [
+      BUILT_IN_LOCAL_EMBEDDING_PROFILE_ID
+    ])).toEqual([{
+      taskKind: "embedding",
+      position: 0,
+      profileId: BUILT_IN_LOCAL_EMBEDDING_PROFILE_ID
+    }]);
   });
 
   it.each([

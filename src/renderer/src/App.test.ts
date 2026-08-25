@@ -55,6 +55,33 @@ function createApi(projects: ProjectDto[] = []): ApiDouble {
         rename,
         archive,
         remove: vi.fn<DesktopApi["projects"]["remove"]>().mockResolvedValue(undefined)
+      },
+      settings: {
+        get: vi.fn<DesktopApi["settings"]["get"]>().mockResolvedValue({
+          ok: true,
+          value: { onboardingCompleted: false, locale: "en", theme: "light" }
+        }),
+        update: vi.fn<DesktopApi["settings"]["update"]>().mockResolvedValue({
+          ok: true,
+          value: { onboardingCompleted: false, locale: "en", theme: "light" }
+        })
+      },
+      models: {
+        listProfiles: vi.fn<DesktopApi["models"]["listProfiles"]>().mockResolvedValue({
+          ok: true,
+          value: { profiles: [], builtInProfiles: [], credentials: [] }
+        }),
+        saveProfile: vi.fn<DesktopApi["models"]["saveProfile"]>(),
+        deleteProfile: vi.fn<DesktopApi["models"]["deleteProfile"]>(),
+        discover: vi.fn<DesktopApi["models"]["discover"]>().mockResolvedValue({
+          ok: true,
+          value: []
+        }),
+        test: vi.fn<DesktopApi["models"]["test"]>()
+      },
+      credentials: {
+        set: vi.fn<DesktopApi["credentials"]["set"]>(),
+        remove: vi.fn<DesktopApi["credentials"]["remove"]>()
       }
     }
   };

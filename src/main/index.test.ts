@@ -9,7 +9,8 @@ const mocks = vi.hoisted(() => {
   const connection = {};
   const ipcMain = {};
   const close = vi.fn(() => events.push("close"));
-  const cleanup = vi.fn(() => events.push("cleanup"));
+  const cleanupProject = vi.fn(() => events.push("project-cleanup"));
+  const cleanupModel = vi.fn(() => events.push("model-cleanup"));
 
   return {
     events,
@@ -17,7 +18,8 @@ const mocks = vi.hoisted(() => {
     connection,
     ipcMain,
     close,
-    cleanup,
+    cleanupProject,
+    cleanupModel,
     app: {
       isPackaged: false,
       whenReady: vi.fn(() => Promise.resolve()),
@@ -50,6 +52,10 @@ const mocks = vi.hoisted(() => {
       events.push("service");
       this.repository = repository;
     }),
+    SettingsRepository: vi.fn(function (this: Record<string, unknown>, db: unknown) {
+      events.push("settings-repository");
+      this.db = db;
+    }),
     SafeStorageAdapter: vi.fn(function (this: Record<string, unknown>) {
       events.push("protector");
     }),
@@ -58,9 +64,22 @@ const mocks = vi.hoisted(() => {
       this.db = db;
       this.protector = protector;
     }),
+    ModelService: vi.fn(function (
+      this: Record<string, unknown>,
+      settings: unknown,
+      credentials: unknown
+    ) {
+      events.push("model-service");
+      this.settings = settings;
+      this.credentials = credentials;
+    }),
     registerProjectHandlers: vi.fn(() => {
-      events.push("handlers");
-      return cleanup;
+      events.push("project-handlers");
+      return cleanupProject;
+    }),
+    registerModelHandlers: vi.fn(() => {
+      events.push("model-handlers");
+      return cleanupModel;
     }),
     createMainWindow: vi.fn(() => {
       events.push("window");
@@ -81,12 +100,19 @@ vi.mock("./projects/project-repository", () => ({
   ProjectRepository: mocks.ProjectRepository
 }));
 vi.mock("./projects/project-service", () => ({ ProjectService: mocks.ProjectService }));
+vi.mock("./settings/settings-repository", () => ({
+  SettingsRepository: mocks.SettingsRepository
+}));
 vi.mock("./credentials/safe-storage-adapter", () => ({
   SafeStorageAdapter: mocks.SafeStorageAdapter
 }));
 vi.mock("./credentials/credential-store", () => ({ CredentialStore: mocks.CredentialStore }));
+vi.mock("./models/model-service", () => ({ ModelService: mocks.ModelService }));
 vi.mock("./ipc/register-project-handlers", () => ({
   registerProjectHandlers: mocks.registerProjectHandlers
+}));
+vi.mock("./ipc/register-model-handlers", () => ({
+  registerModelHandlers: mocks.registerModelHandlers
 }));
 vi.mock("./window", () => ({ createMainWindow: mocks.createMainWindow }));
 
@@ -131,9 +157,12 @@ describe("main application composition", () => {
       "database",
       "repository",
       "service",
+      "settings-repository",
       "protector",
       "credentials",
-      "handlers",
+      "model-service",
+      "project-handlers",
+      "model-handlers",
       "menu",
       "window"
     ]);
@@ -159,10 +188,22 @@ describe("main application composition", () => {
       mocks.connection,
       mocks.SafeStorageAdapter.mock.instances[0]
     );
+    expect(mocks.SettingsRepository).toHaveBeenCalledOnce();
+    expect(mocks.SettingsRepository).toHaveBeenCalledWith(mocks.connection);
+    expect(mocks.ModelService).toHaveBeenCalledOnce();
+    expect(mocks.ModelService).toHaveBeenCalledWith(
+      mocks.SettingsRepository.mock.instances[0],
+      mocks.CredentialStore.mock.instances[0]
+    );
     expect(mocks.registerProjectHandlers).toHaveBeenCalledOnce();
     expect(mocks.registerProjectHandlers).toHaveBeenCalledWith(
       mocks.ipcMain,
       mocks.ProjectService.mock.instances[0]
+    );
+    expect(mocks.registerModelHandlers).toHaveBeenCalledOnce();
+    expect(mocks.registerModelHandlers).toHaveBeenCalledWith(
+      mocks.ipcMain,
+      mocks.ModelService.mock.instances[0]
     );
 
     mocks.callbacks.get("activate")?.();
@@ -171,7 +212,11 @@ describe("main application composition", () => {
     expect(mocks.ProjectService).toHaveBeenCalledOnce();
 
     mocks.callbacks.get("before-quit")?.();
-    expect(mocks.events.slice(-2)).toEqual(["cleanup", "close"]);
+    expect(mocks.events.slice(-3)).toEqual([
+      "project-cleanup",
+      "model-cleanup",
+      "close"
+    ]);
 
     mocks.callbacks.get("window-all-closed")?.();
     expect(mocks.app.quit).toHaveBeenCalledOnce();
