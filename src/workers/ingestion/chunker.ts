@@ -97,15 +97,17 @@ interface Fragment {
 
 function toFragments(block: DocumentBlock, targetTokens: number): Fragment[] {
   if (block.kind === "heading") {
-    return [
-      {
-        block,
-        text: block.text,
-        tokens: estimateTokens(block.text),
-        isHeading: block.kind === "heading",
-        isAtomic: true
-      }
-    ];
+    const tokens = estimateTokens(block.text);
+    if (tokens <= targetTokens) {
+      return [{ block, text: block.text, tokens, isHeading: true, isAtomic: true }];
+    }
+    return splitByTokens(block.text, targetTokens).map((piece) => ({
+      block,
+      text: piece,
+      tokens: estimateTokens(piece),
+      isHeading: true,
+      isAtomic: true
+    }));
   }
   const isAtomic = block.kind === "table";
   const sentences = splitSentences(block.text);
@@ -234,9 +236,26 @@ export function chunkBlocks(
       flush();
       continue;
     }
-    if (state.fragments.length > 0 && state.tokens + fragment.tokens > targetTokens) {
+    const prefixTokens = activeHeading ? estimateTokens(activeHeading.text) : 0;
+    const budget = targetTokens - prefixTokens;
+    if (state.fragments.length > 0 && state.tokens + fragment.tokens > budget) {
       flush();
       startOverlap();
+    }
+    const remaining = budget - state.tokens;
+    if (fragment.tokens > remaining) {
+      for (const piece of splitByTokens(fragment.text, remaining)) {
+        const pieceTokens = estimateTokens(piece);
+        if (state.fragments.length > 0 && state.tokens + pieceTokens > budget) {
+          flush();
+          startOverlap();
+        }
+        if (state.fragments.length === 0) state.firstLocator = fragment.block.locator;
+        state.fragments.push({ ...fragment, text: piece, tokens: pieceTokens });
+        state.tokens += pieceTokens;
+        state.lastLocator = fragment.block.locator;
+      }
+      continue;
     }
     if (state.fragments.length === 0) state.firstLocator = fragment.block.locator;
     state.fragments.push(fragment);

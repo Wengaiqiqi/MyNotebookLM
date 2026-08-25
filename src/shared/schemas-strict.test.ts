@@ -88,5 +88,20 @@ describe("shared DTO schemas", () => {
       kind: "page",
       page: 0
     })).toThrow();
+    expect(() => sourceLocatorSchema.parse({
+      kind: "page",
+      page: 3,
+      endPage: 2
+    })).toThrow();
+    expect(() => sourceLocatorSchema.parse({
+      kind: "slide",
+      slide: 4,
+      endSlide: 3
+    })).toThrow();
+    expect(() => sourceLocatorSchema.parse({
+      kind: "paragraph",
+      paragraph: 2,
+      endParagraph: 1
+    })).toThrow();
   });
 });

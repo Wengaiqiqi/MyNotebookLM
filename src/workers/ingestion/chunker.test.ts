@@ -277,3 +277,28 @@ describe("chunkBlocks numeric locator ranges", () => {
     expect(chunks[0]?.locator).toEqual({ kind: "slide", slide: 1, endSlide: 2 });
   });
 });
+describe("chunkBlocks heading context respects token budget", () => {
+  it("counts the active heading prefix toward the chunk token target", () => {
+    const headingText = Array.from({ length: 500 }, () => "头").join("");
+    const paragraphText = Array.from({ length: 500 }, () => "字").join("");
+    const blocks: DocumentBlock[] = [
+      { kind: "heading", text: headingText, locator: { kind: "heading", depth: 1, headingPath: headingText } },
+      { kind: "paragraph", text: paragraphText, locator: { kind: "paragraph", paragraph: 1 } }
+    ];
+    const chunks = chunkBlocks(blocks);
+    expect(chunks.every((c) => c.tokenEstimate <= 900)).toBe(true);
+  });
+});
+
+describe("chunkBlocks over-limit heading", () => {
+  it("splits an over-limit heading at the token target while keeping heading semantics", () => {
+    const headingText = Array.from({ length: 1200 }, () => "标").join("");
+    const blocks: DocumentBlock[] = [
+      { kind: "heading", text: headingText, locator: { kind: "heading", depth: 1, headingPath: headingText } }
+    ];
+    const chunks = chunkBlocks(blocks);
+    expect(chunks.length).toBeGreaterThan(1);
+    expect(chunks.every((c) => c.tokenEstimate <= 900)).toBe(true);
+    expect(chunks.every((c) => c.text.trim().length > 0)).toBe(true);
+  });
+});
