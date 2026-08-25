@@ -10,6 +10,7 @@ import {
   MODEL_CHANNELS,
   PROJECT_CHANNELS,
   SETTINGS_CHANNELS,
+  TITLE_OVERLAY_CHANNELS,
   type DesktopApi
 } from "../shared/ipc";
 import {
@@ -33,6 +34,7 @@ import {
 } from "../shared/projects";
 import {
   appSettingsDtoSchema,
+  appThemeSchema,
   updateAppSettingsInputSchema
 } from "../shared/settings";
 
@@ -48,6 +50,8 @@ const deleteProfileResultSchema = resultSchema(z.undefined());
 const discoveryResultSchema = resultSchema(modelDescriptorSchema.array());
 const modelTestResultSchema = resultSchema(modelTestResultDtoSchema);
 const credentialResultSchema = resultSchema(credentialStatusDtoSchema);
+const titleOverlayInputSchema = z.object({ theme: appThemeSchema }).strict();
+const titleOverlayResultSchema = resultSchema(z.undefined());
 
 async function invokeResult<I, O>(
   ipc: IpcInvoker,
@@ -142,6 +146,15 @@ export function createDesktopApi(ipc: IpcInvoker): DesktopApi {
         CREDENTIAL_CHANNELS.remove,
         credentialProfileInputSchema,
         credentialResultSchema,
+        input
+      )
+    },
+    titleOverlay: {
+      setTheme: (input) => invokeResult(
+        ipc,
+        TITLE_OVERLAY_CHANNELS.setTheme,
+        titleOverlayInputSchema,
+        titleOverlayResultSchema,
         input
       )
     }

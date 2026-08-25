@@ -11,6 +11,7 @@ const mocks = vi.hoisted(() => {
   const close = vi.fn(() => events.push("close"));
   const cleanupProject = vi.fn(() => events.push("project-cleanup"));
   const cleanupModel = vi.fn(() => events.push("model-cleanup"));
+  const cleanupTitleOverlay = vi.fn(() => events.push("title-overlay-cleanup"));
 
   return {
     events,
@@ -20,6 +21,7 @@ const mocks = vi.hoisted(() => {
     close,
     cleanupProject,
     cleanupModel,
+    cleanupTitleOverlay,
     app: {
       isPackaged: false,
       whenReady: vi.fn(() => Promise.resolve()),
@@ -81,6 +83,10 @@ const mocks = vi.hoisted(() => {
       events.push("model-handlers");
       return cleanupModel;
     }),
+    registerTitleOverlayHandler: vi.fn(() => {
+      events.push("title-overlay-handlers");
+      return cleanupTitleOverlay;
+    }),
     createMainWindow: vi.fn(() => {
       events.push("window");
     })
@@ -114,7 +120,10 @@ vi.mock("./ipc/register-project-handlers", () => ({
 vi.mock("./ipc/register-model-handlers", () => ({
   registerModelHandlers: mocks.registerModelHandlers
 }));
-vi.mock("./window", () => ({ createMainWindow: mocks.createMainWindow }));
+vi.mock("./window", () => ({
+  createMainWindow: mocks.createMainWindow,
+  registerTitleOverlayHandler: mocks.registerTitleOverlayHandler
+}));
 
 describe("main application composition", () => {
   beforeEach(() => {
@@ -163,6 +172,7 @@ describe("main application composition", () => {
       "model-service",
       "project-handlers",
       "model-handlers",
+      "title-overlay-handlers",
       "menu",
       "window"
     ]);
@@ -205,6 +215,7 @@ describe("main application composition", () => {
       mocks.ipcMain,
       mocks.ModelService.mock.instances[0]
     );
+    expect(mocks.registerTitleOverlayHandler).toHaveBeenCalledExactlyOnceWith(mocks.ipcMain);
 
     mocks.callbacks.get("activate")?.();
     expect(mocks.createMainWindow).toHaveBeenCalledTimes(2);
@@ -212,9 +223,10 @@ describe("main application composition", () => {
     expect(mocks.ProjectService).toHaveBeenCalledOnce();
 
     mocks.callbacks.get("before-quit")?.();
-    expect(mocks.events.slice(-3)).toEqual([
+    expect(mocks.events.slice(-4)).toEqual([
       "project-cleanup",
       "model-cleanup",
+      "title-overlay-cleanup",
       "close"
     ]);
 

@@ -349,6 +349,7 @@ export default function App() {
   function selectTheme(next: AppTheme): void {
     setTheme(next);
     changeTheme(next);
+    void window.myNotebook.titleOverlay.setTheme({ theme: next });
   }
 
   function toggleProjectMenu(projectId: string, trigger: HTMLButtonElement): void {
@@ -368,14 +369,14 @@ export default function App() {
     <>
     <div className="app-shell" inert={dialog ? true : undefined} aria-hidden={dialog ? true : undefined}>
       <aside className="sidebar">
-        <div className="brand">
+        <div className="brand title-drag-region">
           <span className="brand-mark" aria-hidden="true">M</span>
           <span>{t("app.name")}</span>
         </div>
 
         <nav className="project-nav" aria-label={t("project.title")}>
           <h1>{t("project.title")}</h1>
-          <button className="primary-button create-button" type="button" disabled={busy} onClick={(event) => openCreateDialog(event.currentTarget)}>
+          <button className="primary-button create-button title-no-drag" type="button" disabled={busy} onClick={(event) => openCreateDialog(event.currentTarget)}>
             <span aria-hidden="true">＋</span>{t("project.create")}
           </button>
 
@@ -445,7 +446,7 @@ export default function App() {
       </aside>
 
       <main className="workspace">
-        <header className="workspace-header">
+        <header className="workspace-header title-drag-region">
           <div>
             <span className="eyebrow">{t("app.name")}</span>
             <h2>{selectedProject?.name ?? t("project.emptyTitle")}</h2>
@@ -539,7 +540,7 @@ export default function App() {
         document.body
       )}
 
-      {dialog && (
+      {dialog && createPortal(
         <div
           className="dialog-layer"
           onMouseDown={(event) => {
@@ -593,7 +594,7 @@ export default function App() {
             )}
           </section>
         </div>
-      )}
+      , document.body)}
     </>
   );
 }

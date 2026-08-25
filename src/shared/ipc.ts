@@ -14,6 +14,7 @@ import type {
   TestModelInput
 } from "./models";
 import type { AppSettingsDto, UpdateAppSettingsInput } from "./settings";
+import type { AppTheme } from "./settings";
 
 export const PROJECT_CHANNELS = {
   list: "projects:list",
@@ -41,6 +42,10 @@ export const CREDENTIAL_CHANNELS = {
   remove: "credentials:v1:remove"
 } as const;
 
+export const TITLE_OVERLAY_CHANNELS = {
+  setTheme: "window:v1:set-title-overlay"
+} as const;
+
 export interface DesktopApi {
   projects: {
     list(): Promise<ProjectDto[]>;
@@ -63,5 +68,8 @@ export interface DesktopApi {
   credentials: {
     set(input: CredentialInput): Promise<Result<CredentialStatusDto>>;
     remove(input: CredentialProfileInput): Promise<Result<CredentialStatusDto>>;
+  };
+  titleOverlay: {
+    setTheme(input: { theme: AppTheme }): Promise<Result<void>>;
   };
 }

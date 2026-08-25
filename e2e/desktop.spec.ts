@@ -46,3 +46,32 @@ test("persists a project across desktop restarts", async ({}, testInfo) => {
     await second.app.close();
   }
 });
+
+test("centers dialogs in the full viewport before and after resizing", async ({}, testInfo) => {
+  const userDataDir = testInfo.outputPath("user-data");
+  await fs.mkdir(userDataDir, { recursive: true });
+  const { app, page } = await launchWithUserData(userDataDir);
+  try {
+    await page.locator(".create-button").click();
+    const dialog = page.getByRole("dialog");
+    await expect(dialog).toBeVisible();
+
+    const expectViewportCenter = async (): Promise<void> => {
+      const bounds = await dialog.boundingBox();
+      const viewport = await page.evaluate(() => ({ width: window.innerWidth, height: window.innerHeight }));
+      if (!bounds) throw new Error("Missing dialog bounds");
+      expect(Math.abs(bounds.x + bounds.width / 2 - viewport.width / 2)).toBeLessThanOrEqual(2);
+      expect(Math.abs(bounds.y + bounds.height / 2 - viewport.height / 2)).toBeLessThanOrEqual(2);
+    };
+
+    await expectViewportCenter();
+    const originalViewport = await page.evaluate(() => ({ width: window.innerWidth, height: window.innerHeight }));
+    await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]?.setSize(1280, 780));
+    await page.waitForFunction((previous) => (
+      window.innerWidth !== previous.width || window.innerHeight !== previous.height
+    ), originalViewport);
+    await expectViewportCenter();
+  } finally {
+    await app.close();
+  }
+});

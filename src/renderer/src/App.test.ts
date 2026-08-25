@@ -34,6 +34,7 @@ type ApiDouble = {
   create: ReturnType<typeof vi.fn<DesktopApi["projects"]["create"]>>;
   rename: ReturnType<typeof vi.fn<DesktopApi["projects"]["rename"]>>;
   archive: ReturnType<typeof vi.fn<DesktopApi["projects"]["archive"]>>;
+  setTitleOverlayTheme: ReturnType<typeof vi.fn<DesktopApi["titleOverlay"]["setTheme"]>>;
 };
 
 const roots: Root[] = [];
@@ -43,11 +44,16 @@ function createApi(projects: ProjectDto[] = []): ApiDouble {
   const create = vi.fn<DesktopApi["projects"]["create"]>().mockResolvedValue(projectA);
   const rename = vi.fn<DesktopApi["projects"]["rename"]>().mockResolvedValue(projectA);
   const archive = vi.fn<DesktopApi["projects"]["archive"]>().mockResolvedValue(projectA);
+  const setTitleOverlayTheme = vi.fn<DesktopApi["titleOverlay"]["setTheme"]>().mockResolvedValue({
+    ok: true,
+    value: undefined
+  });
   return {
     list,
     create,
     rename,
     archive,
+    setTitleOverlayTheme,
     api: {
       projects: {
         list,
@@ -82,6 +88,9 @@ function createApi(projects: ProjectDto[] = []): ApiDouble {
       credentials: {
         set: vi.fn<DesktopApi["credentials"]["set"]>(),
         remove: vi.fn<DesktopApi["credentials"]["remove"]>()
+      },
+      titleOverlay: {
+        setTheme: setTitleOverlayTheme
       }
     }
   };
@@ -102,7 +111,9 @@ async function renderApp(api: DesktopApi): Promise<HTMLElement> {
 }
 
 function button(container: ParentNode, name: string): HTMLButtonElement {
-  const match = [...container.querySelectorAll("button")].find(
+  const candidates = [...container.querySelectorAll("button")];
+  if (container !== document) candidates.push(...document.querySelectorAll("button"));
+  const match = candidates.find(
     (candidate) => {
       const text = candidate.textContent?.trim();
       return text === name || text?.endsWith(name);
@@ -130,7 +141,8 @@ async function click(element: HTMLElement): Promise<void> {
 }
 
 async function enterProjectName(container: HTMLElement, name: string): Promise<void> {
-  const input = container.querySelector<HTMLInputElement>("#project-name");
+  const input = container.querySelector<HTMLInputElement>("#project-name")
+    ?? document.querySelector<HTMLInputElement>("#project-name");
   if (!input) throw new Error("Missing project name input");
   await act(async () => {
     Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set?.call(input, name);
@@ -238,7 +250,7 @@ describe("App shell behavior", () => {
     await enterProjectName(container, "Failure case");
     await click(button(container, "Confirm"));
 
-    expect(container.querySelector("[role=dialog] .inline-error")?.textContent).toBe("Could not create the project.");
+    expect(document.querySelector("[role=dialog] .inline-error")?.textContent).toBe("Could not create the project.");
     expect(container.querySelector(".load-error")).toBeNull();
   });
 
@@ -252,15 +264,17 @@ describe("App shell behavior", () => {
     await click(button(document, "Delete project"));
 
     const shell = container.querySelector<HTMLElement>(".app-shell");
-    const overlay = container.querySelector<HTMLElement>(".dialog-layer");
-    const alertDialog = container.querySelector<HTMLElement>("[role=alertdialog]");
+    const overlay = document.body.querySelector<HTMLElement>(".dialog-layer");
+    const alertDialog = document.querySelector<HTMLElement>("[role=alertdialog]");
     const confirm = button(container, "Confirm");
     const cancel = button(container, "Cancel");
     if (!shell || !overlay || !alertDialog) throw new Error("Missing delete dialog structure");
+    expect(container.querySelector(".dialog-layer")).toBeNull();
+    expect(overlay.parentElement).toBe(document.body);
     expect(getComputedStyle(overlay).position).toBe("fixed");
     expect(getComputedStyle(overlay).getPropertyValue("inset")).toBe("0");
-    expect(getComputedStyle(overlay).gridTemplateColumns).toContain("var(--sidebar-width)");
-    expect(getComputedStyle(alertDialog).gridColumn).toBe("2");
+    expect(getComputedStyle(overlay).display).toBe("grid");
+    expect(getComputedStyle(overlay).placeItems).toBe("center");
     expect(shell.hasAttribute("inert")).toBe(true);
     expect(shell.getAttribute("aria-hidden")).toBe("true");
     expect(document.activeElement).toBe(confirm);
@@ -272,7 +286,7 @@ describe("App shell behavior", () => {
 
     document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
     await act(async () => { await Promise.resolve(); });
-    expect(container.querySelector("[role=alertdialog]")).toBeNull();
+    expect(document.querySelector("[role=alertdialog]")).toBeNull();
     expect(shell.hasAttribute("inert")).toBe(false);
   });
 
@@ -288,7 +302,7 @@ describe("App shell behavior", () => {
     await click(button(document, "Rename"));
     await enterProjectName(container, "Deferred rename");
     await click(button(container, "Confirm"));
-    const overlay = container.querySelector<HTMLElement>(".dialog-layer");
+    const overlay = document.body.querySelector<HTMLElement>(".dialog-layer");
     if (!overlay) throw new Error("Missing dialog overlay");
 
     await act(async () => {
@@ -298,15 +312,15 @@ describe("App shell behavior", () => {
     });
     await click(button(container, "New project"));
 
-    expect(container.querySelector("[role=dialog] h2")?.textContent).toBe("Rename");
-    expect(container.querySelector<HTMLInputElement>("#project-name")?.value).toBe("Deferred rename");
+    expect(document.querySelector("[role=dialog] h2")?.textContent).toBe("Rename");
+    expect(document.querySelector<HTMLInputElement>("#project-name")?.value).toBe("Deferred rename");
 
     await act(async () => {
       pending.reject(new Error("rename failed"));
       await Promise.resolve();
     });
-    expect(container.querySelector("[role=dialog] h2")?.textContent).toBe("Rename");
-    expect(container.querySelector("[role=dialog] .inline-error")?.textContent).toBe("Could not rename the project.");
+    expect(document.querySelector("[role=dialog] h2")?.textContent).toBe("Rename");
+    expect(document.querySelector("[role=dialog] .inline-error")?.textContent).toBe("Could not rename the project.");
   });
 
   it("keeps a deferred archive owned by its menu through every dismissal path", async () => {
@@ -402,7 +416,7 @@ describe("App shell behavior", () => {
     expect(document.activeElement).toBe(opener);
 
     await click(opener);
-    const overlay = container.querySelector<HTMLElement>(".dialog-layer");
+    const overlay = document.body.querySelector<HTMLElement>(".dialog-layer");
     if (!overlay) throw new Error("Missing dialog overlay");
     await act(async () => {
       overlay.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
@@ -450,6 +464,26 @@ describe("App shell behavior", () => {
     expect(getComputedStyle(nav).minHeight).toBe("0");
     expect(getComputedStyle(list).overflowY).toBe("auto");
     expect(getComputedStyle(list).minHeight).toBe("0");
+  });
+
+  it("uses native drag regions without custom title controls and keeps interactive controls clickable", async () => {
+    const { api } = createApi();
+    const container = await renderApp(api);
+    const dragRegions = container.querySelectorAll(".title-drag-region");
+    const create = button(container, "New project");
+
+    expect(dragRegions).toHaveLength(2);
+    expect(container.querySelector(".window-control")).toBeNull();
+    expect(create.classList.contains("title-no-drag")).toBe(true);
+  });
+
+  it("updates the native title-overlay symbols through the isolated theme command", async () => {
+    const { api, setTitleOverlayTheme } = createApi();
+    const container = await renderApp(api);
+
+    await click(button(container, "Dark"));
+
+    expect(setTitleOverlayTheme).toHaveBeenCalledExactlyOnceWith({ theme: "dark" });
   });
 
   it("renders the approved disabled import formats, guidance, composer, and citations", async () => {

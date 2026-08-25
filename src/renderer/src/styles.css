@@ -49,6 +49,8 @@ body {
 
 button, input { font: inherit; }
 button { color: inherit; }
+.title-drag-region { -webkit-app-region: drag; }
+.title-no-drag, button, input, .project-popover, .dialog-layer { -webkit-app-region: no-drag; }
 button:focus-visible, input:focus-visible { outline: 3px solid color-mix(in srgb, var(--accent) 35%, transparent); outline-offset: 2px; }
 button:disabled { cursor: not-allowed; opacity: .55; }
 
@@ -133,8 +135,8 @@ button:disabled { cursor: not-allowed; opacity: .55; }
 .sources-empty strong { margin: 18px 0 8px; font-size: 18px; }
 .sources-empty p { margin: 0; color: var(--muted); line-height: 1.6; }
 
-.dialog-layer { position: fixed; z-index: 100; inset: 0; display: grid; grid-template-columns: var(--sidebar-width) minmax(0, 1fr); place-items: center; padding: 24px 24px 24px 0; background: rgb(24 24 28 / 48%); backdrop-filter: blur(1.5px); }
-.dialog-card { grid-column: 2; width: min(440px, 100%); padding: 24px; border: 1px solid var(--border); border-radius: 13px; background: var(--surface); box-shadow: 0 22px 70px rgb(0 0 0 / 28%); }
+.dialog-layer { position: fixed; z-index: 100; inset: 0; display: grid; place-items: center; padding: 24px; background: rgb(24 24 28 / 48%); backdrop-filter: blur(1.5px); }
+.dialog-card { width: min(440px, 100%); padding: 24px; border: 1px solid var(--border); border-radius: 13px; background: var(--surface); box-shadow: 0 22px 70px rgb(0 0 0 / 28%); }
 .dialog-card h2 { margin: 0 0 18px; font-size: 20px; }
 .dialog-card label { display: block; margin-bottom: 7px; font-size: 13px; font-weight: 620; }
 .dialog-card input { width: 100%; height: 42px; padding: 0 12px; border: 1px solid var(--border); border-radius: 8px; color: var(--text); background: var(--bg); }

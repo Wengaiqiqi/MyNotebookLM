@@ -11,11 +11,12 @@ import { getAppPaths } from "./platform/paths";
 import { ProjectRepository } from "./projects/project-repository";
 import { ProjectService } from "./projects/project-service";
 import { SettingsRepository } from "./settings/settings-repository";
-import { createMainWindow } from "./window";
+import { createMainWindow, registerTitleOverlayHandler } from "./window";
 
 let appDatabase: AppDatabase | undefined;
 let cleanupProjectHandlers: (() => void) | undefined;
 let cleanupModelHandlers: (() => void) | undefined;
+let cleanupTitleOverlayHandler: (() => void) | undefined;
 
 const testUserDataDir = process.env["MYNOTEBOOKLM_USER_DATA_DIR"];
 if (process.env["NODE_ENV"] === "test" && testUserDataDir) {
@@ -41,6 +42,7 @@ app.whenReady().then(async () => {
   const modelService = new ModelService(settingsRepository, credentialStore);
   cleanupProjectHandlers = registerProjectHandlers(ipcMain, projectService);
   cleanupModelHandlers = registerModelHandlers(ipcMain, modelService);
+  cleanupTitleOverlayHandler = registerTitleOverlayHandler(ipcMain);
 
   Menu.setApplicationMenu(null);
   createMainWindow();
@@ -55,6 +57,8 @@ app.on("before-quit", () => {
   cleanupProjectHandlers = undefined;
   cleanupModelHandlers?.();
   cleanupModelHandlers = undefined;
+  cleanupTitleOverlayHandler?.();
+  cleanupTitleOverlayHandler = undefined;
   appDatabase?.close();
   appDatabase = undefined;
 });

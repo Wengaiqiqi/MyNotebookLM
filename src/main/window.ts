@@ -1,10 +1,23 @@
-import { BrowserWindow } from "electron";
+import { BrowserWindow, type IpcMain } from "electron";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
+import { z } from "zod";
+import { internalFailure, validationFailure } from "../shared/app-errors";
+import { TITLE_OVERLAY_CHANNELS } from "../shared/ipc";
+import { appThemeSchema, type AppTheme } from "../shared/settings";
 
 const rendererUrl = process.env["ELECTRON_RENDERER_URL"];
 const rendererFile = path.join(__dirname, "../renderer/index.html");
 const packagedRendererUrl = pathToFileURL(rendererFile).toString();
+const titleOverlayInputSchema = z.object({ theme: appThemeSchema }).strict();
+const lightTitleOverlay = { color: "#f7f5f0", symbolColor: "#24231f" } as const;
+const darkTitleOverlay = { color: "#191a1d", symbolColor: "#f3f0e9" } as const;
+
+type IpcMainLike = Pick<IpcMain, "handle" | "removeHandler">;
+
+function titleOverlayFor(theme: AppTheme) {
+  return theme === "dark" ? darkTitleOverlay : lightTitleOverlay;
+}
 
 function isAllowedNavigation(url: string): boolean {
   if (rendererUrl) {
@@ -20,7 +33,8 @@ export function createMainWindow(): BrowserWindow {
     height: 900,
     minWidth: 1100,
     minHeight: 700,
-    frame: true,
+    titleBarStyle: "hidden",
+    titleBarOverlay: lightTitleOverlay,
     show: false,
     webPreferences: {
       preload: path.join(__dirname, "../preload/index.js"),
@@ -43,4 +57,21 @@ export function createMainWindow(): BrowserWindow {
   }
 
   return window;
+}
+
+export function registerTitleOverlayHandler(ipc: IpcMainLike): () => void {
+  ipc.handle(TITLE_OVERLAY_CHANNELS.setTheme, async (event, input) => {
+    const parsed = titleOverlayInputSchema.safeParse(input);
+    if (!parsed.success) return validationFailure();
+    try {
+      const window = BrowserWindow.fromWebContents(event.sender);
+      if (!window) return internalFailure();
+      window.setTitleBarOverlay(titleOverlayFor(parsed.data.theme));
+      return { ok: true as const, value: undefined };
+    } catch {
+      return internalFailure();
+    }
+  });
+
+  return () => ipc.removeHandler(TITLE_OVERLAY_CHANNELS.setTheme);
 }

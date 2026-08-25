@@ -50,7 +50,7 @@ describe("createDesktopApi", () => {
   it("preserves project commands while exposing only the named model settings groups", () => {
     const api = createDesktopApi({ invoke: vi.fn() });
 
-    expect(Object.keys(api)).toEqual(["projects", "settings", "models", "credentials"]);
+    expect(Object.keys(api)).toEqual(["projects", "settings", "models", "credentials", "titleOverlay"]);
     expect(Object.keys(api.projects)).toEqual(["list", "create", "rename", "archive", "remove"]);
     expect(Object.keys(api.settings)).toEqual(["get", "update"]);
     expect(Object.keys(api.models)).toEqual([
@@ -61,6 +61,19 @@ describe("createDesktopApi", () => {
       "test"
     ]);
     expect(Object.keys(api.credentials)).toEqual(["set", "remove"]);
+    expect(Object.keys((api as unknown as { titleOverlay: object }).titleOverlay)).toEqual(["setTheme"]);
+  });
+
+  it("validates and routes title-overlay theme updates through a versioned result boundary", async () => {
+    const invoke = vi.fn().mockResolvedValue(ok(undefined));
+    const api = createDesktopApi({ invoke });
+    const titleOverlay = (api as unknown as {
+      titleOverlay?: { setTheme(input: unknown): Promise<unknown> };
+    }).titleOverlay;
+
+    await expect(titleOverlay?.setTheme({ theme: "dark" }) ?? Promise.resolve(undefined)).resolves.toEqual(ok(undefined));
+    await expect(titleOverlay?.setTheme({ theme: "neon" }) ?? Promise.resolve(undefined)).resolves.toEqual(validationFailure);
+    expect(invoke).toHaveBeenCalledExactlyOnceWith("window:v1:set-title-overlay", { theme: "dark" });
   });
 
   it("routes all model settings commands through versioned channels", async () => {
