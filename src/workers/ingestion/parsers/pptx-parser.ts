@@ -21,12 +21,21 @@ export async function parsePptx(input: Uint8Array | ArrayBuffer): Promise<Docume
   const zip = await JSZip.loadAsync(input);
   const raw = async (name: string): Promise<string> => zip.file(name)!.async("string");
   const read = async (name: string): Promise<unknown> => xml.parse(await raw(name));
+  const relationshipTarget = async (name: string, type: string): Promise<string | undefined> => {
+    const relsName = name.replace(/([^/]+)$/, "_rels/$1.rels");
+    if (!zip.file(relsName)) return undefined;
+    const relationships = await read(relsName) as any;
+    const rel = arr(relationships?.Relationships?.Relationship).find((item: any) => String(item?.["@_Type"] ?? "").endsWith(type.replace(/^\//, "")));
+    if (!rel?.["@_Target"]) return undefined;
+    const target = String(rel["@_Target"]);
+    return target.startsWith("../") ? "ppt/" + target.slice(3) : "ppt/slides/" + target;
+  };
   const slideNames = Object.keys(zip.files).filter((name) => /^ppt\/slides\/slide\d+\.xml$/.test(name)).sort((a, b) => Number(a.match(/\d+/)?.[0]) - Number(b.match(/\d+/)?.[0]));
   const blocks: DocumentBlock[] = [];
   for (const [index, target] of slideNames.entries()) {
     const slide = await read(target) as any; const values = texts(slide);
-    const noteName = `ppt/notesSlides/notesSlide${index + 1}.xml`;
-    const note = zip.file(noteName) ? texts(await read(noteName)) : [];
+    const noteName = await relationshipTarget(target, "notesSlide");
+    const note = noteName && zip.file(noteName) ? texts(await read(noteName)) : [];
     const title = values[0]; const body = [...values.slice(1), ...note].join("\n");
     const locator = { kind: "slide" as const, slide: index + 1 };
     if (title) blocks.push({ kind: "heading", text: title, locator });

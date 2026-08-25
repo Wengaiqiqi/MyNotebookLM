@@ -2,20 +2,19 @@
 
 ## 实现
 
-- 新增 PPTX OOXML 解析器：使用 JSZip 与 fast-xml-parser，按幻灯片顺序提取标题、正文和备注，生成 slide 定位器，并忽略超链接等外部内容。
-- 新增 XLSX 解析器：使用 ExcelJS 非计算模式读取可见工作表，公式仅使用缓存的 result，不执行公式；按行块输出 sheet-row 与行范围定位器，并保留日期 ISO 值。
+- 修复 PPTX OOXML 关系解析：沿每张幻灯片的 `.rels` `notesSlide` 关系定位备注，不再按 slide 序号猜测备注文件。
+- 修复 XLSX 行 locator：保留 ExcelJS 的物理 `row.number`，空行被跳过时仍输出真实起止行号。
 - 新增 golden 测试与最小 PPTX/XLSX fixture。
 
 ## TDD 记录
 
-1. RED：先添加 parser 测试，确认解析器模块不存在时测试失败。
-2. GREEN：实现最小解析逻辑使测试通过。
-3. REFACTOR：清理 XML 文本遍历与行块格式化，保持测试和类型检查通过。
+1. RED：新增关系目标错配的 PPTX 测试与空行 XLSX 测试；两者按预期失败。
+2. GREEN：实现最小关系解析与物理行号保留；聚焦测试通过。
 
 ## 验证
 
-- 聚焦测试：2 个文件、2 个测试通过。
-- ingestion 相关全量测试：8 个文件、35 个测试通过。
+- 聚焦测试：2 个文件、3 个测试通过。
+- ingestion 相关全量测试：发现既有 DOCX 回归失败（8 个文件、38 个通过、1 个失败），与本次 PPTX/XLSX 改动无关。
 - typecheck：通过。
 - `git diff --check`：通过。
 

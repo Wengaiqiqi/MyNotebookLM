@@ -11,4 +11,11 @@ describe("parseXlsx", () => {
     const blocks = await parseXlsx(await wb.xlsx.writeBuffer(), 2);
     expect(blocks).toEqual([{ kind: "sheet-row", text: "Name | Value | When\nA | 3 | 2025-01-02T00:00:00.000Z", locator: { kind: "row", sheet: "Data", startRow: 1, endRow: 2 } }, { kind: "sheet-row", text: " | 2", locator: { kind: "row", sheet: "Data", startRow: 3, endRow: 3 } }]);
   });
+
+  it("keeps physical row numbers when empty rows are skipped", async () => {
+    const wb = new ExcelJS.Workbook(); const ws = wb.addWorksheet("Data");
+    ws.addRow(["A"]); ws.addRow([]); ws.addRow(["C"]);
+    const blocks = await parseXlsx(await wb.xlsx.writeBuffer());
+    expect(blocks[0]?.locator).toEqual({ kind: "row", sheet: "Data", startRow: 1, endRow: 3 });
+  });
 });
