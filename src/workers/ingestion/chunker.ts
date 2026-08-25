@@ -8,26 +8,39 @@ export const DEFAULT_TARGET_TOKENS = 900;
 export const DEFAULT_OVERLAP_TOKENS = 150;
 
 const CJK_CODE_POINT =
-  /[\u2e80-\u2eff\u3000-\u303f\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uac00-\ud7af\uf900-\ufaff\uff00-\uffef]/;
+  /[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uac00-\ud7af\uf900-\ufaff]/;
+
+// Matches a non-CJK word character: letters, digits, connectors but not
+// whitespace or punctuation. Kept deliberately narrow so punctuation and
+// CJK code points act as word boundaries during token estimation.
+const WORD_CHAR = /[A-Za-z0-9_-]/;
+
+function isWordChar(char: string): boolean {
+  return WORD_CHAR.test(char);
+}
 
 /**
- * Deterministic token estimate: CJK code points cost 1 token each, and
- * non-CJK UTF-8 words are inflated by ceil(wordCount * 1.3).
+ * Deterministic token estimate: each CJK code point costs 1 token; each
+ * non-CJK word costs ceil(1.3) tokens. CJK characters and punctuation act
+ * as word boundaries so unspaced mixed text (e.g. "ab你cd") is not
+ * collapsed into a single under-counted word.
  */
 export function estimateTokens(text: string): number {
   if (text.length === 0) return 0;
   let cjk = 0;
-  let nonCjkWords = 0;
-  for (const token of text.split(/\s+/)) {
-    if (token.length === 0) continue;
-    let hasNonCjk = false;
-    for (const char of token) {
-      if (CJK_CODE_POINT.test(char)) cjk += 1;
-      else hasNonCjk = true;
+  let wordCount = 0;
+  let inWord = false;
+  for (const char of text) {
+    if (CJK_CODE_POINT.test(char)) {
+      if (inWord) { wordCount += 1; inWord = false; }
+      cjk += 1;
+      continue;
     }
-    if (hasNonCjk) nonCjkWords += 1;
+    if (isWordChar(char)) { inWord = true; continue; }
+    if (inWord) { wordCount += 1; inWord = false; }
   }
-  return cjk + Math.ceil(nonCjkWords * 1.3);
+  if (inWord) wordCount += 1;
+  return cjk + Math.ceil(wordCount * 1.3);
 }
 
 function chunkHash(text: string): string {
@@ -51,7 +64,25 @@ function mergeLocators(first: SourceLocator, last: SourceLocator): SourceLocator
     };
   }
   if (first.kind === "paragraph" && last.kind === "paragraph") {
-    return { kind: "paragraph", paragraph: Math.min(first.paragraph, last.paragraph) };
+    return {
+      kind: "paragraph",
+      paragraph: Math.min(first.paragraph, last.paragraph),
+      endParagraph: Math.max(first.endParagraph ?? first.paragraph, last.endParagraph ?? last.paragraph)
+    };
+  }
+  if (first.kind === "page" && last.kind === "page") {
+    return {
+      kind: "page",
+      page: Math.min(first.page, last.page),
+      endPage: Math.max(first.endPage ?? first.page, last.endPage ?? last.page)
+    };
+  }
+  if (first.kind === "slide" && last.kind === "slide") {
+    return {
+      kind: "slide",
+      slide: Math.min(first.slide, last.slide),
+      endSlide: Math.max(first.endSlide ?? first.slide, last.endSlide ?? last.slide)
+    };
   }
   return first;
 }
@@ -65,7 +96,7 @@ interface Fragment {
 }
 
 function toFragments(block: DocumentBlock, targetTokens: number): Fragment[] {
-  if (block.kind === "heading" || block.kind === "table") {
+  if (block.kind === "heading") {
     return [
       {
         block,
@@ -76,16 +107,17 @@ function toFragments(block: DocumentBlock, targetTokens: number): Fragment[] {
       }
     ];
   }
+  const isAtomic = block.kind === "table";
   const sentences = splitSentences(block.text);
   const fragments: Fragment[] = [];
   for (const sentence of sentences) {
     const tokens = estimateTokens(sentence);
     if (tokens <= targetTokens) {
-      fragments.push({ block, text: sentence, tokens, isHeading: false, isAtomic: false });
+      fragments.push({ block, text: sentence, tokens, isHeading: false, isAtomic });
       continue;
     }
     for (const piece of splitByTokens(sentence, targetTokens)) {
-      fragments.push({ block, text: piece, tokens: estimateTokens(piece), isHeading: false, isAtomic: false });
+      fragments.push({ block, text: piece, tokens: estimateTokens(piece), isHeading: false, isAtomic });
     }
   }
   return fragments;
@@ -224,20 +256,46 @@ function splitSentences(text: string): string[] {
 }
 
 function splitByTokens(text: string, targetTokens: number): string[] {
-  const words = text.split(/\s+/).filter((w) => w.length > 0);
+  const words = tokenizeForChunk(text);
   const pieces: string[] = [];
   let current: string[] = [];
   let currentTokens = 0;
   for (const word of words) {
     const tokens = estimateTokens(word);
     if (current.length > 0 && currentTokens + tokens > targetTokens) {
-      pieces.push(current.join(" "));
+      pieces.push(current.join(""));
       current = [];
       currentTokens = 0;
     }
     current.push(word);
     currentTokens += tokens;
   }
-  if (current.length > 0) pieces.push(current.join(" "));
+  if (current.length > 0) pieces.push(current.join(""));
   return pieces;
+}
+
+function tokenizeForChunk(text: string): string[] {
+  const units: string[] = [];
+  let buffer = "";
+  const flush = (): void => {
+    if (buffer.length > 0) {
+      units.push(buffer);
+      buffer = "";
+    }
+  };
+  for (const char of text) {
+    if (CJK_CODE_POINT.test(char)) {
+      flush();
+      units.push(char);
+      continue;
+    }
+    if (isWordChar(char)) {
+      buffer += char;
+      continue;
+    }
+    flush();
+    units.push(char);
+  }
+  flush();
+  return units;
 }

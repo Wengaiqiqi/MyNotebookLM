@@ -71,6 +71,20 @@ describe("estimateTokens", () => {
   it("treats empty text as zero", () => {
     expect(estimateTokens("")).toBe(0);
   });
+
+  it("treats CJK characters as word boundaries so unspaced mixed text is not collapsed", () => {
+    expect(estimateTokens("ab你cd")).toBe(4);
+  });
+
+  it("splits non-CJK words at punctuation so punctuation never inflates a word count", () => {
+    expect(estimateTokens("hello,world")).toBe(3);
+    expect(estimateTokens("a,b,c")).toBe(4);
+  });
+
+  it("counts pure punctuation as zero words", () => {
+    expect(estimateTokens("...")).toBe(0);
+    expect(estimateTokens("，。！？")).toBe(0);
+  });
 });
 
 describe("CHUNKING_VERSION", () => {
@@ -125,7 +139,7 @@ describe("chunkBlocks heading context", () => {
 
 describe("chunkBlocks table boundaries", () => {
   it("keeps a table atomic inside a single chunk", () => {
-    const table = "TABLE\n" + Array.from({ length: 2000 }, (_, i) => `row${i} value`).join("\n");
+    const table = "TABLE\n" + Array.from({ length: 20 }, (_, i) => `row${i} value`).join("\n");
     const blocks: DocumentBlock[] = [
       { kind: "paragraph", text: "before table", locator: { kind: "paragraph", paragraph: 1 } },
       { kind: "table", text: table, locator: { kind: "offset", start: 0, end: table.length } },
@@ -202,5 +216,64 @@ describe("chunkBlocks determinism", () => {
     expect(chunks.every((c) => c.text.trim().length > 0)).toBe(true);
     expect(JSON.stringify(chunks)).toBe(JSON.stringify(chunkBlocks(blocks)));
     expect(JSON.stringify(chunks)).toMatchSnapshot();
+  });
+});
+
+describe("chunkBlocks 900-token ceiling for unspaced CJK", () => {
+  it("splits a long CJK paragraph with no spaces into chunks at or below 900 tokens", () => {
+    const longCjk = Array.from({ length: 1200 }, () => "中").join("");
+    const blocks: DocumentBlock[] = [
+      { kind: "paragraph", text: longCjk, locator: { kind: "paragraph", paragraph: 1 } }
+    ];
+    const chunks = chunkBlocks(blocks);
+    expect(chunks.length).toBeGreaterThan(1);
+    expect(chunks.every((c) => c.tokenEstimate <= 900)).toBe(true);
+    expect(chunks.every((c) => c.text.trim().length > 0)).toBe(true);
+  });
+});
+
+describe("chunkBlocks table over-limit", () => {
+  it("splits a table whose token estimate exceeds the target into chunks at or below the target", () => {
+    const rows = Array.from({ length: 1500 }, (_, i) => `row${i} 值 val${i}`).join("\n");
+    const table = "TABLE\n" + rows;
+    const blocks: DocumentBlock[] = [
+      { kind: "table", text: table, locator: { kind: "offset", start: 0, end: table.length } }
+    ];
+    const chunks = chunkBlocks(blocks);
+    expect(chunks.length).toBeGreaterThan(1);
+    expect(chunks.every((c) => c.tokenEstimate <= 900)).toBe(true);
+  });
+});
+
+describe("chunkBlocks paragraph locator range", () => {
+  it("merges consecutive paragraph locators into an inclusive start/end range", () => {
+    const blocks: DocumentBlock[] = [
+      { kind: "paragraph", text: "p1", locator: { kind: "paragraph", paragraph: 1 } },
+      { kind: "paragraph", text: "p2", locator: { kind: "paragraph", paragraph: 2 } },
+      { kind: "paragraph", text: "p3", locator: { kind: "paragraph", paragraph: 3 } }
+    ];
+    const chunks = chunkBlocks(blocks);
+    expect(chunks[0]?.locator).toEqual({ kind: "paragraph", paragraph: 1, endParagraph: 3 });
+  });
+});
+
+describe("chunkBlocks numeric locator ranges", () => {
+  it("merges consecutive page locators into a page range", () => {
+    const blocks: DocumentBlock[] = [
+      { kind: "paragraph", text: "a", locator: { kind: "page", page: 1 } },
+      { kind: "paragraph", text: "b", locator: { kind: "page", page: 2 } },
+      { kind: "paragraph", text: "c", locator: { kind: "page", page: 3 } }
+    ];
+    const chunks = chunkBlocks(blocks);
+    expect(chunks[0]?.locator).toEqual({ kind: "page", page: 1, endPage: 3 });
+  });
+
+  it("merges consecutive slide locators into a slide range", () => {
+    const blocks: DocumentBlock[] = [
+      { kind: "paragraph", text: "a", locator: { kind: "slide", slide: 1 } },
+      { kind: "paragraph", text: "b", locator: { kind: "slide", slide: 2 } }
+    ];
+    const chunks = chunkBlocks(blocks);
+    expect(chunks[0]?.locator).toEqual({ kind: "slide", slide: 1, endSlide: 2 });
   });
 });

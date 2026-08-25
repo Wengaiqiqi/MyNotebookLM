@@ -41,8 +41,22 @@ const positiveInteger = z.number().int().positive();
 const nonNegativeInteger = z.number().int().nonnegative();
 
 export const sourceLocatorSchema = z.discriminatedUnion("kind", [
-  z.object({ kind: z.literal("page"), page: positiveInteger }).strict(),
-  z.object({ kind: z.literal("slide"), slide: positiveInteger }).strict(),
+  z.object({
+    kind: z.literal("page"),
+    page: positiveInteger,
+    endPage: positiveInteger.optional()
+  }).strict().refine((value) => value.endPage === undefined || value.endPage >= value.page, {
+    message: "endPage must be >= page",
+    path: ["endPage"]
+  }),
+  z.object({
+    kind: z.literal("slide"),
+    slide: positiveInteger,
+    endSlide: positiveInteger.optional()
+  }).strict().refine((value) => value.endSlide === undefined || value.endSlide >= value.slide, {
+    message: "endSlide must be >= slide",
+    path: ["endSlide"]
+  }),
   z.object({
     kind: z.literal("sheet"),
     sheet: z.string().trim().min(1)
@@ -68,8 +82,12 @@ export const sourceLocatorSchema = z.discriminatedUnion("kind", [
   }).strict(),
   z.object({
     kind: z.literal("paragraph"),
-    paragraph: positiveInteger
-  }).strict(),
+    paragraph: positiveInteger,
+    endParagraph: positiveInteger.optional()
+  }).strict().refine((value) => value.endParagraph === undefined || value.endParagraph >= value.paragraph, {
+    message: "endParagraph must be >= paragraph",
+    path: ["endParagraph"]
+  }),
   z.object({
     kind: z.literal("section"),
     sectionPath: z.string().trim().min(1),
