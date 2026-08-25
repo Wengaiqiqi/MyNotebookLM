@@ -68,3 +68,38 @@ Commit: `0096b16` fix: respect heading token budget in chunker
 | `src/workers/ingestion/chunker.ts` | 修改 | heading 前缀计入阈值、超长 heading 拆分、正文 fragment 按预算拆分 |
 | `src/workers/ingestion/chunker.test.ts` | 修改 | 新增 heading 阈值与超长 heading 拆分测试 |
 | `src/shared/schemas-strict.test.ts` | 修改 | 新增 page/slide/paragraph end 反向范围校验测试 |
+
+## 第三轮 P1 复审修复（2026-08-26）
+
+Commit: `bf568e4` fix: constrain heading context prefix to token budget
+
+P1：**超长 heading 后接正文时，完整 heading 作为上下文前缀会使最终 chunk 超过 900 token。**
+
+### 问题根因
+
+原先 `chunkBlocks` 把每个 heading fragment 无条件设为 `activeHeading`。当 heading 超过 `targetTokens` 时会被拆成多个纯 heading 片段，但最后一个片段仍被当作后续正文 chunk 的前缀；同时正文 chunk 之间还会进行 overlap 复用。两者叠加使 heading 前缀 + 正文（含 overlap 尾）的 `tokenEstimate` 超过 900。
+
+### 最小修复
+
+1. **超长 heading 不作为上下文前缀**：`activeHeading` 仅在 `estimateTokens(heading.text) <= targetTokens` 时设置；超长 heading（已被拆分）不再向后续正文重复完整前缀，避免超限。
+2. **heading 上下文存在时禁用 overlap 复用**：`startOverlap` 在 `activeHeading` 存在时直接返回，避免 overlap 尾部从受限的正文预算中挤出，导致正文 chunk 超限。
+3. **overlap 上限受 targetTokens 约束**：`tailBudget = min(overlapTokens, targetTokens - prefixTokens)`，作为无 heading 场景下 overlap 不超目标上限的兜底。
+
+### RED→GREEN
+
+- 先新增真实组合失败测试（超长 heading + 正文），断言所有 chunk `tokenEstimate <= 900` 且正文独特文本不丢失；修复前该测试失败，修复后通过。
+- 修复前后均验证超长（950）与接近但未超长（880）两类 heading 场景，全部 chunk 不超过 900 且正文完整。
+
+### 本轮验证
+
+- 聚焦 `npx vitest run src/workers/ingestion/chunker.test.ts src/shared/schemas-strict.test.ts`：33 个测试全部通过。
+- 全量 `npx vitest run`：32 个测试文件、390 个测试全部通过。
+- `npm run typecheck`（tsconfig.node + tsconfig.web）：通过，退出码 0。
+- 双语 fixture 快照未变动，说明本修复不影响既有非超长 heading 行为。
+
+### 本轮涉及文件
+
+| 文件 | 变更 | 说明 |
+| --- | --- | --- |
+| `src/workers/ingestion/chunker.ts` | 修改 | 超长 heading 不做上下文前缀、heading 前缀下禁用 overlap、overlap 上限受 target 约束 |
+| `src/workers/ingestion/chunker.test.ts` | 修改 | 新增超长 heading + 正文组合、所有 chunk 不超限且正文不丢失测试 |
