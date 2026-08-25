@@ -164,9 +164,12 @@ export default function ModelProfileForm({
     if (manual) modelInput.current?.focus();
   }, [manual]);
 
-  useEffect(() => () => {
-    mounted.current = false;
-    discoveryEpoch.current += 1;
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+      discoveryEpoch.current += 1;
+    };
   }, []);
 
   useEffect(() => {

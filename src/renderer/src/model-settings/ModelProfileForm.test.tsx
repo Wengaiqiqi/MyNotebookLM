@@ -65,26 +65,37 @@ function createApi() {
   return { discover };
 }
 
-async function renderForm(props: Partial<React.ComponentProps<typeof ModelProfileForm>> = {}) {
+async function renderForm(
+  props: Partial<React.ComponentProps<typeof ModelProfileForm>> = {},
+  strictMode = false
+) {
   const container = document.createElement("div");
   document.body.append(container);
   const root = createRoot(container);
   roots.push(root);
   let latest: ModelProfileDraft | undefined;
+  const form = (
+    <ModelProfileForm
+      capability="generation"
+      profiles={[]}
+      builtInProfiles={[]}
+      credentials={[]}
+      onChange={(draft) => { latest = draft; }}
+      {...props}
+    />
+  );
   await act(async () => {
-    root.render(
-      <ModelProfileForm
-        capability="generation"
-        profiles={[]}
-        builtInProfiles={[]}
-        credentials={[]}
-        onChange={(draft) => { latest = draft; }}
-        {...props}
-      />
-    );
+    root.render(strictMode ? <React.StrictMode>{form}</React.StrictMode> : form);
     await Promise.resolve();
   });
-  return { container, latest: () => latest };
+  return {
+    container,
+    latest: () => latest,
+    unmount: async () => {
+      await act(async () => root.unmount());
+      roots.splice(roots.indexOf(root), 1);
+    }
+  };
 }
 
 function field<T extends HTMLInputElement | HTMLSelectElement>(container: ParentNode, label: string): T {
@@ -133,6 +144,60 @@ afterEach(async () => {
 });
 
 describe("ModelProfileForm", () => {
+  it("completes discovery after Strict Mode replays the lifecycle effect", async () => {
+    const pending = deferred<Awaited<ReturnType<DesktopApi["models"]["discover"]>>>();
+    window.myNotebook.models.discover = vi.fn<DesktopApi["models"]["discover"]>()
+      .mockReturnValueOnce(pending.promise);
+    const { container } = await renderForm({}, true);
+    await setValue(field<HTMLInputElement>(container, "API key"), "new-secret");
+    await click(button(container, "Get models"));
+    expect(button(container, "Fetching…").matches(":disabled")).toBe(true);
+
+    await act(async () => {
+      pending.resolve({
+        ok: true,
+        value: [{
+          id: "strict-model",
+          displayName: "Strict model",
+          capabilities: ["generation"],
+          capabilityEvidence: "authoritative"
+        }]
+      });
+      await pending.promise;
+    });
+
+    expect(container.querySelector("[role=status]")?.textContent).toContain("Fetched successfully");
+    expect(button(container, "Get models").matches(":disabled")).toBe(false);
+    expect(field<HTMLSelectElement>(container, "Model").value).toBe("strict-model");
+  });
+
+  it("ignores a pending discovery completion after a real unmount", async () => {
+    const pending = deferred<Awaited<ReturnType<DesktopApi["models"]["discover"]>>>();
+    window.myNotebook.models.discover = vi.fn<DesktopApi["models"]["discover"]>()
+      .mockReturnValueOnce(pending.promise);
+    const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const { container, unmount } = await renderForm({}, true);
+    await setValue(field<HTMLInputElement>(container, "API key"), "new-secret");
+    await click(button(container, "Get models"));
+    await unmount();
+
+    await act(async () => {
+      pending.resolve({
+        ok: true,
+        value: [{
+          id: "late-model",
+          displayName: "Late model",
+          capabilities: ["generation"],
+          capabilityEvidence: "authoritative"
+        }]
+      });
+      await pending.promise;
+    });
+
+    expect(container.textContent).toBe("");
+    expect(error).not.toHaveBeenCalled();
+  });
+
   it("fills provider defaults without overwriting an edited address", async () => {
     const { container } = await renderForm();
     const provider = field<HTMLSelectElement>(container, "Provider");
