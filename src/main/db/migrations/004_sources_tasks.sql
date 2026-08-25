@@ -43,7 +43,7 @@ CREATE TABLE source_revisions (
 CREATE INDEX idx_source_revisions_source_state
 ON source_revisions (source_id, state, created_at DESC);
 
-CREATE INDEX idx_source_revisions_source_active
+CREATE UNIQUE INDEX idx_source_revisions_source_active
 ON source_revisions (source_id, state)
 WHERE state = 'ready';
 

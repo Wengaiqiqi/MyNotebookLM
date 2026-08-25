@@ -347,7 +347,7 @@ describe("openAppDatabase", () => {
     }
   });
 
-  it("enforces revision foreign keys, state checks and a single active revision", () => {
+  it("enforces revision foreign keys and a single ready revision", () => {
     const bundledDatabase = openAppDatabase(
       path.join(temporaryRoot, "bundled-ingestion-3.db"),
       path.resolve("src/main/db/migrations")
@@ -368,7 +368,7 @@ describe("openAppDatabase", () => {
           '2026-01-01T00:00:00.000Z',
           NULL
         )
-      `);
+      `).run();
 
       expect(() => bundledDatabase.connection.prepare(`
         INSERT INTO source_revisions(
@@ -398,7 +398,7 @@ describe("openAppDatabase", () => {
           'blocks-900-150-v1', 'failed',
           '2026-01-01T00:00:00.000Z'
         )
-      `);
+      `).run();
 
       bundledDatabase.connection.prepare(`
         INSERT INTO source_revisions(
@@ -408,10 +408,10 @@ describe("openAppDatabase", () => {
           '88888888-8888-4888-8888-888888888883',
           '99999999-9999-4999-8999-999999999993',
           'orig.pdf', 'stored.pdf', 'sha256:abc', 'page',
-          'blocks-900-150-v1', 'active',
+          'blocks-900-150-v1', 'ready',
           '2026-01-01T00:00:00.000Z'
         )
-      `);
+      `).run();
       expect(() => bundledDatabase.connection.prepare(`
         INSERT INTO source_revisions(
           id, source_id, original_path, stored_path, source_hash, locator_kind,
@@ -420,10 +420,10 @@ describe("openAppDatabase", () => {
           '88888888-8888-4888-8888-888888888884',
           '99999999-9999-4999-8999-999999999993',
           'orig.pdf', 'stored.pdf', 'sha256:abc', 'page',
-          'blocks-900-150-v1', 'active',
+          'blocks-900-150-v1', 'ready',
           '2026-01-01T00:00:00.000Z'
         )
-      `).run()).toThrow(/unique|check|active/i);
+      `).run()).toThrow(/unique/i);
     } finally {
       bundledDatabase.close();
     }
