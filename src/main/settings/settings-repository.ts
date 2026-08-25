@@ -87,6 +87,10 @@ function toRoute(row: RouteRow): ModelRouteDto {
 export class SettingsRepository {
   constructor(private readonly db: Database.Database) {}
 
+  transaction<T>(work: () => T): T {
+    return this.db.transaction(work)();
+  }
+
   getSettings(): AppSettingsDto {
     const row = this.db.prepare(`
       SELECT onboarding_completed, locale, theme

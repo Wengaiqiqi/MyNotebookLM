@@ -33,7 +33,10 @@ import {
   type AppSettingsDto,
   type UpdateAppSettingsInput
 } from "../../shared/settings";
-import type { CredentialStore } from "../credentials/credential-store";
+import {
+  canonicalCredentialBaseUrl,
+  type CredentialStore
+} from "../credentials/credential-store";
 import type { SettingsRepository } from "../settings/settings-repository";
 import { AnthropicProvider } from "./anthropic-provider";
 import { GeminiProvider } from "./gemini-provider";
@@ -121,12 +124,6 @@ const generationTasks = [
   "qa",
   "custom-transformation"
 ] as const;
-
-function canonicalProviderBaseUrl(baseUrl: string): string {
-  const address = new URL(baseUrl);
-  address.pathname = address.pathname.replace(/\/+$/, "");
-  return address.toString();
-}
 
 type ProviderConnection = Readonly<{
   profileId?: string | undefined;
@@ -295,11 +292,21 @@ export class ModelService {
     const tested = await this.testProfile(parsed);
     if (!tested.ok) return tested;
 
+    const profile = modelProfileInputSchema.parse(parsed.profile);
     try {
-      const saved = this.settings.saveProfile(modelProfileInputSchema.parse(parsed.profile));
       if (parsed.apiKey !== undefined) {
-        await this.credentials.set(parsed.profile.id, parsed.apiKey);
+        const prepared = await this.credentials.prepare({
+          provider: profile.provider,
+          baseUrl: profile.baseUrl
+        }, parsed.apiKey);
+        const saved = this.settings.transaction(() => {
+          const persisted = this.settings.saveProfile(profile);
+          this.credentials.storePrepared(profile.id, prepared);
+          return persisted;
+        });
+        return { ok: true, value: saved };
       }
+      const saved = this.settings.saveProfile(profile);
       return { ok: true, value: saved };
     } catch (reason) {
       return resultFromError(reason);
@@ -445,21 +452,23 @@ export class ModelService {
     try {
       savedProfile = this.settings.getProfile(connection.profileId);
       if (!savedProfile) return invoke();
-      if (savedProfile.provider !== connection.provider
-        || canonicalProviderBaseUrl(savedProfile.baseUrl)
-          !== canonicalProviderBaseUrl(connection.baseUrl)) {
-        return credentialBindingError();
-      }
       if (!this.credentials.status(connection.profileId).hasCredential) {
-        return invoke(undefined, savedProfile.provider, savedProfile.baseUrl);
+        return invoke();
+      }
+      if (savedProfile.provider !== connection.provider
+        || canonicalCredentialBaseUrl(savedProfile.baseUrl)
+          !== canonicalCredentialBaseUrl(connection.baseUrl)) {
+        return credentialBindingError();
       }
     } catch (reason) {
       return resultFromError(reason);
     }
 
     try {
-      return await this.credentials.withSecret(connection.profileId, (apiKey) =>
-        invoke(apiKey, savedProfile.provider, savedProfile.baseUrl)
+      return await this.credentials.withSecret(
+        connection.profileId,
+        { provider: connection.provider, baseUrl: connection.baseUrl },
+        (apiKey) => invoke(apiKey, savedProfile.provider, savedProfile.baseUrl)
       );
     } catch (reason) {
       return resultFromError(reason);

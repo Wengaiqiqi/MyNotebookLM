@@ -250,6 +250,27 @@ describe("ModelProfileForm", () => {
     expect(embedding.latest()?.valid).toBe(true);
   });
 
+  it("shows an optional key for a keyless OpenAI-compatible loopback connection", async () => {
+    window.myNotebook.models.discover = vi.fn<DesktopApi["models"]["discover"]>()
+      .mockResolvedValue({ ok: true, value: [] });
+    const { container, latest } = await renderForm();
+    const key = field<HTMLInputElement>(container, "API key");
+    expect(key).not.toBeNull();
+    await setValue(field<HTMLInputElement>(container, "API address"), "http://localhost:1234/v1");
+    await click(button(container, "Enter model name manually"));
+    await setValue(field<HTMLInputElement>(container, "Model name"), "self-hosted-model");
+
+    expect(latest()?.valid).toBe(true);
+    expect(latest()?.apiKey).toBeUndefined();
+    await click(button(container, "Get models"));
+    expect(window.myNotebook.models.discover).toHaveBeenCalledWith({
+      provider: "openai-compatible",
+      capability: "generation",
+      baseUrl: "http://localhost:1234/v1"
+    });
+    expect(container.querySelector("[role=alert]")).toBeNull();
+  });
+
   it("restores a persisted built-in embedding route without exposing editable connection fields", async () => {
     const { container, latest } = await renderForm({
       capability: "embedding",
@@ -405,6 +426,7 @@ describe("ModelProfileForm", () => {
 
   it("reports an accessible validation error before discovery when a required key is missing", async () => {
     const { container } = await renderForm();
+    await setValue(field<HTMLSelectElement>(container, "Provider"), "openai");
 
     await click(button(container, "Get models"));
 

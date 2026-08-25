@@ -1,4 +1,5 @@
 import type Database from "better-sqlite3";
+import type { ProviderKind } from "../../shared/models";
 
 export interface SecretProtector {
   isAvailable(): Promise<boolean>;
@@ -8,12 +9,48 @@ export interface SecretProtector {
 
 export interface CredentialStore {
   set(profileId: string, apiKey: string): Promise<void>;
+  prepare(connection: CredentialConnection, apiKey: string): Promise<PreparedCredential>;
+  storePrepared(profileId: string, credential: PreparedCredential): void;
   remove(profileId: string): void;
   status(profileId: string): { hasCredential: boolean; mask?: string };
-  withSecret<T>(profileId: string, use: (apiKey?: string) => Promise<T>): Promise<T>;
+  withSecret<T>(
+    profileId: string,
+    connection: CredentialConnection,
+    use: (apiKey?: string) => Promise<T>
+  ): Promise<T>;
 }
 
 const CREDENTIAL_MASK = "••••••••";
+
+export type CredentialConnection = Readonly<{
+  provider: ProviderKind;
+  baseUrl: string;
+}>;
+
+export type PreparedCredential = Readonly<{
+  encryptedSecret: Buffer;
+  provider: ProviderKind;
+  baseUrl: string;
+}>;
+
+type ProfileBindingRow = Readonly<{
+  provider: ProviderKind;
+  base_url: string;
+}>;
+
+type StoredCredentialRow = Readonly<{
+  encrypted_secret: Buffer;
+  credential_provider: ProviderKind;
+  credential_base_url: string;
+  profile_provider: ProviderKind;
+  profile_base_url: string;
+}>;
+
+export function canonicalCredentialBaseUrl(baseUrl: string): string {
+  const address = new URL(baseUrl);
+  address.pathname = address.pathname.replace(/\/+$/, "");
+  return address.toString();
+}
 
 export class CredentialStore implements CredentialStore {
   constructor(
@@ -22,6 +59,21 @@ export class CredentialStore implements CredentialStore {
   ) {}
 
   async set(profileId: string, apiKey: string): Promise<void> {
+    const profile = this.db.prepare(`
+      SELECT provider, base_url FROM model_profiles WHERE id = ?
+    `).get(profileId) as ProfileBindingRow | undefined;
+    if (!profile) throw new Error("Credential profile was not found");
+    const prepared = await this.prepare({
+      provider: profile.provider,
+      baseUrl: profile.base_url
+    }, apiKey);
+    this.storePrepared(profileId, prepared);
+  }
+
+  async prepare(
+    connection: CredentialConnection,
+    apiKey: string
+  ): Promise<PreparedCredential> {
     if (apiKey.trim().length === 0) throw new Error("Credential must not be empty");
     await this.assertStorageAvailable();
 
@@ -32,14 +84,29 @@ export class CredentialStore implements CredentialStore {
       throw new Error("Credential could not be protected");
     }
 
+    return {
+      encryptedSecret,
+      provider: connection.provider,
+      baseUrl: canonicalCredentialBaseUrl(connection.baseUrl)
+    };
+  }
+
+  storePrepared(profileId: string, credential: PreparedCredential): void {
     try {
       this.db.prepare(`
-        INSERT INTO credentials(profile_id, encrypted_secret, updated_at)
-        VALUES (?, ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+        INSERT INTO credentials(profile_id, encrypted_secret, provider, base_url, updated_at)
+        VALUES (?, ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
         ON CONFLICT(profile_id) DO UPDATE SET
           encrypted_secret = excluded.encrypted_secret,
+          provider = excluded.provider,
+          base_url = excluded.base_url,
           updated_at = excluded.updated_at
-      `).run(profileId, encryptedSecret);
+      `).run(
+        profileId,
+        credential.encryptedSecret,
+        credential.provider,
+        credential.baseUrl
+      );
     } catch {
       throw new Error("Credential could not be stored");
     }
@@ -56,11 +123,31 @@ export class CredentialStore implements CredentialStore {
     return credential ? { hasCredential: true, mask: CREDENTIAL_MASK } : { hasCredential: false };
   }
 
-  async withSecret<T>(profileId: string, use: (apiKey?: string) => Promise<T>): Promise<T> {
-    const row = this.db.prepare(
-      "SELECT encrypted_secret FROM credentials WHERE profile_id = ?"
-    ).get(profileId) as { encrypted_secret: Buffer } | undefined;
+  async withSecret<T>(
+    profileId: string,
+    connection: CredentialConnection,
+    use: (apiKey?: string) => Promise<T>
+  ): Promise<T> {
+    const row = this.db.prepare(`
+      SELECT credentials.encrypted_secret,
+             credentials.provider AS credential_provider,
+             credentials.base_url AS credential_base_url,
+             model_profiles.provider AS profile_provider,
+             model_profiles.base_url AS profile_base_url
+      FROM credentials
+      JOIN model_profiles ON model_profiles.id = credentials.profile_id
+      WHERE credentials.profile_id = ?
+    `).get(profileId) as StoredCredentialRow | undefined;
     if (!row) return use();
+
+    if (row.credential_provider !== row.profile_provider
+      || canonicalCredentialBaseUrl(row.credential_base_url)
+        !== canonicalCredentialBaseUrl(row.profile_base_url)
+      || row.credential_provider !== connection.provider
+      || canonicalCredentialBaseUrl(row.credential_base_url)
+        !== canonicalCredentialBaseUrl(connection.baseUrl)) {
+      throw new Error("Credential binding does not match profile");
+    }
 
     await this.assertStorageAvailable();
 

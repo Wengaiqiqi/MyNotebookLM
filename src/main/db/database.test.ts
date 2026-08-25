@@ -16,6 +16,14 @@ const initialMigration = readFileSync(
   new URL("./migrations/001_initial.sql", import.meta.url),
   "utf8"
 );
+const settingsModelsMigration = readFileSync(
+  new URL("./migrations/002_settings_models.sql", import.meta.url),
+  "utf8"
+);
+const credentialBindingMigration = readFileSync(
+  new URL("./migrations/003_credential_binding.sql", import.meta.url),
+  "utf8"
+);
 
 describe("openAppDatabase", () => {
   let temporaryRoot: string;
@@ -112,6 +120,62 @@ describe("openAppDatabase", () => {
     connection.close();
   });
 
+  it("backfills durable bindings for credentials saved before migration 003", () => {
+    writeFileSync(path.join(migrationsDir, "002_settings_models.sql"), settingsModelsMigration);
+    const beforeBinding = openAppDatabase(databaseFile, migrationsDir);
+    beforeBinding.connection.prepare(`
+      INSERT INTO model_profiles(id, name, provider, capability, base_url, model_id)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `).run(
+      "11111111-1111-4111-8111-111111111111",
+      "Existing profile",
+      "openai-compatible",
+      "generation",
+      "https://models.example.test/v1/",
+      "existing-model"
+    );
+    beforeBinding.connection.prepare(`
+      INSERT INTO credentials(profile_id, encrypted_secret) VALUES (?, ?)
+    `).run("11111111-1111-4111-8111-111111111111", Buffer.from("encrypted"));
+    beforeBinding.connection.prepare(`
+      INSERT INTO model_profiles(id, name, provider, capability, base_url, model_id)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `).run(
+      "22222222-2222-4222-8222-222222222222",
+      "Root endpoint",
+      "gemini",
+      "generation",
+      "https://generativelanguage.googleapis.com/",
+      "gemini-test"
+    );
+    beforeBinding.connection.prepare(`
+      INSERT INTO credentials(profile_id, encrypted_secret) VALUES (?, ?)
+    `).run("22222222-2222-4222-8222-222222222222", Buffer.from("encrypted-root"));
+    beforeBinding.close();
+    writeFileSync(
+      path.join(migrationsDir, "003_credential_binding.sql"),
+      credentialBindingMigration
+    );
+
+    const migrated = openAppDatabase(databaseFile, migrationsDir);
+    try {
+      expect(migrated.connection.prepare(`
+        SELECT provider, base_url FROM credentials WHERE profile_id = ?
+      `).get("11111111-1111-4111-8111-111111111111")).toEqual({
+        provider: "openai-compatible",
+        base_url: "https://models.example.test/v1"
+      });
+      expect(migrated.connection.prepare(`
+        SELECT provider, base_url FROM credentials WHERE profile_id = ?
+      `).get("22222222-2222-4222-8222-222222222222")).toEqual({
+        provider: "gemini",
+        base_url: "https://generativelanguage.googleapis.com/"
+      });
+    } finally {
+      migrated.close();
+    }
+  });
+
   it("rejects duplicate migration versions", () => {
     writeFileSync(path.join(migrationsDir, "001_duplicate.sql"), initialMigration);
 
@@ -182,6 +246,15 @@ describe("openAppDatabase", () => {
         { name: "credentials" },
         { name: "model_profiles" },
         { name: "model_routes" }
+      ]));
+      expect(
+        bundledDatabase.connection
+          .prepare(`SELECT name, type, "notnull" AS required
+            FROM pragma_table_info('credentials') ORDER BY cid`)
+          .all()
+      ).toEqual(expect.arrayContaining([
+        { name: "provider", type: "TEXT", required: 1 },
+        { name: "base_url", type: "TEXT", required: 1 }
       ]));
       expect(() => bundledDatabase.connection.prepare(`
         INSERT INTO model_profiles(id, name, provider, capability, base_url, model_id)

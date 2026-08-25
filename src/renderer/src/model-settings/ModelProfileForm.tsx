@@ -35,8 +35,12 @@ const providerMarks: Record<ProviderKind, string> = {
 };
 
 const fixedCredentialMask = "••••••••";
-function needsCredential(provider: ProviderKind): boolean {
+function showsCredentialField(provider: ProviderKind): boolean {
   return provider !== "ollama" && provider !== "local";
+}
+
+function requiresCredential(provider: ProviderKind): boolean {
+  return provider === "openai" || provider === "anthropic" || provider === "gemini";
 }
 
 function validAddress(provider: ProviderKind, baseUrl: string): boolean {
@@ -119,7 +123,8 @@ export default function ModelProfileForm({
   );
   const hasStoredCredential = storedCredential
     && credentialConnection === `${provider}\n${baseUrl}`;
-  const requiresKey = needsCredential(provider);
+  const showsKey = showsCredentialField(provider);
+  const requiresKey = requiresCredential(provider);
   const valid = provider === "local"
     ? Boolean(builtIn)
     : validAddress(provider, baseUrl)
@@ -340,7 +345,7 @@ export default function ModelProfileForm({
             />
           </label>
 
-          {requiresKey && (
+          {showsKey && (
             <div className="model-field">
               <label htmlFor={`${prefix}-key`}>{t("model.apiKey")}</label>
               <span className="secret-field">

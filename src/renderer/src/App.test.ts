@@ -360,6 +360,115 @@ describe("App shell behavior", () => {
     expect(updateSettings).toHaveBeenCalledWith({ onboardingCompleted: true });
   });
 
+  it("completes onboarding with a keyless OpenAI-compatible loopback profile", async () => {
+    const { api, listProfiles, testModel, saveProfile, setDefaultRoutes, updateSettings } =
+      createApi([], false);
+    listProfiles.mockResolvedValueOnce({
+      ok: true,
+      value: { profiles: [], builtInProfiles: [builtInEmbedding], credentials: [] }
+    });
+    const container = await renderApp(api);
+    const forms = container.querySelectorAll<HTMLElement>(".model-profile-form");
+    await setField(
+      labelledField<HTMLInputElement>(forms[0]!, "API address"),
+      "http://localhost:1234/v1"
+    );
+    await click(button(forms[0]!, "Enter model name manually"));
+    await setField(labelledField<HTMLInputElement>(forms[0]!, "Model name"), "self-hosted-model");
+    await setField(labelledField<HTMLSelectElement>(forms[1]!, "Provider"), "local");
+
+    await click(button(container, "Finish and start"));
+
+    expect(testModel).toHaveBeenCalledWith({
+      profile: expect.objectContaining({
+        provider: "openai-compatible",
+        baseUrl: "http://localhost:1234/v1",
+        modelId: "self-hosted-model"
+      })
+    });
+    expect(saveProfile).toHaveBeenCalledWith({
+      profile: expect.objectContaining({ provider: "openai-compatible" })
+    });
+    expect(setDefaultRoutes).toHaveBeenCalledOnce();
+    expect(updateSettings).toHaveBeenCalledWith({ onboardingCompleted: true });
+  });
+
+  it("saves keyless OpenAI-compatible changes from settings", async () => {
+    const { api, listProfiles, getDefaultRoutes, testModel, saveProfile, setDefaultRoutes } =
+      createApi([], true);
+    listProfiles.mockResolvedValue({
+      ok: true,
+      value: { profiles: [], builtInProfiles: [builtInEmbedding], credentials: [] }
+    });
+    getDefaultRoutes.mockResolvedValue({ ok: true, value: {} });
+    const container = await renderApp(api);
+    await click(button(container, "Settings"));
+    const forms = container.querySelectorAll<HTMLElement>(".model-profile-form");
+    await setField(
+      labelledField<HTMLInputElement>(forms[0]!, "API address"),
+      "http://localhost:1234/v1"
+    );
+    await click(button(forms[0]!, "Enter model name manually"));
+    await setField(labelledField<HTMLInputElement>(forms[0]!, "Model name"), "self-hosted-model");
+    await setField(labelledField<HTMLSelectElement>(forms[1]!, "Provider"), "local");
+
+    await click(button(container, "Save changes"));
+
+    expect(testModel).toHaveBeenCalledWith({
+      profile: expect.objectContaining({ provider: "openai-compatible" })
+    });
+    expect(saveProfile).toHaveBeenCalledWith({
+      profile: expect.objectContaining({ provider: "openai-compatible" })
+    });
+    expect(setDefaultRoutes).toHaveBeenCalledOnce();
+  });
+
+  it("edits a saved credential-free Ollama endpoint from settings", async () => {
+    const { api, listProfiles, getDefaultRoutes, testModel, saveProfile } = createApi([], true);
+    listProfiles.mockResolvedValue({
+      ok: true,
+      value: {
+        profiles: [{
+          id: projectA.id,
+          name: "Local Ollama",
+          provider: "ollama",
+          capability: "generation",
+          baseUrl: "http://127.0.0.1:11434",
+          modelId: "llama3.2",
+          enabled: true,
+          createdAt: "2026-08-25T00:00:00.000Z",
+          updatedAt: "2026-08-25T00:00:00.000Z"
+        }],
+        builtInProfiles: [builtInEmbedding],
+        credentials: []
+      }
+    });
+    getDefaultRoutes.mockResolvedValue({
+      ok: true,
+      value: { generationProfileId: projectA.id, embeddingProfileId: builtInEmbedding.id }
+    });
+    const container = await renderApp(api);
+    await click(button(container, "Settings"));
+    const generation = container.querySelectorAll<HTMLElement>(".model-profile-form")[0]!;
+
+    await setField(
+      labelledField<HTMLInputElement>(generation, "API address"),
+      "http://localhost:11435"
+    );
+    await click(button(container, "Save changes"));
+
+    expect(testModel).toHaveBeenCalledWith({
+      profile: expect.objectContaining({
+        provider: "ollama",
+        baseUrl: "http://localhost:11435",
+        modelId: "llama3.2"
+      })
+    });
+    expect(saveProfile).toHaveBeenCalledWith({
+      profile: expect.objectContaining({ baseUrl: "http://localhost:11435" })
+    });
+  });
+
   it("locks both complete model forms while onboarding persistence is in flight", async () => {
     const pending = deferred<Awaited<ReturnType<DesktopApi["models"]["test"]>>>();
     const { api, listProfiles, testModel } = createApi([], false);

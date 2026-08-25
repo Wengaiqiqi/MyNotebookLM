@@ -102,6 +102,23 @@ describe("Ollama provider", () => {
     expect(fake.requests[0]?.body).toBe(JSON.stringify({ model: "embed-test", input: ["one"], dimensions: 2 }));
   });
 
+  it.each([
+    [[]],
+    [[[]]],
+    [[[1, "bad"]]],
+    [[[1, 2], [3]]]
+  ])("rejects malformed Ollama embedding vectors %j", async (vectors) => {
+    const fake = await server((_request, response) => sendJson(response, { embeddings: vectors }));
+    const provider = new OllamaProvider({ baseUrl: origin(fake) });
+    const inputs = vectors.length === 2 ? ["one", "two"] : ["one"];
+
+    const error = await providerError(() => provider.embed(
+      { model: "embed-test", inputs },
+      new AbortController().signal
+    ));
+    expect(error.failure).toMatchObject({ error: { code: "PROVIDER" } });
+  });
+
   it("maps caller aborts to cancellation", async () => {
     const fake = await server(async (_request, response) => {
       await new Promise<void>((resolve) => response.once("close", resolve));

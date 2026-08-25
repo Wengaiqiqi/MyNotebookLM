@@ -126,6 +126,36 @@ describe("Gemini provider", () => {
     ]);
   });
 
+  it.each([
+    [],
+    [1, "bad"],
+    null
+  ])("rejects malformed Gemini embedding values %j", async (values) => {
+    const fake = await server((_request, response) => sendJson(response, {
+      embedding: { values }
+    }));
+    const provider = new GeminiProvider({ baseUrl: origin(fake), apiKey: secret });
+
+    const error = await providerError(() => provider.embed(
+      { model: "embedding-test", inputs: ["one"] },
+      new AbortController().signal
+    ));
+    expect(error.failure).toMatchObject({ error: { code: "PROVIDER" } });
+  });
+
+  it("rejects mixed Gemini embedding dimensions", async () => {
+    const fake = await server((_request, response) => sendJson(response, {
+      embedding: { values: fake.requests.length === 1 ? [1, 2] : [3] }
+    }));
+    const provider = new GeminiProvider({ baseUrl: origin(fake), apiKey: secret });
+
+    const error = await providerError(() => provider.embed(
+      { model: "embedding-test", inputs: ["one", "two"] },
+      new AbortController().signal
+    ));
+    expect(error.failure).toMatchObject({ error: { code: "PROVIDER" } });
+  });
+
   it("maps caller aborts to cancellation", async () => {
     const fake = await server(async (_request, response) => {
       await new Promise<void>((resolve) => response.once("close", resolve));

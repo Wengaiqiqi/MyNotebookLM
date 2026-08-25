@@ -58,6 +58,10 @@ class FakeSettingsRepository {
   readonly routes = new Map<ModelTaskKind, ModelRouteDto[]>();
   readonly events: string[] = [];
 
+  transaction<T>(work: () => T): T {
+    return work();
+  }
+
   getSettings(): AppSettingsDto {
     return this.settings;
   }
@@ -128,6 +132,23 @@ class FakeCredentialStore {
     this.events.push("set-credential");
     this.secrets.set(profileId, apiKey);
   });
+  readonly prepare = vi.fn(async (
+    connection: { provider: ProviderKind; baseUrl: string },
+    apiKey: string
+  ) => {
+    this.events.push("prepare-credential");
+    return {
+      encryptedSecret: Buffer.from(apiKey),
+      provider: connection.provider,
+      baseUrl: connection.baseUrl
+    };
+  });
+  readonly storePrepared = vi.fn((profileId: string, prepared: {
+    encryptedSecret: Buffer;
+  }) => {
+    this.events.push("store-credential");
+    this.secrets.set(profileId, prepared.encryptedSecret.toString("utf8"));
+  });
   readonly remove = vi.fn((profileId: string) => {
     this.events.push("remove-credential");
     this.secrets.delete(profileId);
@@ -145,6 +166,7 @@ class FakeCredentialStore {
 
   async withSecret<T>(
     profileId: string,
+    _connection: { provider: ProviderKind; baseUrl: string },
     use: (apiKey?: string) => Promise<T>
   ): Promise<T> {
     this.secretUses.push(profileId);
@@ -359,6 +381,65 @@ describe("ModelService", () => {
     expect(repository.events).toEqual([]);
   });
 
+  it("edits a credential-free Ollama profile to another permitted loopback endpoint", async () => {
+    const modelProvider = provider([{
+      id: "llama-new",
+      displayName: "Llama new",
+      capabilities: ["generation"],
+      capabilityEvidence: "authoritative"
+    }]);
+    const { service, repository, credentials, factory } = setup(modelProvider);
+    const ollamaProfile = {
+      ...profile,
+      provider: "ollama" as const,
+      baseUrl: "http://127.0.0.1:11434",
+      modelId: "llama-old"
+    };
+    repository.profiles.set(PROFILE_ID, dto(ollamaProfile));
+
+    const result = await service.saveProfile({
+      profile: {
+        ...ollamaProfile,
+        baseUrl: "http://localhost:11435",
+        modelId: "llama-new"
+      }
+    });
+
+    expect(result).toMatchObject({
+      ok: true,
+      value: { baseUrl: "http://localhost:11435", modelId: "llama-new" }
+    });
+    expect(credentials.secretUses).toEqual([]);
+    expect(factory).toHaveBeenCalledWith("ollama", "http://localhost:11435", undefined);
+  });
+
+  it("saves a keyless OpenAI-compatible profile on a permitted loopback endpoint", async () => {
+    const modelProvider = provider([{
+      id: "self-hosted-model",
+      displayName: "Self hosted model",
+      capabilities: ["generation"],
+      capabilityEvidence: "authoritative"
+    }]);
+    const { service, repository, credentials, factory } = setup(modelProvider);
+    const compatible = {
+      ...profile,
+      provider: "openai-compatible" as const,
+      baseUrl: "http://localhost:1234/v1",
+      modelId: "self-hosted-model"
+    };
+
+    const result = await service.saveProfile({ profile: compatible });
+
+    expect(result).toMatchObject({ ok: true, value: compatible });
+    expect(repository.profiles.get(PROFILE_ID)).toMatchObject(compatible);
+    expect(credentials.secrets.has(PROFILE_ID)).toBe(false);
+    expect(factory).toHaveBeenCalledWith(
+      "openai-compatible",
+      "http://localhost:1234/v1",
+      undefined
+    );
+  });
+
   it.each([
     ["openai", "file:///tmp/models"],
     ["openai", "https://user:password@example.test/v1"],
@@ -507,7 +588,12 @@ describe("ModelService", () => {
       temperature: 0,
       maxTokens: 1
     }, expect.any(AbortSignal));
-    expect(repository.events).toEqual(["probe", "save-profile", "set-credential"]);
+    expect(repository.events).toEqual([
+      "probe",
+      "prepare-credential",
+      "save-profile",
+      "store-credential"
+    ]);
     expect(credentials.secrets.get(PROFILE_ID)).toBe("new-secret");
   });
 

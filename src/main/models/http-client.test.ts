@@ -15,6 +15,15 @@ function chunkedResponse(chunks: string[], headers: HeadersInit): Response {
   }), { headers });
 }
 
+function byteChunkedResponse(chunks: Uint8Array[], headers: HeadersInit): Response {
+  return new Response(new ReadableStream({
+    start(controller) {
+      for (const chunk of chunks) controller.enqueue(chunk);
+      controller.close();
+    }
+  }), { headers });
+}
+
 async function requestError(action: () => Promise<unknown>): Promise<ProviderRequestError> {
   const error = await action().catch((reason: unknown) => reason);
   expect(error).toBeInstanceOf(ProviderRequestError);
@@ -99,6 +108,22 @@ describe("ProviderHttpClient", () => {
     expect(JSON.stringify(error)).not.toContain("secret-token");
   });
 
+  it("enforces the raw response byte cap before parsing", async () => {
+    const client = new ProviderHttpClient(
+      async () => response('{"secret":"oversized"}'),
+      { maxResponseBytes: 8 }
+    );
+
+    const error = await requestError(() => client.json(
+      "https://models.example",
+      "/models",
+      { signal: new AbortController().signal }
+    ));
+
+    expect(error.failure).toMatchObject({ error: { code: "PROVIDER" } });
+    expect(JSON.stringify(error)).not.toContain("oversized");
+  });
+
   it("reads SSE and NDJSON records split across byte chunks", async () => {
     const client = new ProviderHttpClient(async (_url) => chunkedResponse(
       ['data: {"text":"hel', 'lo"}\n\ndata: [DONE]\n\n'],
@@ -119,5 +144,36 @@ describe("ProviderHttpClient", () => {
       records.push(record);
     }
     expect(records).toEqual([{ value: 1 }, { value: 2 }]);
+  });
+
+  it("preserves multibyte UTF-8 characters split across streaming chunks", async () => {
+    const encoder = new TextEncoder();
+    const sseBytes = encoder.encode('data: {"text":"你好"}\n\n');
+    const firstMultibyte = sseBytes.findIndex((byte) => byte === 0xe4);
+    const client = new ProviderHttpClient(async () => byteChunkedResponse([
+      sseBytes.slice(0, firstMultibyte + 1),
+      sseBytes.slice(firstMultibyte + 1)
+    ], { "content-type": "text/event-stream" }));
+    const events: unknown[] = [];
+    for await (const event of client.sse(
+      "https://models.example",
+      "/stream",
+      { signal: new AbortController().signal }
+    )) events.push(event);
+    expect(events).toEqual([{ text: "你好" }]);
+
+    const ndjsonBytes = encoder.encode('{"text":"研究"}\n');
+    const secondMultibyte = ndjsonBytes.findIndex((byte) => byte === 0xe7);
+    const ndjsonClient = new ProviderHttpClient(async () => byteChunkedResponse([
+      ndjsonBytes.slice(0, secondMultibyte + 2),
+      ndjsonBytes.slice(secondMultibyte + 2)
+    ], { "content-type": "application/x-ndjson" }));
+    const records: unknown[] = [];
+    for await (const record of ndjsonClient.ndjson(
+      "https://models.example",
+      "/stream",
+      { signal: new AbortController().signal }
+    )) records.push(record);
+    expect(records).toEqual([{ text: "研究" }]);
   });
 });

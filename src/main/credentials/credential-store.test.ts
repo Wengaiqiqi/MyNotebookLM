@@ -42,6 +42,15 @@ class LeakyProtector extends DeterministicProtector {
   }
 }
 
+class CountingProtector extends DeterministicProtector {
+  decryptCalls = 0;
+
+  override async decrypt(value: Buffer): Promise<string> {
+    this.decryptCalls += 1;
+    return super.decrypt(value);
+  }
+}
+
 describe("CredentialStore", () => {
   let temporaryRoot: string;
   let appDatabase: AppDatabase;
@@ -75,11 +84,49 @@ describe("CredentialStore", () => {
     await store.set(PROFILE_ID, apiKey);
 
     const row = appDatabase.connection.prepare(
-      "SELECT encrypted_secret FROM credentials WHERE profile_id = ?"
-    ).get(PROFILE_ID) as { encrypted_secret: Buffer };
+      "SELECT encrypted_secret, provider, base_url FROM credentials WHERE profile_id = ?"
+    ).get(PROFILE_ID) as { encrypted_secret: Buffer; provider: string; base_url: string };
     expect(row.encrypted_secret.equals(Buffer.from(apiKey))).toBe(false);
+    expect(row).toMatchObject({
+      provider: "openai",
+      base_url: "https://api.openai.com/v1"
+    });
     expect(store.status(PROFILE_ID)).toEqual({ hasCredential: true, mask: "••••••••" });
-    await expect(store.withSecret(PROFILE_ID, async (value) => value)).resolves.toBe(apiKey);
+    await expect(store.withSecret(
+      PROFILE_ID,
+      { provider: "openai", baseUrl: "https://api.openai.com/v1" },
+      async (value) => value
+    )).resolves.toBe(apiKey);
+  });
+
+  it("refuses to decrypt when durable credential binding no longer matches the profile", async () => {
+    const protector = new CountingProtector();
+    const store = new CredentialStore(appDatabase.connection, protector);
+    await store.set(PROFILE_ID, "bound-secret");
+    appDatabase.connection.prepare(`
+      UPDATE model_profiles SET base_url = 'https://attacker.example.test/v1' WHERE id = ?
+    `).run(PROFILE_ID);
+
+    await expect(store.withSecret(
+      PROFILE_ID,
+      { provider: "openai", baseUrl: "https://attacker.example.test/v1" },
+      async (value) => value
+    ))
+      .rejects.toThrow(/binding/i);
+    expect(protector.decryptCalls).toBe(0);
+  });
+
+  it("refuses to decrypt for a requested endpoint outside the durable binding", async () => {
+    const protector = new CountingProtector();
+    const store = new CredentialStore(appDatabase.connection, protector);
+    await store.set(PROFILE_ID, "bound-secret");
+
+    await expect(store.withSecret(
+      PROFILE_ID,
+      { provider: "openai-compatible", baseUrl: "https://attacker.example.test/v1" },
+      async (value) => value
+    )).rejects.toThrow(/binding/i);
+    expect(protector.decryptCalls).toBe(0);
   });
 
   it("replaces a stored credential and removes it on request", async () => {
@@ -87,11 +134,19 @@ describe("CredentialStore", () => {
 
     await store.set(PROFILE_ID, "first-key");
     await store.set(PROFILE_ID, "replacement-key");
-    await expect(store.withSecret(PROFILE_ID, async (value) => value)).resolves.toBe("replacement-key");
+    await expect(store.withSecret(
+      PROFILE_ID,
+      { provider: "openai", baseUrl: "https://api.openai.com/v1" },
+      async (value) => value
+    )).resolves.toBe("replacement-key");
 
     store.remove(PROFILE_ID);
     expect(store.status(PROFILE_ID)).toEqual({ hasCredential: false });
-    await expect(store.withSecret(PROFILE_ID, async (value) => value)).resolves.toBeUndefined();
+    await expect(store.withSecret(
+      PROFILE_ID,
+      { provider: "openai", baseUrl: "https://api.openai.com/v1" },
+      async (value) => value
+    )).resolves.toBeUndefined();
   });
 
   it("rejects blank credentials before encrypting them", async () => {
