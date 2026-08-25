@@ -120,23 +120,16 @@ export class TaskRepository {
 
   transition(input: TaskTransition): TaskDto {
     return this.db.transaction(() => {
-      const current = this.findById(input.id);
-      if (!current) throw new TaskNotFoundError(input.id);
-      if (current.state !== input.expectedState) throw new StaleTaskStateError(input.id);
-
-      const progress = input.progress ?? current.progress;
-      if (input.progress !== undefined && progress < current.progress) {
-        throw new StaleTaskStateError(input.id);
-      }
-
-      const attempt = input.attempt ?? current.attempt;
+      const progress = input.progress;
+      const attempt = input.attempt;
       const errorCode = input.error?.code ?? null;
       const errorMessage = input.error?.messageKey ?? null;
-      this.db.prepare(`
+      const result = this.db.prepare(`
         UPDATE tasks
-        SET state = ?, stage = ?, progress_1000 = ?, attempt = ?,
-            error_code = ?, error_message = ?, updated_at = ?
-        WHERE id = ?
+        SET state = ?, stage = ?, progress_1000 = COALESCE(?, progress_1000),
+            attempt = COALESCE(?, attempt), error_code = ?, error_message = ?, updated_at = ?
+        WHERE id = ? AND state = ?
+          AND (? IS NULL OR progress_1000 <= ?)
       `).run(
         input.nextState,
         input.stage,
@@ -145,8 +138,16 @@ export class TaskRepository {
         errorCode,
         errorMessage,
         input.updatedAt,
-        input.id
+        input.id,
+        input.expectedState,
+        progress,
+        progress
       );
+      if (result.changes === 0) {
+        const current = this.findById(input.id);
+        if (!current) throw new TaskNotFoundError(input.id);
+        throw new StaleTaskStateError(input.id);
+      }
       return this.read(input.id);
     })();
   }

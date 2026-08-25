@@ -1,6 +1,7 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import Database from "better-sqlite3";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { TaskDto } from "../../shared/tasks";
 import { openAppDatabase, type AppDatabase } from "../db/database";
@@ -184,5 +185,37 @@ describe("TaskRepository", () => {
     expect(stale.map((t) => t.id)).toEqual([TASK_ID]);
     const fresh = repository.listRecoverableRunning("2026-08-19T00:00:00.000Z");
     expect(fresh).toEqual([]);
+  });
+
+  it("compare-and-swaps against the persisted state inside a transaction", () => {
+    createTask();
+    const secondConnection = new Database(path.join(temporaryRoot, "app.db"));
+    secondConnection.pragma("busy_timeout = 5000");
+    try {
+      repository.transition({
+        id: TASK_ID,
+        expectedState: "queued",
+        nextState: "running",
+        stage: "parsing",
+        updatedAt: "2026-08-25T00:00:00.001Z"
+      });
+
+      secondConnection.prepare(
+        "UPDATE tasks SET state = 'completed', updated_at = ? WHERE id = ?"
+      ).run("2026-08-25T00:00:01.000Z", TASK_ID);
+
+      expect(() => repository.transition({
+        id: TASK_ID,
+        expectedState: "running",
+        nextState: "running",
+        stage: "parsing",
+        progress: 400,
+        updatedAt: "2026-08-25T00:00:02.000Z"
+      })).toThrow(StaleTaskStateError);
+
+      expect(repository.findById(TASK_ID)!.state).toBe("completed");
+    } finally {
+      secondConnection.close();
+    }
   });
 });
