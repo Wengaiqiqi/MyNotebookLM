@@ -1,0 +1,10 @@
+# bilingual sample fixture for deterministic source chunking tests
+heading|第一章 概述
+paragraph|这是一个用于测试中文分词与 token 估算的段落，包含若干中文句子。它应该被当作连续的正文接入标准化分块器。
+paragraph|This English paragraph contains a set of words that are counted for non-CJK token estimation during deterministic chunking.
+paragraph|混合内容：中文句子与 English words 交替出现，用于验证双语文档的分块稳定性。
+heading|第二章 方法
+table|名称|数值|alpha|1|beta|2|gamma|3
+list|分析样本
+list|验证结果
+sheet-row|A1 B2 C3
