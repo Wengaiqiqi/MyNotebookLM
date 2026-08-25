@@ -77,6 +77,10 @@ export class OllamaProvider implements ModelProvider {
       signal
     })) {
       if (!isRecord(chunk)) throw malformedResponse();
+      if (chunk.error !== undefined) {
+        if (typeof chunk.error !== "string") throw malformedResponse();
+        throw new ProviderRequestError(classifyProviderError({ status: 500 }));
+      }
       if (chunk.message !== undefined) {
         if (!isRecord(chunk.message) || typeof chunk.message.content !== "string") throw malformedResponse();
         if (chunk.message.content) yield { type: "text-delta", text: chunk.message.content };
@@ -103,7 +107,11 @@ export class OllamaProvider implements ModelProvider {
     const response = await this.client.json<unknown>(this.baseUrl, "/api/embed", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ model: request.model, input: request.inputs }),
+      body: JSON.stringify({
+        model: request.model,
+        input: request.inputs,
+        ...(request.dimensions === undefined ? {} : { dimensions: request.dimensions })
+      }),
       signal
     });
     if (!isRecord(response)) throw malformedResponse();

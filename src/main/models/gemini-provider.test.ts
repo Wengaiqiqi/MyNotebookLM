@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { GeminiProvider } from "./gemini-provider";
 import { ProviderRequestError } from "./http-client";
+import type { GenerationEvent } from "./provider";
 import { sendJson, startFakeProviderServer, type FakeProviderServer } from "./test/fake-provider-server";
 
 const secret = "gemini-test-secret";
@@ -61,7 +62,7 @@ describe("Gemini provider", () => {
       response.end('data: {"candidates":[{"content":{"parts":[{"text":"lo"}]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":4,"candidatesTokenCount":2}}\n\n');
     });
     const provider = new GeminiProvider({ baseUrl: origin(fake), apiKey: secret });
-    const events = [];
+    const events: GenerationEvent[] = [];
     for await (const event of provider.generate({
       model: "models/gemini-test",
       messages: [
@@ -136,6 +137,26 @@ describe("Gemini provider", () => {
 
     const error = await providerError(() => pending);
     expect(error.failure).toMatchObject({ fallbackEligible: false, error: { code: "CANCELLED" } });
+  });
+
+  it("rejects Gemini in-stream errors without finalizing partial output or retaining the message", async () => {
+    const streamSecret = "gemini-stream-secret";
+    const fake = await server((_request, response) => {
+      response.writeHead(200, { "content-type": "text/event-stream" });
+      response.write('data: {"candidates":[{"content":{"parts":[{"text":"partial"}]}}]}\n\n');
+      response.end(`data: {"error":{"code":429,"message":"${streamSecret}","status":"RESOURCE_EXHAUSTED"}}\n\n`);
+    });
+    const provider = new GeminiProvider({ baseUrl: origin(fake), apiKey: secret });
+    const events: GenerationEvent[] = [];
+
+    const error = await providerError(async () => {
+      for await (const event of provider.generate({
+        model: "gemini-test", messages: [{ role: "user", content: "Hello" }]
+      }, new AbortController().signal)) events.push(event);
+    });
+    expect(events).toEqual([{ type: "text-delta", text: "partial" }]);
+    expect(error.failure).toMatchObject({ fallbackEligible: true, error: { code: "RATE_LIMITED" } });
+    expect(JSON.stringify(error)).not.toContain(streamSecret);
   });
 
   it.each([

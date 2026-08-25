@@ -32,6 +32,21 @@ function optionalFiniteNumber(value: unknown): number | undefined {
   return value;
 }
 
+function anthropicStreamError(value: unknown): ProviderRequestError {
+  if (!isRecord(value) || typeof value.type !== "string") return malformedResponse();
+  const status = {
+    invalid_request_error: 400,
+    authentication_error: 401,
+    billing_error: 403,
+    permission_error: 403,
+    not_found_error: 404,
+    rate_limit_error: 429,
+    api_error: 500,
+    overloaded_error: 503
+  }[value.type] ?? 500;
+  return new ProviderRequestError(classifyProviderError({ status }));
+}
+
 export class AnthropicProvider implements ModelProvider {
   readonly baseUrl: string;
   private readonly apiKey: string | undefined;
@@ -78,7 +93,9 @@ export class AnthropicProvider implements ModelProvider {
       signal
     })) {
       if (!isRecord(event) || typeof event.type !== "string") throw malformedResponse();
-      if (event.type === "message_start") {
+      if (event.type === "error") {
+        throw anthropicStreamError(event.error);
+      } else if (event.type === "message_start") {
         if (!isRecord(event.message) || !isRecord(event.message.usage)) throw malformedResponse();
         const inputTokens = optionalFiniteNumber(event.message.usage.input_tokens);
         if (inputTokens !== undefined) yield { type: "usage", inputTokens };

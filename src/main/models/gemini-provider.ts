@@ -98,6 +98,12 @@ export class GeminiProvider implements ModelProvider {
       { method: "POST", headers: this.headers(true), body: JSON.stringify(body), signal }
     )) {
       if (!isRecord(chunk)) throw malformedResponse();
+      if (chunk.error !== undefined) {
+        if (!isRecord(chunk.error) || typeof chunk.error.code !== "number" || !Number.isInteger(chunk.error.code)) {
+          throw malformedResponse();
+        }
+        throw new ProviderRequestError(classifyProviderError({ status: chunk.error.code }));
+      }
       const finishReasons: string[] = [];
       if (chunk.candidates !== undefined) {
         if (!Array.isArray(chunk.candidates)) throw malformedResponse();

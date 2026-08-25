@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { OllamaProvider } from "./ollama-provider";
 import { ProviderRequestError } from "./http-client";
+import type { GenerationEvent } from "./provider";
 import { sendJson, startFakeProviderServer, type FakeProviderServer } from "./test/fake-provider-server";
 
 const servers: FakeProviderServer[] = [];
@@ -52,7 +53,7 @@ describe("Ollama provider", () => {
       response.end('{"message":{"role":"assistant","content":"lo"},"done":true,"done_reason":"stop","prompt_eval_count":4,"eval_count":2}\n');
     });
     const provider = new OllamaProvider({ baseUrl: origin(fake) });
-    const events = [];
+    const events: GenerationEvent[] = [];
     for await (const event of provider.generate({
       model: "llama-test",
       messages: [{ role: "user", content: "Hello" }],
@@ -93,6 +94,14 @@ describe("Ollama provider", () => {
     });
   });
 
+  it("includes requested embedding dimensions in the Ollama body", async () => {
+    const fake = await server((_request, response) => sendJson(response, { embeddings: [[1, 2]] }));
+    const provider = new OllamaProvider({ baseUrl: origin(fake) });
+
+    await provider.embed({ model: "embed-test", inputs: ["one"], dimensions: 2 }, new AbortController().signal);
+    expect(fake.requests[0]?.body).toBe(JSON.stringify({ model: "embed-test", input: ["one"], dimensions: 2 }));
+  });
+
   it("maps caller aborts to cancellation", async () => {
     const fake = await server(async (_request, response) => {
       await new Promise<void>((resolve) => response.once("close", resolve));
@@ -104,6 +113,26 @@ describe("Ollama provider", () => {
 
     const error = await providerError(() => pending);
     expect(error.failure).toMatchObject({ fallbackEligible: false, error: { code: "CANCELLED" } });
+  });
+
+  it("rejects Ollama in-stream errors without finalizing partial output or retaining the message", async () => {
+    const streamSecret = "ollama-stream-secret";
+    const fake = await server((_request, response) => {
+      response.writeHead(200, { "content-type": "application/x-ndjson" });
+      response.write('{"message":{"role":"assistant","content":"partial"},"done":false}\n');
+      response.end(`${JSON.stringify({ error: streamSecret })}\n`);
+    });
+    const provider = new OllamaProvider({ baseUrl: origin(fake) });
+    const events: GenerationEvent[] = [];
+
+    const error = await providerError(async () => {
+      for await (const event of provider.generate({
+        model: "llama-test", messages: [{ role: "user", content: "Hello" }]
+      }, new AbortController().signal)) events.push(event);
+    });
+    expect(events).toEqual([{ type: "text-delta", text: "partial" }]);
+    expect(error.failure).toMatchObject({ fallbackEligible: true, error: { code: "PROVIDER" } });
+    expect(JSON.stringify(error)).not.toContain(streamSecret);
   });
 
   it.each([
