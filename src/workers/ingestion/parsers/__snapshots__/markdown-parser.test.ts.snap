@@ -1,0 +1,63 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`parseMarkdown > emits heading ancestry, list, code and table text 1`] = `
+[
+  {
+    "kind": "heading",
+    "locator": {
+      "depth": 1,
+      "headingPath": "Root",
+      "kind": "heading",
+    },
+    "text": "Root",
+  },
+  {
+    "kind": "heading",
+    "locator": {
+      "depth": 2,
+      "headingPath": "Root > Child",
+      "kind": "heading",
+    },
+    "text": "Child",
+  },
+  {
+    "kind": "paragraph",
+    "locator": {
+      "kind": "paragraph",
+      "paragraph": 1,
+    },
+    "text": "Root > Child
+body",
+  },
+  {
+    "kind": "list",
+    "locator": {
+      "end": 33,
+      "kind": "offset",
+      "start": 21,
+    },
+    "text": "one
+two",
+  },
+  {
+    "kind": "paragraph",
+    "locator": {
+      "end": 56,
+      "kind": "offset",
+      "start": 33,
+    },
+    "text": "const x = 1;",
+  },
+  {
+    "kind": "table",
+    "locator": {
+      "end": 86,
+      "kind": "offset",
+      "start": 56,
+    },
+    "text": "| A | B |
+|---|---|
+| 1 | 2 |",
+  },
+]
+`;

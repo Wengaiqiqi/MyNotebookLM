@@ -1,0 +1,29 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`parseCsv > detects delimiters, preserves quoted commas/newlines, headers, and row ranges 1`] = `
+[
+  {
+    "kind": "sheet-row",
+    "locator": {
+      "endRow": 2,
+      "kind": "row",
+      "sheet": "CSV",
+      "startRow": 2,
+    },
+    "text": "Name: Alice
+Note: hello, world",
+  },
+  {
+    "kind": "sheet-row",
+    "locator": {
+      "endRow": 3,
+      "kind": "row",
+      "sheet": "CSV",
+      "startRow": 3,
+    },
+    "text": "Name: Bob
+Note: line1
+line2",
+  },
+]
+`;
