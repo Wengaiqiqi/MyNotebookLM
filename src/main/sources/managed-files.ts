@@ -19,7 +19,15 @@ function mkdirSafe(root: string, dir: string): void {
       throw new Error("non-directory in storage path");
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
-      mkdirSync(current);
+      try {
+        mkdirSync(current);
+      } catch (mkdirError) {
+        if ((mkdirError as NodeJS.ErrnoException).code !== "EEXIST") throw mkdirError;
+        const created = lstatSync(current);
+        if (created.isSymbolicLink()) throw new Error("reparse point or symbolic link in storage path");
+        if (path.resolve(realpathSync(current)) !== current) throw new Error("reparse point or symbolic link in storage path");
+        if (!created.isDirectory()) throw new Error("non-directory in storage path");
+      }
     }
   }
 }

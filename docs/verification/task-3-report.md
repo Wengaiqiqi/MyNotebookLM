@@ -29,3 +29,7 @@
 ## P2 最终复审修复
 
 linkSync 成功即视为提交完成；后续 unlinkSync 临时文件清理失败只会被吞掉并保留已提交的 content，不会再向调用方报告提交失败。新增测试模拟提交后清理失败并验证成功返回与内容可读。
+
+本次 P2 最终复审修复 mkdirSafe 的并发首次创建竞争：检查到 ENOENT 后若 mkdirSync 竞争性返回 EEXIST，重新执行 lstat/realpath，确认目标仍为安全的真实目录后继续；其他异常、非目录、符号链接或 reparse 路径仍拒绝。新增并发创建获胜回归测试。
+
+本次验证：聚焦测试 12/12、src/main/sources 相关测试 39/39、npm run typecheck 通过，git diff --check 通过（仅有换行符转换提示）。

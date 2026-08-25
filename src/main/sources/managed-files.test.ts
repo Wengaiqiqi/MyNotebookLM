@@ -6,6 +6,7 @@ import path from "node:path";
 let failFsync = false;
 let failClose = false;
 let failUnlink = false;
+let failMkdirWithEexistOnce = false;
 let observeRename: ((from: string, to: string) => void) | undefined;
 vi.mock("node:fs", async () => {
   const actual = await vi.importActual<typeof import("node:fs")>("node:fs");
@@ -14,12 +15,28 @@ vi.mock("node:fs", async () => {
     fsyncSync: (fd: number) => { if (failFsync) throw new Error("fsync failed"); return actual.fsyncSync(fd); },
     closeSync: (fd: number) => { if (failClose) throw new Error("close failed"); return actual.closeSync(fd); },
     unlinkSync: (filePath: string) => { if (failUnlink) throw new Error("unlink failed"); return actual.unlinkSync(filePath); },
+    mkdirSync: (directory: string, options?: Parameters<typeof actual.mkdirSync>[1]) => {
+      if (failMkdirWithEexistOnce) {
+        failMkdirWithEexistOnce = false;
+        actual.mkdirSync(directory, options);
+        const error = new Error("already exists") as NodeJS.ErrnoException;
+        error.code = "EEXIST";
+        throw error;
+      }
+      return actual.mkdirSync(directory, options);
+    },
     renameSync: (from: string, to: string) => { observeRename?.(from, to); return actual.renameSync(from, to); },
   };
 });
 import { stageFile } from "./managed-files";
 
 describe("managed files", () => {
+  it("revalidates a directory after a concurrent create wins", () => {
+    const root = mkdtempSync(path.join(tmpdir(), "managed-"));
+    failMkdirWithEexistOnce = true;
+    expect(() => stageFile({ root, sourceId: "source-1", revisionId: "revision-1", bytes: Buffer.from("race") })).not.toThrow();
+  });
+
   it("stores under the revision directory using an id-derived name and hashes bytes", () => {
     const root = mkdtempSync(path.join(tmpdir(), "managed-"));
     const result = stageFile({ root, sourceId: "source-1", revisionId: "revision-1", bytes: Buffer.from("hello") });
