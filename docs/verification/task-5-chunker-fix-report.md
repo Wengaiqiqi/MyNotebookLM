@@ -43,3 +43,28 @@ Commit: `3dbd112` fix: correct chunker token estimate and locator ranges
 ## 未包含的无关改动
 
 以下预先存在、与本任务无关的改动未暂存、未提交：`docs/superpowers/plans/2026-08-24-desktop-foundation-implementation.md`（删除）、`docs/verification/screenshots/onboarding-zh-light.png` / `settings-en-dark.png`（修改）、`docs/superpowers/2026-08-24-desktop-foundation-implementation.md`（新增）。
+
+## 第二轮独立复审修复（2026-08-26）
+
+Commit: `0096b16` fix: respect heading token budget in chunker
+
+复审指出三点，均先写失败测试（RED）再实现（GREEN）：
+
+1. **heading 上下文 token 必须计入分块阈值**：原先 `flush` 只在 `tokenEstimate` 输出里加 heading 前缀 token，分块阈值判断只按 `state.tokens`，导致 heading 较大的 chunk 最终 `tokenEstimate` 可超过 `targetTokens`。修复后在 `chunkBlocks` 循环中引入 `prefixTokens` 预算：`budget = targetTokens - prefixTokens`，并把超预算的正文 fragment 按剩余预算 `splitByTokens` 拆分，保证任何 chunk 的 `tokenEstimate <= targetTokens`。
+2. **超长 heading 不得作为超限 atomic chunk**：原先 `toFragments` 对所有 heading 无条件返回单一 `isAtomic` fragment，超过 `targetTokens` 仍塞进一块。修复后当 heading 自身 token 数超过目标时，用 `splitByTokens` 拆成多个 `isHeading: true` 的原子片段，每片 `tokenEstimate <= targetTokens`，且每个仍携带 heading 语义（heading locator/纯 heading chunk）。
+3. **page/slide/paragraph end 范围反向校验测试**：在 `schemas-strict.test.ts` 的 `validates normalized source locators` 中补充 `endPage < page`、`endSlide < slide`、`endParagraph < paragraph` 三类反向输入应抛错的断言，验证新增 end 字段的反向范围校验。
+
+### 本轮验证
+
+- 聚焦 `npx vitest run src/workers/ingestion/chunker.test.ts src/shared/schemas-strict.test.ts`：32 个测试全部通过（含新增 2 个 chunker 失败测试，先 RED 再 GREEN；schema 反测通过）。
+- 全量 `npx vitest run`：32 个测试文件、389 个测试全部通过。
+- `npm run typecheck`（tsconfig.node + tsconfig.web）：通过，退出码 0。
+- 双语 fixture 快照未变动，说明本修复不影响既有非超长 heading 行为。
+
+### 本轮涉及文件
+
+| 文件 | 变更 | 说明 |
+| --- | --- | --- |
+| `src/workers/ingestion/chunker.ts` | 修改 | heading 前缀计入阈值、超长 heading 拆分、正文 fragment 按预算拆分 |
+| `src/workers/ingestion/chunker.test.ts` | 修改 | 新增 heading 阈值与超长 heading 拆分测试 |
+| `src/shared/schemas-strict.test.ts` | 修改 | 新增 page/slide/paragraph end 反向范围校验测试 |
