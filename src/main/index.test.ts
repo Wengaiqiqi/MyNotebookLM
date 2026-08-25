@@ -50,6 +50,14 @@ const mocks = vi.hoisted(() => {
       events.push("service");
       this.repository = repository;
     }),
+    SafeStorageAdapter: vi.fn(function (this: Record<string, unknown>) {
+      events.push("protector");
+    }),
+    CredentialStore: vi.fn(function (this: Record<string, unknown>, db: unknown, protector: unknown) {
+      events.push("credentials");
+      this.db = db;
+      this.protector = protector;
+    }),
     registerProjectHandlers: vi.fn(() => {
       events.push("handlers");
       return cleanup;
@@ -73,6 +81,10 @@ vi.mock("./projects/project-repository", () => ({
   ProjectRepository: mocks.ProjectRepository
 }));
 vi.mock("./projects/project-service", () => ({ ProjectService: mocks.ProjectService }));
+vi.mock("./credentials/safe-storage-adapter", () => ({
+  SafeStorageAdapter: mocks.SafeStorageAdapter
+}));
+vi.mock("./credentials/credential-store", () => ({ CredentialStore: mocks.CredentialStore }));
 vi.mock("./ipc/register-project-handlers", () => ({
   registerProjectHandlers: mocks.registerProjectHandlers
 }));
@@ -119,6 +131,8 @@ describe("main application composition", () => {
       "database",
       "repository",
       "service",
+      "protector",
+      "credentials",
       "handlers",
       "menu",
       "window"
@@ -139,6 +153,12 @@ describe("main application composition", () => {
     expect(mocks.ProjectRepository).toHaveBeenCalledWith(mocks.connection);
     expect(mocks.ProjectService).toHaveBeenCalledOnce();
     expect(mocks.ProjectService).toHaveBeenCalledWith(mocks.ProjectRepository.mock.instances[0]);
+    expect(mocks.SafeStorageAdapter).toHaveBeenCalledOnce();
+    expect(mocks.CredentialStore).toHaveBeenCalledOnce();
+    expect(mocks.CredentialStore).toHaveBeenCalledWith(
+      mocks.connection,
+      mocks.SafeStorageAdapter.mock.instances[0]
+    );
     expect(mocks.registerProjectHandlers).toHaveBeenCalledOnce();
     expect(mocks.registerProjectHandlers).toHaveBeenCalledWith(
       mocks.ipcMain,

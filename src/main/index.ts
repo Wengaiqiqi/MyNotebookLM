@@ -2,6 +2,8 @@ import { app, BrowserWindow, ipcMain, Menu } from "electron";
 import { mkdir } from "node:fs/promises";
 import path from "node:path";
 import { type AppDatabase, openAppDatabase } from "./db/database";
+import { CredentialStore } from "./credentials/credential-store";
+import { SafeStorageAdapter } from "./credentials/safe-storage-adapter";
 import { registerProjectHandlers } from "./ipc/register-project-handlers";
 import { getAppPaths } from "./platform/paths";
 import { ProjectRepository } from "./projects/project-repository";
@@ -10,6 +12,7 @@ import { createMainWindow } from "./window";
 
 let appDatabase: AppDatabase | undefined;
 let cleanupProjectHandlers: (() => void) | undefined;
+let credentialStore: CredentialStore | undefined;
 
 const testUserDataDir = process.env["MYNOTEBOOKLM_USER_DATA_DIR"];
 if (process.env["NODE_ENV"] === "test" && testUserDataDir) {
@@ -30,6 +33,7 @@ app.whenReady().then(async () => {
   appDatabase = openAppDatabase(appPaths.database, migrationsDir);
   const projectRepository = new ProjectRepository(appDatabase.connection);
   const projectService = new ProjectService(projectRepository);
+  credentialStore = new CredentialStore(appDatabase.connection, new SafeStorageAdapter());
   cleanupProjectHandlers = registerProjectHandlers(ipcMain, projectService);
 
   Menu.setApplicationMenu(null);
@@ -43,6 +47,7 @@ app.whenReady().then(async () => {
 app.on("before-quit", () => {
   cleanupProjectHandlers?.();
   cleanupProjectHandlers = undefined;
+  credentialStore = undefined;
   appDatabase?.close();
   appDatabase = undefined;
 });
