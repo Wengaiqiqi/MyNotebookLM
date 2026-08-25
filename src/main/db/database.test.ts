@@ -161,4 +161,34 @@ describe("openAppDatabase", () => {
 
     expectOpenToFail(/name/i);
   });
+
+  it("creates the approved settings and model tables with safe defaults", () => {
+    const bundledDatabase = openAppDatabase(
+      path.join(temporaryRoot, "bundled.db"),
+      path.resolve("src/main/db/migrations")
+    );
+
+    try {
+      expect(
+        bundledDatabase.connection
+          .prepare("SELECT onboarding_completed, locale, theme FROM app_settings WHERE id = 1")
+          .get()
+      ).toEqual({ onboarding_completed: 0, locale: "zh-CN", theme: "light" });
+      expect(
+        bundledDatabase.connection
+          .prepare("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name")
+          .all()
+      ).toEqual(expect.arrayContaining([
+        { name: "credentials" },
+        { name: "model_profiles" },
+        { name: "model_routes" }
+      ]));
+      expect(() => bundledDatabase.connection.prepare(`
+        INSERT INTO model_profiles(id, name, provider, capability, base_url, model_id)
+        VALUES ('11111111-1111-4111-8111-111111111111', 'Broken', 'invalid', 'generation', '', 'x')
+      `).run()).toThrow(/check/i);
+    } finally {
+      bundledDatabase.close();
+    }
+  });
 });
