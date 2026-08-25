@@ -20,6 +20,13 @@ describe("classifyProviderError", () => {
     expect(JSON.stringify(failure.error)).not.toContain("secret-token");
   });
 
+  it.each([400, 409, 422])("keeps unlisted client HTTP %i failures out of fallback", (status) => {
+    expect(classifyProviderError({ status })).toEqual({
+      fallbackEligible: false,
+      error: { code: "PROVIDER", messageKey: "errors.provider", recoverable: false }
+    });
+  });
+
   it("marks timeout and network failures as fallback eligible", () => {
     expect(classifyProviderError({ timeout: true })).toMatchObject({
       fallbackEligible: true,

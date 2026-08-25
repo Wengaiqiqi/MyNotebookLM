@@ -53,6 +53,9 @@ export function classifyProviderError(input: ProviderFailureInput): ProviderFail
       if (input.status !== undefined && input.status >= 500) {
         return { error: error("PROVIDER", "errors.provider", true), fallbackEligible: true };
       }
+      if (input.status !== undefined) {
+        return { error: error("PROVIDER", "errors.provider", false), fallbackEligible: false };
+      }
       return { error: error("NETWORK", "errors.network", true), fallbackEligible: true };
   }
 }
