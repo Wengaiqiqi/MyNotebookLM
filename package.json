@@ -15,8 +15,15 @@
     "postinstall": "electron-builder install-app-deps"
   },
   "dependencies": {
+    "@mozilla/readability": "0.6.0",
     "better-sqlite3": "13.0.3",
+    "csv-parse": "7.0.2",
+    "exceljs": "4.4.0",
+    "fast-xml-parser": "5.11.0",
     "i18next": "26.4.0",
+    "jszip": "3.10.1",
+    "linkedom": "0.18.13",
+    "pdfjs-dist": "6.2.108",
     "react": "19.2.8",
     "react-dom": "19.2.8",
     "react-i18next": "17.0.12",

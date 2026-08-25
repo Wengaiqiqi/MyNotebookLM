@@ -263,4 +263,257 @@ describe("openAppDatabase", () => {
       bundledDatabase.close();
     }
   });
+
+  it("creates the ingestion sources, revisions, chunks and tasks tables", () => {
+    const bundledDatabase = openAppDatabase(
+      path.join(temporaryRoot, "bundled-ingestion-1.db"),
+      path.resolve("src/main/db/migrations")
+    );
+    try {
+      expect(
+        bundledDatabase.connection
+          .prepare("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name")
+          .all()
+      ).toEqual(expect.arrayContaining([
+        { name: "sources" },
+        { name: "source_revisions" },
+        { name: "source_chunks" },
+        { name: "tasks" }
+      ]));
+    } finally {
+      bundledDatabase.close();
+    }
+  });
+
+  it("enforces source foreign keys, kind/status checks and soft-delete fields", () => {
+    const bundledDatabase = openAppDatabase(
+      path.join(temporaryRoot, "bundled-ingestion-2.db"),
+      path.resolve("src/main/db/migrations")
+    );
+    try {
+      bundledDatabase.connection.prepare(`
+        INSERT INTO projects(id, name, archived) VALUES (?, ?, 0)
+      `).run("11111111-1111-4111-8111-111111111111", "Project");
+      const insert = bundledDatabase.connection.prepare(`
+        INSERT INTO sources(
+          id, project_id, kind, display_name, status, current_revision_id,
+          created_at, updated_at, deleted_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `);
+
+      expect(() => insert.run(
+        "99999999-9999-4999-8999-999999999991",
+        "missing-project",
+        "pdf",
+        "Doc",
+        "active",
+        null,
+        "2026-01-01T00:00:00.000Z",
+        "2026-01-01T00:00:00.000Z",
+        null
+      )).toThrow(/foreign key/i);
+
+      expect(() => insert.run(
+        "99999999-9999-4999-8999-999999999992",
+        "11111111-1111-4111-8111-111111111111",
+        "unsupported-kind",
+        "Doc",
+        "active",
+        null,
+        "2026-01-01T00:00:00.000Z",
+        "2026-01-01T00:00:00.000Z",
+        null
+      )).toThrow(/check/i);
+
+      const ok = insert.run(
+        "99999999-9999-4999-8999-999999999993",
+        "11111111-1111-4111-8111-111111111111",
+        "pdf",
+        "Doc",
+        "active",
+        null,
+        "2026-01-01T00:00:00.000Z",
+        "2026-01-01T00:00:00.000Z",
+        null
+      );
+      expect(ok.changes).toBe(1);
+
+      const updated = bundledDatabase.connection.prepare(`
+        UPDATE sources SET deleted_at = ? WHERE id = ?
+      `).run("2026-01-02T00:00:00.000Z", "99999999-9999-4999-8999-999999999993");
+      expect(updated.changes).toBe(1);
+    } finally {
+      bundledDatabase.close();
+    }
+  });
+
+  it("enforces revision foreign keys, state checks and a single active revision", () => {
+    const bundledDatabase = openAppDatabase(
+      path.join(temporaryRoot, "bundled-ingestion-3.db"),
+      path.resolve("src/main/db/migrations")
+    );
+    try {
+      bundledDatabase.connection.prepare(`
+        INSERT INTO projects(id, name, archived) VALUES (?, ?, 0)
+      `).run("11111111-1111-4111-8111-111111111111", "Project");
+      bundledDatabase.connection.prepare(`
+        INSERT INTO sources(
+          id, project_id, kind, display_name, status, current_revision_id,
+          created_at, updated_at, deleted_at
+        ) VALUES (
+          '99999999-9999-4999-8999-999999999993',
+          '11111111-1111-4111-8111-111111111111',
+          'pdf', 'Doc', 'active', NULL,
+          '2026-01-01T00:00:00.000Z',
+          '2026-01-01T00:00:00.000Z',
+          NULL
+        )
+      `);
+
+      expect(() => bundledDatabase.connection.prepare(`
+        INSERT INTO source_revisions(
+          id, source_id, original_path, stored_path, source_hash, locator_kind,
+          chunking_version, state, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(
+        "88888888-8888-4888-8888-888888888881",
+        "missing-source",
+        "orig.pdf",
+        "stored.pdf",
+        "sha256:abc",
+        "page",
+        "blocks-900-150-v1",
+        "failed",
+        "2026-01-01T00:00:00.000Z"
+      )).toThrow(/foreign key/i);
+
+      bundledDatabase.connection.prepare(`
+        INSERT INTO source_revisions(
+          id, source_id, original_path, stored_path, source_hash, locator_kind,
+          chunking_version, state, created_at
+        ) VALUES (
+          '88888888-8888-4888-8888-888888888882',
+          '99999999-9999-4999-8999-999999999993',
+          'orig.pdf', 'stored.pdf', 'sha256:abc', 'page',
+          'blocks-900-150-v1', 'failed',
+          '2026-01-01T00:00:00.000Z'
+        )
+      `);
+
+      bundledDatabase.connection.prepare(`
+        INSERT INTO source_revisions(
+          id, source_id, original_path, stored_path, source_hash, locator_kind,
+          chunking_version, state, created_at
+        ) VALUES (
+          '88888888-8888-4888-8888-888888888883',
+          '99999999-9999-4999-8999-999999999993',
+          'orig.pdf', 'stored.pdf', 'sha256:abc', 'page',
+          'blocks-900-150-v1', 'active',
+          '2026-01-01T00:00:00.000Z'
+        )
+      `);
+      expect(() => bundledDatabase.connection.prepare(`
+        INSERT INTO source_revisions(
+          id, source_id, original_path, stored_path, source_hash, locator_kind,
+          chunking_version, state, created_at
+        ) VALUES (
+          '88888888-8888-4888-8888-888888888884',
+          '99999999-9999-4999-8999-999999999993',
+          'orig.pdf', 'stored.pdf', 'sha256:abc', 'page',
+          'blocks-900-150-v1', 'active',
+          '2026-01-01T00:00:00.000Z'
+        )
+      `).run()).toThrow(/unique|check|active/i);
+    } finally {
+      bundledDatabase.close();
+    }
+  });
+
+  it("enforces revision state and task state plus task progress range", () => {
+    const bundledDatabase = openAppDatabase(
+      path.join(temporaryRoot, "bundled-ingestion-4.db"),
+      path.resolve("src/main/db/migrations")
+    );
+    try {
+      bundledDatabase.connection.prepare(`
+        INSERT INTO projects(id, name, archived) VALUES (?, ?, 0)
+      `).run("22222222-2222-4222-8222-222222222222", "Project");
+      bundledDatabase.connection.prepare(`
+        INSERT INTO sources(
+          id, project_id, kind, display_name, status, current_revision_id,
+          created_at, updated_at, deleted_at
+        ) VALUES (
+          '99999999-9999-4999-8999-999999999994',
+          '22222222-2222-4222-8222-222222222222',
+          'url', 'Web', 'active', NULL,
+          '2026-01-01T00:00:00.000Z',
+          '2026-01-01T00:00:00.000Z',
+          NULL
+        )
+      `);
+
+      expect(() => bundledDatabase.connection.prepare(`
+        INSERT INTO tasks(
+          id, project_id, source_id, kind, state, stage, progress_1000,
+          attempt, error_code, error_message, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(
+        "77777777-7777-4777-8777-777777777771",
+        "22222222-2222-4222-8222-222222222222",
+        null,
+        "validation",
+        "invalid-state",
+        "validating",
+        0,
+        0,
+        null,
+        null,
+        "2026-01-01T00:00:00.000Z",
+        "2026-01-01T00:00:00.000Z"
+      )).toThrow(/check/i);
+
+      expect(() => bundledDatabase.connection.prepare(`
+        INSERT INTO tasks(
+          id, project_id, source_id, kind, state, stage, progress_1000,
+          attempt, error_code, error_message, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(
+        "77777777-7777-4777-8777-777777777772",
+        "22222222-2222-4222-8222-222222222222",
+        null,
+        "ingest",
+        "queued",
+        "validating",
+        1001,
+        0,
+        null,
+        null,
+        "2026-01-01T00:00:00.000Z",
+        "2026-01-01T00:00:00.000Z"
+      )).toThrow(/check/i);
+
+      const valid = bundledDatabase.connection.prepare(`
+        INSERT INTO tasks(
+          id, project_id, source_id, kind, state, stage, progress_1000,
+          attempt, error_code, error_message, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(
+       "77777777-7777-4777-8777-777777777773",
+        "22222222-2222-4222-8222-222222222222",
+        null,
+        "ingest",
+        "queued",
+        "validating",
+        350,
+        0,
+        null,
+        null,
+        "2026-01-01T00:00:00.000Z",
+        "2026-01-01T00:00:00.000Z"
+      );
+      expect(valid.changes).toBe(1);
+    } finally {
+      bundledDatabase.close();
+    }
+  });
 });
