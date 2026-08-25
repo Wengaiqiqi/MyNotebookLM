@@ -28,7 +28,20 @@ const discoveryInput = {
   capability: "generation" as const,
   baseUrl: profile.baseUrl
 };
-const descriptors = [{ id: "gpt-test", displayName: "GPT Test", capabilities: ["generation" as const] }];
+const descriptors = [{
+  id: "gpt-test",
+  displayName: "GPT Test",
+  capabilities: ["generation" as const],
+  capabilityEvidence: "authoritative" as const
+}];
+const validationFailure = {
+  ok: false,
+  error: { code: "VALIDATION", messageKey: "errors.validation", recoverable: false }
+};
+const internalFailure = {
+  ok: false,
+  error: { code: "INTERNAL", messageKey: "errors.internal", recoverable: false }
+};
 
 type Handler = Parameters<IpcMain["handle"]>[1];
 
@@ -137,12 +150,12 @@ describe("registerModelHandlers", () => {
     [MODEL_CHANNELS.test, { profile: { ...profile, modelId: "" } }, "test"],
     [CREDENTIAL_CHANNELS.set, { profileId: PROFILE_ID, apiKey: " " }, "setCredential"],
     [CREDENTIAL_CHANNELS.remove, { profileId: "not-a-uuid" }, "removeCredential"]
-  ] as const)("rejects invalid input on %s before service dispatch", async (channel, input, method) => {
+  ] as const)("returns sanitized validation on invalid %s input before service dispatch", async (channel, input, method) => {
     const ipc = new FakeIpcMain();
     const service = createService();
     registerModelHandlers(ipc, service as unknown as ModelService);
 
-    await expect(invoke(ipc, channel, input)).rejects.toThrow();
+    await expect(invoke(ipc, channel, input)).resolves.toEqual(validationFailure);
     expect(service[method]).not.toHaveBeenCalled();
   });
 
@@ -156,13 +169,25 @@ describe("registerModelHandlers", () => {
     [MODEL_CHANNELS.test, { profile }, "test"],
     [CREDENTIAL_CHANNELS.set, { profileId: PROFILE_ID, apiKey: "secret" }, "setCredential"],
     [CREDENTIAL_CHANNELS.remove, { profileId: PROFILE_ID }, "removeCredential"]
-  ] as const)("rejects malformed service output on %s", async (channel, input, method) => {
+  ] as const)("returns sanitized internal failure for malformed %s service output", async (channel, input, method) => {
     const ipc = new FakeIpcMain();
     const service = createService();
     service[method].mockResolvedValueOnce({ ok: true, value: { unexpected: true } } as never);
     registerModelHandlers(ipc, service as unknown as ModelService);
 
-    await expect(invoke(ipc, channel, input)).rejects.toThrow();
+    await expect(invoke(ipc, channel, input)).resolves.toEqual(internalFailure);
+  });
+
+  it("sanitizes an unexpected service rejection", async () => {
+    const ipc = new FakeIpcMain();
+    const service = createService();
+    service.discover.mockRejectedValueOnce(new Error("raw secret-bearing failure"));
+    registerModelHandlers(ipc, service as unknown as ModelService);
+
+    const result = await invoke(ipc, MODEL_CHANNELS.discover, discoveryInput);
+
+    expect(result).toEqual(internalFailure);
+    expect(JSON.stringify(result)).not.toContain("raw secret-bearing failure");
   });
 
   it("removes only its registered channels during teardown", () => {

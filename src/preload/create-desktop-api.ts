@@ -1,5 +1,10 @@
 import { z } from "zod";
-import { resultSchema } from "../shared/app-errors";
+import {
+  internalFailure,
+  resultSchema,
+  validationFailure,
+  type Result
+} from "../shared/app-errors";
 import {
   CREDENTIAL_CHANNELS,
   MODEL_CHANNELS,
@@ -44,6 +49,26 @@ const discoveryResultSchema = resultSchema(modelDescriptorSchema.array());
 const modelTestResultSchema = resultSchema(modelTestResultDtoSchema);
 const credentialResultSchema = resultSchema(credentialStatusDtoSchema);
 
+async function invokeResult<I, O>(
+  ipc: IpcInvoker,
+  channel: string,
+  inputSchema: z.ZodType<I>,
+  outputSchema: z.ZodType<Result<O>>,
+  input?: unknown
+): Promise<Result<O>> {
+  const parsed = inputSchema.safeParse(input);
+  if (!parsed.success) return validationFailure();
+  try {
+    const raw = parsed.data === undefined
+      ? await ipc.invoke(channel)
+      : await ipc.invoke(channel, parsed.data);
+    const output = outputSchema.safeParse(raw);
+    return output.success ? output.data : internalFailure();
+  } catch {
+    return internalFailure();
+  }
+}
+
 export function createDesktopApi(ipc: IpcInvoker): DesktopApi {
   return {
     projects: {
@@ -59,34 +84,65 @@ export function createDesktopApi(ipc: IpcInvoker): DesktopApi {
       }
     },
     settings: {
-      get: async () => settingsResultSchema.parse(await ipc.invoke(SETTINGS_CHANNELS.get)),
-      update: async (input) => settingsResultSchema.parse(
-        await ipc.invoke(SETTINGS_CHANNELS.update, updateAppSettingsInputSchema.parse(input))
+      get: () => invokeResult(ipc, SETTINGS_CHANNELS.get, z.undefined(), settingsResultSchema),
+      update: (input) => invokeResult(
+        ipc,
+        SETTINGS_CHANNELS.update,
+        updateAppSettingsInputSchema,
+        settingsResultSchema,
+        input
       )
     },
     models: {
-      listProfiles: async () => profileListResultSchema.parse(
-        await ipc.invoke(MODEL_CHANNELS.listProfiles)
+      listProfiles: () => invokeResult(
+        ipc,
+        MODEL_CHANNELS.listProfiles,
+        z.undefined(),
+        profileListResultSchema
       ),
-      saveProfile: async (input) => profileResultSchema.parse(
-        await ipc.invoke(MODEL_CHANNELS.saveProfile, saveModelProfileInputSchema.parse(input))
+      saveProfile: (input) => invokeResult(
+        ipc,
+        MODEL_CHANNELS.saveProfile,
+        saveModelProfileInputSchema,
+        profileResultSchema,
+        input
       ),
-      deleteProfile: async (input) => deleteProfileResultSchema.parse(
-        await ipc.invoke(MODEL_CHANNELS.deleteProfile, deleteModelProfileInputSchema.parse(input))
+      deleteProfile: (input) => invokeResult(
+        ipc,
+        MODEL_CHANNELS.deleteProfile,
+        deleteModelProfileInputSchema,
+        deleteProfileResultSchema,
+        input
       ),
-      discover: async (input) => discoveryResultSchema.parse(
-        await ipc.invoke(MODEL_CHANNELS.discover, discoverModelsInputSchema.parse(input))
+      discover: (input) => invokeResult(
+        ipc,
+        MODEL_CHANNELS.discover,
+        discoverModelsInputSchema,
+        discoveryResultSchema,
+        input
       ),
-      test: async (input) => modelTestResultSchema.parse(
-        await ipc.invoke(MODEL_CHANNELS.test, testModelInputSchema.parse(input))
+      test: (input) => invokeResult(
+        ipc,
+        MODEL_CHANNELS.test,
+        testModelInputSchema,
+        modelTestResultSchema,
+        input
       )
     },
     credentials: {
-      set: async (input) => credentialResultSchema.parse(
-        await ipc.invoke(CREDENTIAL_CHANNELS.set, credentialInputSchema.parse(input))
+      set: (input) => invokeResult(
+        ipc,
+        CREDENTIAL_CHANNELS.set,
+        credentialInputSchema,
+        credentialResultSchema,
+        input
       ),
-      remove: async (input) => credentialResultSchema.parse(
-        await ipc.invoke(CREDENTIAL_CHANNELS.remove, credentialProfileInputSchema.parse(input))
+      remove: (input) => invokeResult(
+        ipc,
+        CREDENTIAL_CHANNELS.remove,
+        credentialProfileInputSchema,
+        credentialResultSchema,
+        input
       )
     }
   };

@@ -39,3 +39,17 @@ export function resultSchema<T extends z.ZodType>(valueSchema: T) {
     z.object({ ok: z.literal(false), error: appErrorDtoSchema }).strict()
   ]);
 }
+
+export function validationFailure<T = never>(): Result<T> {
+  return {
+    ok: false,
+    error: { code: "VALIDATION", messageKey: "errors.validation", recoverable: false }
+  };
+}
+
+export function internalFailure<T = never>(): Result<T> {
+  return {
+    ok: false,
+    error: { code: "INTERNAL", messageKey: "errors.internal", recoverable: false }
+  };
+}

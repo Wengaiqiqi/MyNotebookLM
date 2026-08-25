@@ -78,10 +78,17 @@ function errorResult<T>(error: AppErrorDto): Result<T> {
   return { ok: false, error };
 }
 
+class ModelServiceError extends Error {
+  constructor(readonly appError: AppErrorDto) {
+    super(appError.messageKey);
+  }
+}
+
 function resultFromError<T>(reason: unknown): Result<T> {
   if (reason instanceof ZodError) {
     return errorResult(appError("VALIDATION", "errors.validation"));
   }
+  if (reason instanceof ModelServiceError) return errorResult(reason.appError);
   if (reason instanceof ProviderRequestError) return errorResult(reason.failure.error);
   return errorResult(appError("INTERNAL", "errors.internal"));
 }
@@ -92,6 +99,16 @@ function builtInError<T>(): Result<T> {
 
 function notFound<T>(): Result<T> {
   return errorResult(appError("NOT_FOUND", "errors.modelProfileNotFound"));
+}
+
+function credentialBindingError<T>(): Result<T> {
+  return errorResult(appError("VALIDATION", "errors.credentialBinding"));
+}
+
+function canonicalProviderBaseUrl(baseUrl: string): string {
+  const address = new URL(baseUrl);
+  address.pathname = address.pathname.replace(/\/+$/, "");
+  return address.toString();
 }
 
 type ProviderConnection = Readonly<{
@@ -166,7 +183,10 @@ export class ModelService {
       const discovered = modelDescriptorSchema.array().parse(
         await provider.discover(new AbortController().signal)
       );
-      return discovered.filter((model) => model.capabilities.includes(parsed.capability));
+      return discovered.filter((model) =>
+        model.capabilityEvidence === "probe-required"
+        || model.capabilities.includes(parsed.capability)
+      );
     });
   }
 
@@ -274,20 +294,24 @@ export class ModelService {
       ...(input.apiKey === undefined ? {} : { apiKey: input.apiKey })
     }, async (provider) => {
       const signal = new AbortController().signal;
+      let discovered: ModelDescriptorDto[] = [];
       try {
-        const discovered = modelDescriptorSchema.array().parse(await provider.discover(signal));
-        const match = discovered.find((model) =>
-          model.id === profile.modelId && model.capabilities.includes(profile.capability)
-        );
-        if (match) {
-          return {
-            modelId: profile.modelId,
-            capability: profile.capability,
-            verifiedBy: "discovery" as const
-          };
-        }
+        discovered = modelDescriptorSchema.array().parse(await provider.discover(signal));
       } catch {
         // Some compatible endpoints cannot list models; the capability probe is authoritative.
+      }
+      const authoritativeMatch = discovered.find((model) =>
+        model.id === profile.modelId && model.capabilityEvidence === "authoritative"
+      );
+      if (authoritativeMatch) {
+        if (!authoritativeMatch.capabilities.includes(profile.capability)) {
+          throw new ModelServiceError(appError("VALIDATION", "errors.modelCapability"));
+        }
+        return {
+          modelId: profile.modelId,
+          capability: profile.capability,
+          verifiedBy: "discovery" as const
+        };
       }
 
       if (profile.capability === "embedding") {
@@ -314,11 +338,15 @@ export class ModelService {
     connection: ProviderConnection,
     use: (provider: ModelProvider) => Promise<T>
   ): Promise<Result<T>> {
-    const invoke = async (storedApiKey?: string): Promise<Result<T>> => {
+    const invoke = async (
+      storedApiKey?: string,
+      providerKind = connection.provider,
+      baseUrl = connection.baseUrl
+    ): Promise<Result<T>> => {
       try {
         const provider = this.providerFactory(
-          connection.provider,
-          connection.baseUrl,
+          providerKind,
+          baseUrl,
           connection.apiKey ?? storedApiKey
         );
         return { ok: true, value: await use(provider) };
@@ -330,8 +358,27 @@ export class ModelService {
     if (connection.apiKey !== undefined || connection.profileId === undefined) {
       return invoke();
     }
+
+    let savedProfile: ModelProfileDto | undefined;
     try {
-      return await this.credentials.withSecret(connection.profileId, invoke);
+      savedProfile = this.settings.getProfile(connection.profileId);
+      if (!savedProfile) return invoke();
+      if (savedProfile.provider !== connection.provider
+        || canonicalProviderBaseUrl(savedProfile.baseUrl)
+          !== canonicalProviderBaseUrl(connection.baseUrl)) {
+        return credentialBindingError();
+      }
+      if (!this.credentials.status(connection.profileId).hasCredential) {
+        return invoke(undefined, savedProfile.provider, savedProfile.baseUrl);
+      }
+    } catch (reason) {
+      return resultFromError(reason);
+    }
+
+    try {
+      return await this.credentials.withSecret(connection.profileId, (apiKey) =>
+        invoke(apiKey, savedProfile.provider, savedProfile.baseUrl)
+      );
     } catch (reason) {
       return resultFromError(reason);
     }

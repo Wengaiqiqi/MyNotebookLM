@@ -91,6 +91,7 @@ class FakeSettingsRepository {
 
 class FakeCredentialStore {
   readonly secrets = new Map<string, string>();
+  readonly secretUses: string[] = [];
   readonly events: string[];
   readonly set = vi.fn(async (profileId: string, apiKey: string) => {
     this.events.push("set-credential");
@@ -115,6 +116,7 @@ class FakeCredentialStore {
     profileId: string,
     use: (apiKey?: string) => Promise<T>
   ): Promise<T> {
+    this.secretUses.push(profileId);
     return use(this.secrets.get(profileId));
   }
 }
@@ -194,9 +196,11 @@ describe("ModelService", () => {
     const discovered = [{
       id: "gpt-test",
       displayName: "GPT Test",
-      capabilities: ["generation" as const]
+      capabilities: ["generation" as const],
+      capabilityEvidence: "authoritative" as const
     }];
-    const { service, credentials, factory } = setup(provider(discovered));
+    const { service, repository, credentials, factory } = setup(provider(discovered));
+    repository.profiles.set(PROFILE_ID, dto(profile));
     credentials.secrets.set(PROFILE_ID, "stored-secret");
 
     const result = await service.discover({
@@ -213,6 +217,40 @@ describe("ModelService", () => {
       "stored-secret"
     );
     expect(JSON.stringify(result)).not.toContain("stored-secret");
+  });
+
+  it("never decrypts a stored credential for caller-supplied provider or endpoint changes", async () => {
+    const { service, repository, credentials, factory } = setup(provider([{
+      id: profile.modelId,
+      displayName: profile.modelId,
+      capabilities: ["generation"],
+      capabilityEvidence: "authoritative"
+    }]));
+    repository.profiles.set(PROFILE_ID, dto(profile));
+    credentials.secrets.set(PROFILE_ID, "stored-secret");
+    const attackerUrl = "https://attacker.example.test/v1";
+
+    const results = await Promise.all([
+      service.discover({
+        profileId: PROFILE_ID,
+        provider: "openai",
+        capability: "generation",
+        baseUrl: attackerUrl
+      }),
+      service.test({ profile: { ...profile, baseUrl: attackerUrl } }),
+      service.saveProfile({ profile: { ...profile, provider: "openai-compatible" } })
+    ]);
+
+    for (const result of results) {
+      expect(result).toMatchObject({
+        ok: false,
+        error: { code: "VALIDATION", messageKey: "errors.credentialBinding" }
+      });
+      expect(JSON.stringify(result)).not.toContain("stored-secret");
+    }
+    expect(credentials.secretUses).toEqual([]);
+    expect(factory).not.toHaveBeenCalled();
+    expect(repository.events).toEqual([]);
   });
 
   it.each([
@@ -262,7 +300,8 @@ describe("ModelService", () => {
     const modelProvider = provider([{
       id: profile.modelId,
       displayName: "Discovered",
-      capabilities: ["generation"]
+      capabilities: ["generation"],
+      capabilityEvidence: "authoritative"
     }]);
     const { service } = setup(modelProvider);
 
@@ -276,6 +315,73 @@ describe("ModelService", () => {
     });
     expect(modelProvider.generate).not.toHaveBeenCalled();
     expect(modelProvider.embed).not.toHaveBeenCalled();
+  });
+
+  it("rejects a capability disproved by authoritative discovery without probing", async () => {
+    const modelProvider = provider([{
+      id: profile.modelId,
+      displayName: "Generation only",
+      capabilities: ["generation"],
+      capabilityEvidence: "authoritative"
+    }]);
+    const { service } = setup(modelProvider);
+
+    await expect(service.test({
+      profile: { ...profile, provider: "gemini", capability: "embedding" }
+    })).resolves.toMatchObject({
+      ok: false,
+      error: { code: "VALIDATION", messageKey: "errors.modelCapability" }
+    });
+    expect(modelProvider.generate).not.toHaveBeenCalled();
+    expect(modelProvider.embed).not.toHaveBeenCalled();
+  });
+
+  it("probes a listed OpenAI-compatible model whose capability is not authoritative", async () => {
+    const modelProvider = provider([{
+      id: profile.modelId,
+      displayName: "Listed",
+      capabilities: [],
+      capabilityEvidence: "probe-required"
+    }]);
+    const { service } = setup(modelProvider);
+
+    await expect(service.test({
+      profile: { ...profile, provider: "openai-compatible" }
+    })).resolves.toEqual({
+      ok: true,
+      value: {
+        modelId: profile.modelId,
+        capability: "generation",
+        verifiedBy: "probe"
+      }
+    });
+    expect(modelProvider.generate).toHaveBeenCalledWith({
+      model: profile.modelId,
+      messages: [{ role: "user", content: "ping" }],
+      temperature: 0,
+      maxTokens: 1
+    }, expect.any(AbortSignal));
+  });
+
+  it("rejects an embedding selection when a listed chat-only model fails its probe", async () => {
+    const modelProvider = provider([{
+      id: profile.modelId,
+      displayName: "Listed chat model",
+      capabilities: [],
+      capabilityEvidence: "probe-required"
+    }]);
+    vi.mocked(modelProvider.embed).mockRejectedValue(new Error("chat-only"));
+    const { service, repository } = setup(modelProvider);
+    const embeddingProfile = { ...profile, capability: "embedding" as const };
+
+    const result = await service.saveProfile({ profile: embeddingProfile });
+
+    expect(result).toMatchObject({ ok: false, error: { code: "INTERNAL" } });
+    expect(modelProvider.embed).toHaveBeenCalledWith({
+      model: profile.modelId,
+      inputs: ["test"]
+    }, expect.any(AbortSignal));
+    expect(repository.profiles.has(PROFILE_ID)).toBe(false);
   });
 
   it("uses the smallest generation probe for a manual model and saves only afterward", async () => {
@@ -335,16 +441,22 @@ describe("ModelService", () => {
 
   it("preserves the existing credential when editing non-secret fields", async () => {
     const modelProvider = provider([{
-      id: profile.modelId,
-      displayName: profile.modelId,
-      capabilities: ["generation"]
+      id: "gpt-renamed",
+      displayName: "gpt-renamed",
+      capabilities: ["generation"],
+      capabilityEvidence: "authoritative"
     }]);
     const { service, repository, credentials, factory } = setup(modelProvider);
     repository.profiles.set(PROFILE_ID, dto(profile));
     credentials.secrets.set(PROFILE_ID, "existing-secret");
 
     const result = await service.saveProfile({
-      profile: { ...profile, name: "Renamed" }
+      profile: {
+        ...profile,
+        name: "Renamed",
+        modelId: "gpt-renamed",
+        baseUrl: `${profile.baseUrl}/`
+      }
     });
 
     expect(result).toMatchObject({ ok: true, value: { name: "Renamed" } });

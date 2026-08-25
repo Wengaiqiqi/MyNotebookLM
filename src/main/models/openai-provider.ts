@@ -48,7 +48,12 @@ export class OpenAiProvider implements ModelProvider {
     if (!isRecord(response) || !Array.isArray(response.data)) throw malformedResponse();
     return response.data.map((model) => {
       if (!isRecord(model) || typeof model.id !== "string" || !model.id) throw malformedResponse();
-      return { id: model.id, displayName: model.id, capabilities: ["generation", "embedding"] };
+      return {
+        id: model.id,
+        displayName: model.id,
+        capabilities: [],
+        capabilityEvidence: "probe-required"
+      };
     });
   }
 

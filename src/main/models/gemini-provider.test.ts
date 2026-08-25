@@ -44,9 +44,9 @@ describe("Gemini provider", () => {
     const provider = new GeminiProvider({ baseUrl: origin(fake), apiKey: secret });
 
     await expect(provider.discover(new AbortController().signal)).resolves.toEqual([
-      { id: "models/gemini-test", displayName: "Gemini Test", capabilities: ["generation"] },
-      { id: "models/embedding-test", displayName: "Embedding Test", capabilities: ["embedding"] },
-      { id: "models/both-test", displayName: "models/both-test", capabilities: ["generation", "embedding"] }
+      { id: "models/gemini-test", displayName: "Gemini Test", capabilities: ["generation"], capabilityEvidence: "authoritative" },
+      { id: "models/embedding-test", displayName: "Embedding Test", capabilities: ["embedding"], capabilityEvidence: "authoritative" },
+      { id: "models/both-test", displayName: "models/both-test", capabilities: ["generation", "embedding"], capabilityEvidence: "authoritative" }
     ]);
     expect(fake.requests).toEqual([expect.objectContaining({
       method: "GET",

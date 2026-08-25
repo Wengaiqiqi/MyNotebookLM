@@ -30,8 +30,8 @@ describe("OpenAI-compatible provider", () => {
     const provider = new OpenAiCompatibleProvider({ baseUrl: `${fake.baseUrl}/`, apiKey: secret });
 
     await expect(provider.discover(new AbortController().signal)).resolves.toEqual([
-      { id: "gpt-test", displayName: "gpt-test", capabilities: ["generation", "embedding"] },
-      { id: "text-embedding-test", displayName: "text-embedding-test", capabilities: ["generation", "embedding"] }
+      { id: "gpt-test", displayName: "gpt-test", capabilities: [], capabilityEvidence: "probe-required" },
+      { id: "text-embedding-test", displayName: "text-embedding-test", capabilities: [], capabilityEvidence: "probe-required" }
     ]);
     expect(fake.requests).toEqual([expect.objectContaining({
       method: "GET", path: "/v1/models", headers: expect.objectContaining({ authorization: `Bearer ${secret}` })

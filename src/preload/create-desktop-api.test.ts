@@ -37,6 +37,15 @@ function ok<T>(value: T) {
   return { ok: true as const, value };
 }
 
+const validationFailure = {
+  ok: false as const,
+  error: { code: "VALIDATION" as const, messageKey: "errors.validation", recoverable: false }
+};
+const internalFailure = {
+  ok: false as const,
+  error: { code: "INTERNAL" as const, messageKey: "errors.internal", recoverable: false }
+};
+
 describe("createDesktopApi", () => {
   it("preserves project commands while exposing only the named model settings groups", () => {
     const api = createDesktopApi({ invoke: vi.fn() });
@@ -61,7 +70,12 @@ describe("createDesktopApi", () => {
       builtInProfiles: [],
       credentials: [credentialStatus]
     };
-    const descriptors = [{ id: "gpt-test", displayName: "GPT Test", capabilities: ["generation" as const] }];
+    const descriptors = [{
+      id: "gpt-test",
+      displayName: "GPT Test",
+      capabilities: ["generation" as const],
+      capabilityEvidence: "authoritative" as const
+    }];
     const invoke = vi.fn()
       .mockResolvedValueOnce(ok(settings))
       .mockResolvedValueOnce(ok({ ...settings, theme: "dark" as const }))
@@ -125,10 +139,10 @@ describe("createDesktopApi", () => {
     ["model test", (api: DesktopApi) => api.models.test({ profile: { ...profile, modelId: "" } })],
     ["credential set", (api: DesktopApi) => api.credentials.set({ profileId: profile.id, apiKey: " " })],
     ["credential remove", (api: DesktopApi) => api.credentials.remove({ profileId: "not-a-uuid" })]
-  ])("rejects invalid %s input before IPC", async (_command, call) => {
+  ])("returns sanitized validation for invalid %s input before IPC", async (_command, call) => {
     const invoke = vi.fn();
 
-    await expect(call(createDesktopApi({ invoke }))).rejects.toThrow();
+    await expect(call(createDesktopApi({ invoke }))).resolves.toEqual(validationFailure);
     expect(invoke).not.toHaveBeenCalled();
   });
 
@@ -146,10 +160,24 @@ describe("createDesktopApi", () => {
     ["model test", (api: DesktopApi) => api.models.test({ profile })],
     ["credential set", (api: DesktopApi) => api.credentials.set({ profileId: profile.id, apiKey: "secret" })],
     ["credential remove", (api: DesktopApi) => api.credentials.remove({ profileId: profile.id })]
-  ])("rejects malformed %s IPC results", async (_command, call) => {
+  ])("returns sanitized internal failure for malformed %s IPC results", async (_command, call) => {
     const invoke = vi.fn().mockResolvedValue({ ok: true, value: { unexpected: true } });
 
-    await expect(call(createDesktopApi({ invoke }))).rejects.toThrow();
+    await expect(call(createDesktopApi({ invoke }))).resolves.toEqual(internalFailure);
+  });
+
+  it("sanitizes an unexpected model IPC rejection", async () => {
+    const invoke = vi.fn().mockRejectedValue(new Error("raw secret-bearing failure"));
+    const api = createDesktopApi({ invoke });
+
+    const result = await api.models.discover({
+      provider: profile.provider,
+      capability: profile.capability,
+      baseUrl: profile.baseUrl
+    });
+
+    expect(result).toEqual(internalFailure);
+    expect(JSON.stringify(result)).not.toContain("raw secret-bearing failure");
   });
 
   it("accepts a strictly validated application error result", async () => {

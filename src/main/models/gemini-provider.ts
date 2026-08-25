@@ -71,7 +71,8 @@ export class GeminiProvider implements ModelProvider {
       if (capabilities.length) descriptors.push({
         id: model.name,
         displayName: model.displayName || model.name,
-        capabilities
+        capabilities,
+        capabilityEvidence: "authoritative"
       });
     }
     return descriptors;

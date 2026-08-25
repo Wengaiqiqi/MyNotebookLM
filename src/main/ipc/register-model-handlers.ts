@@ -1,6 +1,10 @@
 import type { IpcMain } from "electron";
 import { z } from "zod";
-import { resultSchema } from "../../shared/app-errors";
+import {
+  internalFailure,
+  resultSchema,
+  validationFailure
+} from "../../shared/app-errors";
 import {
   CREDENTIAL_CHANNELS,
   MODEL_CHANNELS,
@@ -36,49 +40,65 @@ const discoveryResultSchema = resultSchema(modelDescriptorSchema.array());
 const testResultSchema = resultSchema(modelTestResultDtoSchema);
 const credentialResultSchema = resultSchema(credentialStatusDtoSchema);
 
+async function validatedCall<I>(
+  inputSchema: z.ZodType<I>,
+  outputSchema: z.ZodType,
+  input: unknown,
+  call: (parsed: I) => Promise<unknown>
+): Promise<unknown> {
+  const parsed = inputSchema.safeParse(input);
+  if (!parsed.success) return validationFailure();
+  try {
+    const output = outputSchema.safeParse(await call(parsed.data));
+    return output.success ? output.data : internalFailure();
+  } catch {
+    return internalFailure();
+  }
+}
+
 export function registerModelHandlers(
   ipc: IpcMainLike,
   service: ModelService
 ): () => void {
-  ipc.handle(SETTINGS_CHANNELS.get, async (_event, input) => {
-    undefinedSchema.parse(input);
-    return settingsResultSchema.parse(await service.getSettings());
-  });
-  ipc.handle(SETTINGS_CHANNELS.update, async (_event, input) =>
-    settingsResultSchema.parse(
-      await service.updateSettings(updateAppSettingsInputSchema.parse(input))
+  ipc.handle(SETTINGS_CHANNELS.get, (_event, input) =>
+    validatedCall(undefinedSchema, settingsResultSchema, input, () => service.getSettings())
+  );
+  ipc.handle(SETTINGS_CHANNELS.update, (_event, input) =>
+    validatedCall(updateAppSettingsInputSchema, settingsResultSchema, input, (parsed) =>
+      service.updateSettings(parsed)
     )
   );
-  ipc.handle(MODEL_CHANNELS.listProfiles, async (_event, input) => {
-    undefinedSchema.parse(input);
-    return profileListResultSchema.parse(await service.listProfiles());
-  });
-  ipc.handle(MODEL_CHANNELS.saveProfile, async (_event, input) =>
-    profileResultSchema.parse(
-      await service.saveProfile(saveModelProfileInputSchema.parse(input))
+  ipc.handle(MODEL_CHANNELS.listProfiles, (_event, input) =>
+    validatedCall(undefinedSchema, profileListResultSchema, input, () => service.listProfiles())
+  );
+  ipc.handle(MODEL_CHANNELS.saveProfile, (_event, input) =>
+    validatedCall(saveModelProfileInputSchema, profileResultSchema, input, (parsed) =>
+      service.saveProfile(parsed)
     )
   );
-  ipc.handle(MODEL_CHANNELS.deleteProfile, async (_event, input) =>
-    deleteResultSchema.parse(
-      await service.deleteProfile(deleteModelProfileInputSchema.parse(input))
+  ipc.handle(MODEL_CHANNELS.deleteProfile, (_event, input) =>
+    validatedCall(deleteModelProfileInputSchema, deleteResultSchema, input, (parsed) =>
+      service.deleteProfile(parsed)
     )
   );
-  ipc.handle(MODEL_CHANNELS.discover, async (_event, input) =>
-    discoveryResultSchema.parse(
-      await service.discover(discoverModelsInputSchema.parse(input))
+  ipc.handle(MODEL_CHANNELS.discover, (_event, input) =>
+    validatedCall(discoverModelsInputSchema, discoveryResultSchema, input, (parsed) =>
+      service.discover(parsed)
     )
   );
-  ipc.handle(MODEL_CHANNELS.test, async (_event, input) =>
-    testResultSchema.parse(await service.test(testModelInputSchema.parse(input)))
-  );
-  ipc.handle(CREDENTIAL_CHANNELS.set, async (_event, input) =>
-    credentialResultSchema.parse(
-      await service.setCredential(credentialInputSchema.parse(input))
+  ipc.handle(MODEL_CHANNELS.test, (_event, input) =>
+    validatedCall(testModelInputSchema, testResultSchema, input, (parsed) =>
+      service.test(parsed)
     )
   );
-  ipc.handle(CREDENTIAL_CHANNELS.remove, async (_event, input) =>
-    credentialResultSchema.parse(
-      await service.removeCredential(credentialProfileInputSchema.parse(input))
+  ipc.handle(CREDENTIAL_CHANNELS.set, (_event, input) =>
+    validatedCall(credentialInputSchema, credentialResultSchema, input, (parsed) =>
+      service.setCredential(parsed)
+    )
+  );
+  ipc.handle(CREDENTIAL_CHANNELS.remove, (_event, input) =>
+    validatedCall(credentialProfileInputSchema, credentialResultSchema, input, (parsed) =>
+      service.removeCredential(parsed)
     )
   );
 

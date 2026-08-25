@@ -70,7 +70,8 @@ export class AnthropicProvider implements ModelProvider {
       return {
         id: model.id,
         displayName: model.display_name || model.id,
-        capabilities: ["generation"]
+        capabilities: ["generation"],
+        capabilityEvidence: "authoritative"
       };
     });
   }

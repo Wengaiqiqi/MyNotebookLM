@@ -10,6 +10,7 @@ export const providerKindSchema = z.enum([
 ]);
 
 export const modelCapabilitySchema = z.enum(["generation", "embedding"]);
+export const capabilityEvidenceSchema = z.enum(["authoritative", "probe-required"]);
 
 export const modelTaskKindSchema = z.enum([
   "chat",
@@ -80,7 +81,8 @@ export const modelRouteDtoSchema = z.object({
 export const modelDescriptorSchema = z.object({
   id: z.string().trim().min(1).max(200),
   displayName: z.string().trim().min(1).max(200),
-  capabilities: modelCapabilitySchema.array().min(1)
+  capabilities: modelCapabilitySchema.array(),
+  capabilityEvidence: capabilityEvidenceSchema
 }).strict();
 
 const apiKeySchema = z.string().max(16_384).refine(
@@ -193,6 +195,7 @@ export const modelTestResultDtoSchema = z.object({
 
 export type ProviderKind = z.infer<typeof providerKindSchema>;
 export type ModelCapability = z.infer<typeof modelCapabilitySchema>;
+export type CapabilityEvidence = z.infer<typeof capabilityEvidenceSchema>;
 export type ModelTaskKind = z.infer<typeof modelTaskKindSchema>;
 export type EmbeddingMetadata = Readonly<z.infer<typeof embeddingMetadataSchema>>;
 export type ModelProfileInput = z.infer<typeof modelProfileInputSchema>;

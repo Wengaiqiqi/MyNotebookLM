@@ -38,8 +38,8 @@ describe("Ollama provider", () => {
     const provider = new OllamaProvider({ baseUrl: origin(fake) });
 
     await expect(provider.discover(new AbortController().signal)).resolves.toEqual([
-      { id: "llama-test:latest", displayName: "llama-test:latest", capabilities: ["generation", "embedding"] },
-      { id: "embed-test:latest", displayName: "embed-test:latest", capabilities: ["generation", "embedding"] }
+      { id: "llama-test:latest", displayName: "llama-test:latest", capabilities: [], capabilityEvidence: "probe-required" },
+      { id: "embed-test:latest", displayName: "embed-test:latest", capabilities: [], capabilityEvidence: "probe-required" }
     ]);
     expect(fake.requests).toEqual([expect.objectContaining({ method: "GET", path: "/api/tags" })]);
     expect(fake.requests[0]?.headers.authorization).toBeUndefined();

@@ -39,7 +39,7 @@ describe("Anthropic provider", () => {
     const provider = new AnthropicProvider({ baseUrl: origin(fake), apiKey: secret });
 
     await expect(provider.discover(new AbortController().signal)).resolves.toEqual([
-      { id: "claude-test", displayName: "Claude Test", capabilities: ["generation"] }
+      { id: "claude-test", displayName: "Claude Test", capabilities: ["generation"], capabilityEvidence: "authoritative" }
     ]);
     expect(fake.requests).toEqual([expect.objectContaining({
       method: "GET",
