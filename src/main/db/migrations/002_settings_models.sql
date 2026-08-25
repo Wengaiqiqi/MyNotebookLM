@@ -17,7 +17,11 @@ CREATE TABLE model_profiles (
   provider TEXT NOT NULL CHECK (
     provider IN ('openai', 'openai-compatible', 'anthropic', 'gemini', 'ollama', 'local')
   ),
-  capability TEXT NOT NULL CHECK (capability IN ('generation', 'embedding')),
+  capability TEXT NOT NULL CHECK (
+    capability IN ('generation', 'embedding')
+    AND (provider <> 'anthropic' OR capability = 'generation')
+    AND (provider <> 'local' OR capability = 'embedding')
+  ),
   base_url TEXT NOT NULL,
   model_id TEXT NOT NULL CHECK (length(trim(model_id)) BETWEEN 1 AND 200),
   enabled INTEGER NOT NULL DEFAULT 1 CHECK (enabled IN (0, 1)),

@@ -24,7 +24,7 @@ export const appErrorDtoSchema = z.object({
   recoverable: z.boolean(),
   retryAfterMs: z.number().int().nonnegative().optional(),
   details: z.record(z.string(), appErrorDetailSchema).optional()
-});
+}).strict();
 
 export type AppErrorCode = z.infer<typeof appErrorCodeSchema>;
 export type AppErrorDto = z.infer<typeof appErrorDtoSchema>;

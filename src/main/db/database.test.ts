@@ -187,6 +187,14 @@ describe("openAppDatabase", () => {
         INSERT INTO model_profiles(id, name, provider, capability, base_url, model_id)
         VALUES ('11111111-1111-4111-8111-111111111111', 'Broken', 'invalid', 'generation', '', 'x')
       `).run()).toThrow(/check/i);
+      expect(() => bundledDatabase.connection.prepare(`
+        INSERT INTO model_profiles(id, name, provider, capability, base_url, model_id)
+        VALUES ('22222222-2222-4222-8222-222222222222', 'Broken', 'anthropic', 'embedding', '', 'x')
+      `).run()).toThrow(/check/i);
+      expect(() => bundledDatabase.connection.prepare(`
+        INSERT INTO model_profiles(id, name, provider, capability, base_url, model_id)
+        VALUES ('33333333-3333-4333-8333-333333333333', 'Broken', 'local', 'generation', '', 'x')
+      `).run()).toThrow(/check/i);
     } finally {
       bundledDatabase.close();
     }

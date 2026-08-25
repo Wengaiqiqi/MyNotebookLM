@@ -21,7 +21,7 @@ export const modelTaskKindSchema = z.enum([
   "embedding"
 ]);
 
-export const modelProfileInputSchema = z.object({
+const modelProfileFieldsSchema = z.object({
   id: z.uuid(),
   name: z.string().trim().min(1).max(100),
   provider: providerKindSchema,
@@ -29,18 +29,42 @@ export const modelProfileInputSchema = z.object({
   baseUrl: z.string(),
   modelId: z.string().trim().min(1).max(200),
   enabled: z.boolean()
-});
+}).strict();
 
-export const modelProfileDtoSchema = modelProfileInputSchema.extend({
+function validateProviderCapability(
+  profile: { provider: ProviderKind; capability: ModelCapability },
+  context: z.RefinementCtx
+): void {
+  if (profile.provider === "anthropic" && profile.capability !== "generation") {
+    context.addIssue({
+      code: "custom",
+      path: ["capability"],
+      message: "Anthropic profiles only support generation"
+    });
+  }
+  if (profile.provider === "local" && profile.capability !== "embedding") {
+    context.addIssue({
+      code: "custom",
+      path: ["capability"],
+      message: "Local profiles only support embedding"
+    });
+  }
+}
+
+export const modelProfileInputSchema = modelProfileFieldsSchema.superRefine(
+  validateProviderCapability
+);
+
+export const modelProfileDtoSchema = modelProfileFieldsSchema.extend({
   createdAt: z.iso.datetime(),
   updatedAt: z.iso.datetime()
-});
+}).superRefine(validateProviderCapability);
 
 export const modelRouteDtoSchema = z.object({
   taskKind: modelTaskKindSchema,
   position: z.number().int().nonnegative(),
   profileId: z.uuid()
-});
+}).strict();
 
 export type ProviderKind = z.infer<typeof providerKindSchema>;
 export type ModelCapability = z.infer<typeof modelCapabilitySchema>;

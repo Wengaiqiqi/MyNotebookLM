@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { openAppDatabase, type AppDatabase } from "../db/database";
+import { modelProfileInputSchema } from "../../shared/models";
 import { SettingsRepository } from "./settings-repository";
 
 const GENERATION_ID = "11111111-1111-4111-8111-111111111111";
@@ -110,6 +111,53 @@ describe("SettingsRepository", () => {
 
     expect(() => repository.replaceRoute("chat", [EMBEDDING_ID])).toThrow(/capability/i);
     expect(repository.getRoute("chat")).toEqual([]);
+  });
+
+  it("rejects generation profiles from the embedding route", () => {
+    repository.saveProfile({
+      id: GENERATION_ID,
+      name: "Generation",
+      provider: "openai",
+      capability: "generation",
+      baseUrl: "https://api.openai.com/v1",
+      modelId: "gpt-test",
+      enabled: true
+    });
+
+    expect(() => repository.replaceRoute("embedding", [GENERATION_ID])).toThrow(/capability/i);
+    expect(repository.getRoute("embedding")).toEqual([]);
+  });
+
+  it.each([
+    ["anthropic", "embedding"],
+    ["local", "generation"]
+  ] as const)("rejects the invalid %s/%s provider capability pair in Zod", (provider, capability) => {
+    expect(() => modelProfileInputSchema.parse({
+      id: GENERATION_ID,
+      name: "Invalid",
+      provider,
+      capability,
+      baseUrl: "",
+      modelId: "model-test",
+      enabled: true
+    })).toThrow(/capability|provider/i);
+  });
+
+  it.each([
+    ["anthropic", "embedding"],
+    ["local", "generation"]
+  ] as const)("rejects the invalid %s/%s provider capability pair in SQLite", (provider, capability) => {
+    expect(() => appDatabase.connection.prepare(`
+      INSERT INTO model_profiles(id, name, provider, capability, base_url, model_id)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `).run(
+      GENERATION_ID,
+      "Invalid",
+      provider,
+      capability,
+      "",
+      "model-test"
+    )).toThrow(/check/i);
   });
 
   it("does not let a profile update invalidate an existing route", () => {

@@ -7,9 +7,9 @@ export const appSettingsDtoSchema = z.object({
   onboardingCompleted: z.boolean(),
   locale: appLanguageSchema,
   theme: appThemeSchema
-});
+}).strict();
 
-export const updateAppSettingsInputSchema = appSettingsDtoSchema.partial().refine(
+export const updateAppSettingsInputSchema = appSettingsDtoSchema.partial().strict().refine(
   (input) => Object.keys(input).length > 0,
   "At least one setting is required"
 );
