@@ -23,7 +23,7 @@ describe("source IPC handlers", () => {
     const service = { resolveDialogToken: vi.fn().mockReturnValue({ projectId: "other", path: "x.txt" }), retryTask: vi.fn() };
     registerSourceHandlers(bus as any, service as any, { showOpenDialog: vi.fn() } as any);
     const retry = bus.handlers.get(SOURCE_CHANNELS.retry)!;
-    expect(retry({}, { projectId, taskId: "22222222-2222-4222-8222-222222222222" })).toMatchObject({ ok: false });
+    await expect(retry({}, { projectId, taskId: "22222222-2222-4222-8222-222222222222" })).resolves.toMatchObject({ ok: false });
     expect(service.retryTask).not.toHaveBeenCalled();
   });
 
