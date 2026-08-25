@@ -6,6 +6,7 @@ import { CredentialStore } from "./credentials/credential-store";
 import { SafeStorageAdapter } from "./credentials/safe-storage-adapter";
 import { registerProjectHandlers } from "./ipc/register-project-handlers";
 import { registerModelHandlers } from "./ipc/register-model-handlers";
+import { registerSourceHandlers } from "./ipc/register-source-handlers";
 import { ModelService } from "./models/model-service";
 import { getAppPaths } from "./platform/paths";
 import { ProjectRepository } from "./projects/project-repository";
@@ -17,6 +18,7 @@ let appDatabase: AppDatabase | undefined;
 let cleanupProjectHandlers: (() => void) | undefined;
 let cleanupModelHandlers: (() => void) | undefined;
 let cleanupTitleOverlayHandler: (() => void) | undefined;
+let cleanupSourceHandlers: (() => void) | undefined;
 
 const testUserDataDir = process.env["MYNOTEBOOKLM_USER_DATA_DIR"];
 if (process.env["NODE_ENV"] === "test" && testUserDataDir) {
@@ -42,6 +44,9 @@ app.whenReady().then(async () => {
   const modelService = new ModelService(settingsRepository, credentialStore);
   cleanupProjectHandlers = registerProjectHandlers(ipcMain, projectService);
   cleanupModelHandlers = registerModelHandlers(ipcMain, modelService);
+  cleanupSourceHandlers = registerSourceHandlers(ipcMain, {
+    listSources: () => [], listTasks: () => []
+  });
   cleanupTitleOverlayHandler = registerTitleOverlayHandler(ipcMain);
 
   Menu.setApplicationMenu(null);
@@ -58,6 +63,8 @@ app.on("before-quit", () => {
   cleanupModelHandlers?.();
   cleanupModelHandlers = undefined;
   cleanupTitleOverlayHandler?.();
+  cleanupSourceHandlers?.();
+  cleanupSourceHandlers = undefined;
   cleanupTitleOverlayHandler = undefined;
   appDatabase?.close();
   appDatabase = undefined;

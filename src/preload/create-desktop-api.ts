@@ -13,6 +13,9 @@ import {
   TITLE_OVERLAY_CHANNELS,
   type DesktopApi
 } from "../shared/ipc";
+import { SOURCE_CHANNELS } from "../shared/ipc";
+import { sourceDtoSchema } from "../shared/sources";
+import { taskDtoSchema } from "../shared/tasks";
 import {
   credentialInputSchema,
   credentialProfileInputSchema,
@@ -42,6 +45,8 @@ import {
 
 type IpcInvoker = {
   invoke(channel: string, payload?: unknown): Promise<unknown>;
+  on?: (channel: string, listener: (...args: unknown[]) => void) => void;
+  removeListener?: (channel: string, listener: (...args: unknown[]) => void) => void;
 };
 
 const removeProjectResponseSchema = z.undefined();
@@ -78,6 +83,19 @@ async function invokeResult<I, O>(
 
 export function createDesktopApi(ipc: IpcInvoker): DesktopApi {
   return {
+    sources: {
+      chooseFiles: async (input) => { const parsed = z.object({ projectId: z.uuid() }).strict().safeParse(input); if (!parsed.success) return null; const raw = await ipc.invoke(SOURCE_CHANNELS.chooseFiles, parsed.data); return raw === null ? null : z.string().array().parse(raw); },
+      importFile: (input) => invokeResult(ipc, SOURCE_CHANNELS.importFile, z.object({ projectId: z.uuid(), dialogToken: z.string().min(1) }).strict(), resultSchema(sourceDtoSchema), input),
+      importUrl: (input) => invokeResult(ipc, SOURCE_CHANNELS.importUrl, z.object({ projectId: z.uuid(), url: z.url() }).strict(), resultSchema(sourceDtoSchema), input),
+      list: async (input) => sourceDtoSchema.array().parse(await ipc.invoke(SOURCE_CHANNELS.list, z.object({ projectId: z.uuid() }).strict().parse(input))),
+      remove: (input) => invokeResult(ipc, SOURCE_CHANNELS.remove, z.object({ projectId: z.uuid(), sourceId: z.uuid() }).strict(), resultSchema(z.undefined()), input),
+      retry: (input) => invokeResult(ipc, SOURCE_CHANNELS.retry, z.object({ projectId: z.uuid(), sourceId: z.uuid() }).strict(), resultSchema(taskDtoSchema), input)
+    },
+    tasks: {
+      list: async (input) => taskDtoSchema.array().parse(await ipc.invoke(SOURCE_CHANNELS.listTasks, z.object({ projectId: z.uuid() }).strict().parse(input))),
+      cancel: (input) => invokeResult(ipc, SOURCE_CHANNELS.cancel, z.object({ projectId: z.uuid(), taskId: z.uuid() }).strict(), resultSchema(taskDtoSchema), input),
+      subscribe: (projectId, listener) => { const channel = SOURCE_CHANNELS.update + ":" + projectId; const handler = (_event: unknown, raw: unknown) => { const parsed = taskDtoSchema.safeParse(raw); if (parsed.success) listener(parsed.data); }; ipc.on?.(channel, handler); return () => ipc.removeListener?.(channel, handler); }
+    },
     projects: {
       list: async () => projectDtoSchema.array().parse(await ipc.invoke(PROJECT_CHANNELS.list)),
       create: async (input) =>

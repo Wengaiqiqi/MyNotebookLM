@@ -17,6 +17,10 @@ import type {
 } from "./models";
 import type { AppSettingsDto, UpdateAppSettingsInput } from "./settings";
 import type { AppTheme } from "./settings";
+import type { SourceDto } from "./sources";
+import type { TaskDto } from "./tasks";
+
+export const SOURCE_CHANNELS = { chooseFiles: "sources:v1:choose-files", importFile: "sources:v1:import-file", importUrl: "sources:v1:import-url", list: "sources:v1:list", remove: "sources:v1:remove", retry: "sources:v1:retry", cancel: "tasks:v1:cancel", listTasks: "tasks:v1:list", subscribe: "tasks:v1:subscribe", update: "tasks:v1:update" } as const;
 
 export const PROJECT_CHANNELS = {
   list: "projects:list",
@@ -51,6 +55,8 @@ export const TITLE_OVERLAY_CHANNELS = {
 } as const;
 
 export interface DesktopApi {
+  sources?: { chooseFiles(input: { projectId: string }): Promise<string[] | null>; importFile(input: { projectId: string; dialogToken: string }): Promise<Result<SourceDto>>; importUrl(input: { projectId: string; url: string }): Promise<Result<SourceDto>>; list(input: { projectId: string }): Promise<SourceDto[]>; remove(input: { projectId: string; sourceId: string }): Promise<Result<void>>; retry(input: { projectId: string; sourceId: string }): Promise<Result<TaskDto>>; };
+  tasks?: { list(input: { projectId: string }): Promise<TaskDto[]>; cancel(input: { projectId: string; taskId: string }): Promise<Result<TaskDto>>; subscribe(projectId: string, listener: (task: TaskDto) => void): () => void; };
   projects: {
     list(): Promise<ProjectDto[]>;
     create(input: CreateProjectInput): Promise<ProjectDto>;
