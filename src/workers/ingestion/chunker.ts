@@ -197,14 +197,17 @@ export function chunkBlocks(
 
   const startOverlap = (): void => {
     if (chunks.length === 0) return;
+    if (activeHeading) return;
     const prevChunk = chunks[chunks.length - 1]!;
     const prevFragments = lastChunkFragments.get(prevChunk) ?? [];
     const tail: Fragment[] = [];
     let tailTokens = 0;
+    const prefixTokens = activeHeading ? estimateTokens(activeHeading.text) : 0;
+    const tailBudget = Math.min(overlapTokens, targetTokens - prefixTokens);
     for (let i = prevFragments.length - 1; i >= 0; i -= 1) {
       const f = prevFragments[i]!;
       if (f.isAtomic) break;
-      if (tailTokens + f.tokens > overlapTokens) break;
+      if (tailTokens + f.tokens > tailBudget) break;
       tail.unshift(f);
       tailTokens += f.tokens;
     }
@@ -228,7 +231,7 @@ export function chunkBlocks(
     }
     if (fragment.isHeading) {
       flush();
-      activeHeading = fragment.block;
+      activeHeading = estimateTokens(fragment.block.text) <= targetTokens ? fragment.block : undefined;
       state.fragments.push(fragment);
       state.tokens += fragment.tokens;
       state.firstLocator = fragment.block.locator;

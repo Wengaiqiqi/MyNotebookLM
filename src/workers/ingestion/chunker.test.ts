@@ -231,6 +231,22 @@ describe("chunkBlocks 900-token ceiling for unspaced CJK", () => {
     expect(chunks.every((c) => c.text.trim().length > 0)).toBe(true);
   });
 });
+describe("chunkBlocks over-limit heading followed by body", () => {
+  it("never lets a full heading prefix push a chunk past the target while preserving body text", () => {
+    const headingText = Array.from({ length: 950 }, () => "标").join("");
+    const bodyText = "unique body sentinel 正文保留 验证内容".repeat(40);
+    const blocks: DocumentBlock[] = [
+      { kind: "heading", text: headingText, locator: { kind: "heading", depth: 1, headingPath: headingText } },
+      { kind: "paragraph", text: bodyText, locator: { kind: "paragraph", paragraph: 1 } }
+    ];
+    const chunks = chunkBlocks(blocks);
+    expect(chunks.length).toBeGreaterThan(1);
+    expect(chunks.every((c) => c.tokenEstimate <= 900)).toBe(true);
+    const joined = chunks.map((c) => c.text).join("");
+    expect(joined).toContain("unique body sentinel");
+    expect(joined).toContain("正文保留");
+  });
+});
 
 describe("chunkBlocks table over-limit", () => {
   it("splits a table whose token estimate exceeds the target into chunks at or below the target", () => {
