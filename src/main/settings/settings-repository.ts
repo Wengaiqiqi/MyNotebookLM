@@ -45,6 +45,15 @@ type RouteRow = {
   profile_id: string;
 };
 
+const defaultGenerationTasks = [
+  "chat",
+  "note-title",
+  "summary",
+  "key-points",
+  "qa",
+  "custom-transformation"
+] as const;
+
 function toSettings(row: SettingsRow): AppSettingsDto {
   return appSettingsDtoSchema.parse({
     onboardingCompleted: row.onboarding_completed === 1,
@@ -186,5 +195,37 @@ export class SettingsRepository {
     })();
 
     return this.getRoute(parsedTask);
+  }
+
+  replaceDefaultRoutes(generationProfileId: string, embeddingProfileId: string): void {
+    this.db.transaction(() => {
+      if (isBuiltInLocalEmbeddingProfile(embeddingProfileId)
+        && !this.getProfile(BUILT_IN_LOCAL_EMBEDDING_PROFILE.id)) {
+        const { id, name, provider, capability, baseUrl, modelId, enabled } =
+          BUILT_IN_LOCAL_EMBEDDING_PROFILE;
+        this.saveProfile({ id, name, provider, capability, baseUrl, modelId, enabled });
+      }
+
+      const generationProfile = this.getProfile(generationProfileId);
+      const embeddingProfile = this.getProfile(embeddingProfileId);
+      if (!generationProfile || !embeddingProfile) throw new Error("Default route profile not found");
+      if (generationProfile.capability !== "generation") {
+        throw new Error("Generation default route requires generation capability");
+      }
+      if (embeddingProfile.capability !== "embedding") {
+        throw new Error("Embedding default route requires embedding capability");
+      }
+
+      this.db.prepare(`
+        DELETE FROM model_routes
+        WHERE task_kind IN ('chat', 'note-title', 'summary', 'key-points', 'qa',
+          'custom-transformation', 'embedding')
+      `).run();
+      const insert = this.db.prepare(`
+        INSERT INTO model_routes(task_kind, position, profile_id) VALUES (?, 0, ?)
+      `);
+      for (const task of defaultGenerationTasks) insert.run(task, generationProfileId);
+      insert.run("embedding", embeddingProfileId);
+    })();
   }
 }

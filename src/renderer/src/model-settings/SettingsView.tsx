@@ -3,6 +3,7 @@ import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { ModelConfigurationForms, persistModelConfiguration, type ModelSettingsData } from "./FirstLaunch";
 import type { ModelProfileDraft } from "./ModelProfileForm";
+import { modelErrorText } from "./model-error-text";
 
 export default function SettingsView({
   data,
@@ -25,13 +26,13 @@ export default function SettingsView({
     setError("");
     const result = await persistModelConfiguration({ generation, embedding });
     if (!result.ok) {
-      setError(t(result.messageKey, { defaultValue: t("model.errors.request") }));
+      setError(modelErrorText(t, result.messageKey));
       setBusy(false);
       return;
     }
     const completionError = await onSaved();
     if (completionError) {
-      setError(t(completionError, { defaultValue: t("model.errors.request") }));
+      setError(modelErrorText(t, completionError));
     }
     setBusy(false);
   }
@@ -55,6 +56,7 @@ export default function SettingsView({
           <h3 id="model-services-title">{t("settings.modelServices")}</h3>
           <ModelConfigurationForms
             data={data}
+            disabled={busy}
             onGenerationChange={setGeneration}
             onEmbeddingChange={setEmbedding}
           />

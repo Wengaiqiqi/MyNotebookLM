@@ -2,7 +2,9 @@ import * as React from "react";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { DefaultModelRoutesDto, ModelProfileListDto } from "../../../shared/models";
+import type { AppTheme } from "../../../shared/settings";
 import ModelProfileForm, { type ModelProfileDraft } from "./ModelProfileForm";
+import { modelErrorText } from "./model-error-text";
 
 export type ModelSettingsData = Readonly<{
   profiles: ModelProfileListDto;
@@ -42,23 +44,27 @@ export async function persistModelConfiguration(drafts: Drafts): Promise<Persist
     if (!saved.ok) return { ok: false, messageKey: saved.error.messageKey };
   }
 
-  for (const draft of ordered) {
-    if (!draft) continue;
-    const routed = await window.myNotebook.models.setDefaultRoute({
-      capability: draft.profile.capability,
-      profileId: draft.profile.id
-    });
-    if (!routed.ok) return { ok: false, messageKey: routed.error.messageKey };
+  const generationProfileId = drafts.generation?.profile.id;
+  const embeddingProfileId = drafts.embedding?.profile.id;
+  if (!generationProfileId || !embeddingProfileId) {
+    return { ok: false, messageKey: "model.validation.complete" };
   }
+  const routed = await window.myNotebook.models.setDefaultRoutes({
+    generationProfileId,
+    embeddingProfileId
+  });
+  if (!routed.ok) return { ok: false, messageKey: routed.error.messageKey };
   return { ok: true };
 }
 
 export function ModelConfigurationForms({
   data,
+  disabled = false,
   onGenerationChange,
   onEmbeddingChange
 }: Readonly<{
   data: ModelSettingsData;
+  disabled?: boolean;
   onGenerationChange(draft: ModelProfileDraft): void;
   onEmbeddingChange(draft: ModelProfileDraft): void;
 }>) {
@@ -69,6 +75,7 @@ export function ModelConfigurationForms({
         profiles={data.profiles.profiles}
         builtInProfiles={data.profiles.builtInProfiles}
         credentials={data.profiles.credentials}
+        disabled={disabled}
         {...(data.routes.generationProfileId
           ? { initialProfileId: data.routes.generationProfileId }
           : {})}
@@ -79,6 +86,7 @@ export function ModelConfigurationForms({
         profiles={data.profiles.profiles}
         builtInProfiles={data.profiles.builtInProfiles}
         credentials={data.profiles.credentials}
+        disabled={disabled}
         {...(data.routes.embeddingProfileId
           ? { initialProfileId: data.routes.embeddingProfileId }
           : {})}
@@ -90,10 +98,14 @@ export function ModelConfigurationForms({
 
 export default function FirstLaunch({
   data,
+  theme,
+  onThemeChange,
   onComplete,
   onSkip
 }: Readonly<{
   data: ModelSettingsData;
+  theme: AppTheme;
+  onThemeChange(theme: AppTheme): void;
   onComplete(): Promise<string | undefined> | string | undefined;
   onSkip(): Promise<string | undefined> | string | undefined;
 }>) {
@@ -109,13 +121,13 @@ export default function FirstLaunch({
     setError("");
     const result = await persistModelConfiguration({ generation, embedding });
     if (!result.ok) {
-      setError(t(result.messageKey, { defaultValue: t("model.errors.request") }));
+      setError(modelErrorText(t, result.messageKey));
       setBusy(false);
       return;
     }
     const completionError = await onComplete();
     if (completionError) {
-      setError(t(completionError, { defaultValue: t("model.errors.request") }));
+      setError(modelErrorText(t, completionError));
     }
     setBusy(false);
   }
@@ -126,7 +138,7 @@ export default function FirstLaunch({
     setError("");
     const completionError = await onSkip();
     if (completionError) {
-      setError(t(completionError, { defaultValue: t("model.errors.request") }));
+      setError(modelErrorText(t, completionError));
     }
     setBusy(false);
   }
@@ -138,9 +150,18 @@ export default function FirstLaunch({
           <h2>{t("onboarding.title")}</h2>
           <p>{t("onboarding.subtitle")}</p>
         </div>
+        <div className="onboarding-theme-toggle title-no-drag" role="group" aria-label={t("common.theme")}>
+          <button type="button" disabled={busy} aria-pressed={theme === "light"} onClick={() => onThemeChange("light")}>
+            <span aria-hidden="true">☼</span>{t("common.light")}
+          </button>
+          <button type="button" disabled={busy} aria-pressed={theme === "dark"} onClick={() => onThemeChange("dark")}>
+            <span aria-hidden="true">◐</span>{t("common.dark")}
+          </button>
+        </div>
       </header>
       <ModelConfigurationForms
         data={data}
+        disabled={busy}
         onGenerationChange={setGeneration}
         onEmbeddingChange={setEmbedding}
       />

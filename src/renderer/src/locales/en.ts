@@ -24,7 +24,8 @@ const en = {
     dark: "Dark",
     save: "Save changes",
     saving: "Saving…",
-    openSettings: "Open settings"
+    openSettings: "Open settings",
+    retry: "Retry"
   },
   model: {
     generation: { title: "Generation model", description: "For chat, summaries, and writing" },
@@ -73,7 +74,27 @@ const en = {
     general: "General",
     languageAppearance: "Language & appearance",
     modelServices: "Model services",
-    dataIndex: "Data & indexing"
+    dataIndex: "Data & indexing",
+    loadError: "Could not load model settings. Check the app connection and retry."
+  },
+  errors: {
+    authentication: "Authentication failed. Check the API key and provider permissions.",
+    authorization: "Access was denied. Check the API key permissions and provider account.",
+    builtInModelImmutable: "The built-in embedding model cannot be edited. Select it as the embedding route.",
+    cancelled: "The request was cancelled. Try again.",
+    configuration: "Check the provider address, API key, and model configuration, then retry.",
+    credentialBinding: "The saved key does not match this provider address. Re-enter the API key.",
+    internal: "The model service could not complete the request. Try again.",
+    invalidResponse: "The provider returned an invalid response. Check its status and retry.",
+    modelCapability: "This provider or model does not support the required capability. Choose another model.",
+    modelNotFound: "The model was not found. Fetch models again or enter a valid model name.",
+    modelProfileNotFound: "This saved model profile no longer exists. Reload settings and choose another profile.",
+    modelRouteInconsistent: "Saved model routes are inconsistent. Reopen settings and save both models again.",
+    network: "Could not reach the provider. Check the API address and network, then retry.",
+    provider: "The provider returned an invalid or unavailable response. Check its status and retry.",
+    rateLimited: "The provider is rate limiting requests. Wait a moment and retry.",
+    timeout: "The provider took too long to respond. Check the address or network, then retry.",
+    validation: "Check the provider address, model name, and required fields."
   },
   error: {
     loadProjects: "Could not load projects. Try again.",

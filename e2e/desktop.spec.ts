@@ -75,6 +75,10 @@ test("fresh profile opens approved onboarding with key conditions and captures z
   try {
     await expect(page.getByRole("heading", { name: "欢迎使用 MyNotebookLM" })).toBeVisible();
     await expect(page.getByRole("button", { name: "新建项目" }).first()).toBeDisabled();
+    const headerTheme = page.locator(".onboarding-theme-toggle");
+    await expect(headerTheme).toHaveClass(/title-no-drag/);
+    await expect(headerTheme.getByRole("button", { name: "浅色" })).toHaveAttribute("aria-pressed", "true");
+    await expect(headerTheme.getByRole("button", { name: "深色" })).toBeVisible();
     const generation = page.locator(".model-profile-form").first();
     await expect(generation.locator('input[name="apiKey"]')).toBeVisible();
     await generation.getByLabel("提供商").selectOption("ollama");
@@ -128,6 +132,7 @@ test("validated model save and routes survive restart and capture English dark s
   await fs.mkdir(userDataDir, { recursive: true });
   await fs.mkdir(path.resolve("docs/verification/screenshots"), { recursive: true });
   const provider = await startFakeOpenAi();
+  let editedEmbeddingProfileId = "";
   const first = await launchWithUserData(userDataDir);
   try {
     const generation = first.page.locator(".model-profile-form").first();
@@ -169,6 +174,14 @@ test("validated model save and routes survive restart and capture English dark s
     await embedding.locator('select[id$="-model"]').selectOption("text-embedding-e2e");
     await second.page.getByRole("button", { name: "保存更改" }).click();
     await expect(second.page.getByRole("heading", { name: "开始新的研究项目" }).first()).toBeVisible();
+    const editedRouteResult = await second.page.evaluate(async () => (
+      (window as unknown as { myNotebook: { models: { getDefaultRoutes(): Promise<unknown> } } })
+        .myNotebook.models.getDefaultRoutes()
+    )) as { ok: boolean; value?: { embeddingProfileId?: string } };
+    expect(editedRouteResult).toMatchObject({ ok: true });
+    editedEmbeddingProfileId = editedRouteResult.value?.embeddingProfileId ?? "";
+    expect(editedEmbeddingProfileId).not.toBe("");
+    expect(editedEmbeddingProfileId).not.toBe("00000000-0000-4000-8000-000000000001");
     await second.page.getByRole("button", { name: "设置" }).click();
     await expect(second.page.locator(".model-profile-form").nth(1).getByLabel("提供商"))
       .toHaveValue("openai-compatible");
@@ -187,6 +200,18 @@ test("validated model save and routes survive restart and capture English dark s
     await expect(third.page.locator("html")).toHaveAttribute("lang", "en");
     await expect(third.page.locator("html")).toHaveAttribute("data-theme", "dark");
     await expect(third.page.getByRole("heading", { name: "Welcome to MyNotebookLM" })).toHaveCount(0);
+    const thirdRouteResult = await third.page.evaluate(async () => (
+      (window as unknown as { myNotebook: { models: { getDefaultRoutes(): Promise<unknown> } } })
+        .myNotebook.models.getDefaultRoutes()
+    ));
+    expect(thirdRouteResult).toMatchObject({
+      ok: true,
+      value: { embeddingProfileId: editedEmbeddingProfileId }
+    });
+    await third.page.getByRole("button", { name: "Settings" }).click();
+    const thirdEmbedding = third.page.locator(".model-profile-form").nth(1);
+    await expect(thirdEmbedding.getByLabel("Provider")).toHaveValue("openai-compatible");
+    await expect(thirdEmbedding.getByLabel("Model")).toHaveValue("text-embedding-e2e");
   } finally {
     await third.app.close();
   }

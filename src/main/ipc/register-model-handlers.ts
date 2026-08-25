@@ -22,7 +22,7 @@ import {
   modelProfileListDtoSchema,
   modelTestResultDtoSchema,
   saveModelProfileInputSchema,
-  setDefaultModelRouteInputSchema,
+  setDefaultModelRoutesInputSchema,
   testModelInputSchema
 } from "../../shared/models";
 import {
@@ -79,9 +79,9 @@ export function registerModelHandlers(
       service.getDefaultRoutes()
     )
   );
-  ipc.handle(MODEL_CHANNELS.setDefaultRoute, (_event, input) =>
-    validatedCall(setDefaultModelRouteInputSchema, defaultRoutesResultSchema, input, (parsed) =>
-      service.setDefaultRoute(parsed)
+  ipc.handle(MODEL_CHANNELS.setDefaultRoutes, (_event, input) =>
+    validatedCall(setDefaultModelRoutesInputSchema, defaultRoutesResultSchema, input, (parsed) =>
+      service.setDefaultRoutes(parsed)
     )
   );
   ipc.handle(MODEL_CHANNELS.saveProfile, (_event, input) =>

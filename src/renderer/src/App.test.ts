@@ -64,7 +64,7 @@ type ApiDouble = {
   updateSettings: ReturnType<typeof vi.fn<DesktopApi["settings"]["update"]>>;
   listProfiles: ReturnType<typeof vi.fn<DesktopApi["models"]["listProfiles"]>>;
   getDefaultRoutes: ReturnType<typeof vi.fn<DesktopApi["models"]["getDefaultRoutes"]>>;
-  setDefaultRoute: ReturnType<typeof vi.fn<DesktopApi["models"]["setDefaultRoute"]>>;
+  setDefaultRoutes: ReturnType<typeof vi.fn<DesktopApi["models"]["setDefaultRoutes"]>>;
   saveProfile: ReturnType<typeof vi.fn<DesktopApi["models"]["saveProfile"]>>;
   testModel: ReturnType<typeof vi.fn<DesktopApi["models"]["test"]>>;
 };
@@ -102,11 +102,9 @@ function createApi(projects: ProjectDto[] = [], onboardingCompleted = true): Api
       ? { generationProfileId: projectA.id, embeddingProfileId: projectB.id }
       : {}
   });
-  const setDefaultRoute = vi.fn<DesktopApi["models"]["setDefaultRoute"]>().mockImplementation(async (input) => ({
+  const setDefaultRoutes = vi.fn<DesktopApi["models"]["setDefaultRoutes"]>().mockImplementation(async (input) => ({
     ok: true,
-    value: input.capability === "generation"
-      ? { generationProfileId: input.profileId }
-      : { embeddingProfileId: input.profileId }
+    value: input
   }));
   const saveProfile = vi.fn<DesktopApi["models"]["saveProfile"]>().mockImplementation(async ({ profile }) => ({
     ok: true,
@@ -130,7 +128,7 @@ function createApi(projects: ProjectDto[] = [], onboardingCompleted = true): Api
     updateSettings,
     listProfiles,
     getDefaultRoutes,
-    setDefaultRoute,
+    setDefaultRoutes,
     saveProfile,
     testModel,
     api: {
@@ -148,7 +146,7 @@ function createApi(projects: ProjectDto[] = [], onboardingCompleted = true): Api
       models: {
         listProfiles,
         getDefaultRoutes,
-        setDefaultRoute,
+        setDefaultRoutes,
         saveProfile,
         deleteProfile: vi.fn<DesktopApi["models"]["deleteProfile"]>(),
         discover: vi.fn<DesktopApi["models"]["discover"]>().mockResolvedValue({
@@ -281,6 +279,17 @@ describe("App shell behavior", () => {
     expect(list).not.toHaveBeenCalled();
   });
 
+  it("offers a no-drag theme control in the first-launch header", async () => {
+    const { api, updateSettings } = createApi([], false);
+    const container = await renderApp(api);
+    const toggle = container.querySelector<HTMLElement>(".onboarding-theme-toggle");
+
+    expect(toggle?.classList.contains("title-no-drag")).toBe(true);
+    await click(button(toggle!, "Dark"));
+    expect(document.documentElement.dataset.theme).toBe("dark");
+    expect(updateSettings).toHaveBeenCalledWith({ theme: "dark" });
+  });
+
   it("persists skip before entering the app and exposes settings repair actions", async () => {
     const { api, updateSettings, list } = createApi([projectA], false);
     const container = await renderApp(api);
@@ -306,7 +315,9 @@ describe("App shell behavior", () => {
 
     await click(button(container, "Configure later"));
 
-    expect(container.querySelector("[role=alert]")?.textContent).toBe("The model service request failed.");
+    expect(container.querySelector("[role=alert]")?.textContent).toBe(
+      "The model service could not complete the request. Try again."
+    );
     expect(container.textContent).toContain("Welcome to MyNotebookLM");
     expect(list).not.toHaveBeenCalled();
   });
@@ -323,7 +334,7 @@ describe("App shell behavior", () => {
   });
 
   it("validates and saves editable profiles before explicitly persisting both routes", async () => {
-    const { api, listProfiles, testModel, saveProfile, setDefaultRoute, updateSettings } =
+    const { api, listProfiles, testModel, saveProfile, setDefaultRoutes, updateSettings } =
       createApi([], false);
     listProfiles.mockResolvedValueOnce({
       ok: true,
@@ -341,12 +352,93 @@ describe("App shell behavior", () => {
 
     expect(testModel).toHaveBeenCalledOnce();
     expect(saveProfile).toHaveBeenCalledOnce();
-    expect(setDefaultRoute).toHaveBeenNthCalledWith(1, expect.objectContaining({ capability: "generation" }));
-    expect(setDefaultRoute).toHaveBeenNthCalledWith(2, {
-      capability: "embedding",
-      profileId: builtInEmbedding.id
+    expect(setDefaultRoutes).toHaveBeenCalledOnce();
+    expect(setDefaultRoutes).toHaveBeenCalledWith({
+      generationProfileId: expect.any(String),
+      embeddingProfileId: builtInEmbedding.id
     });
     expect(updateSettings).toHaveBeenCalledWith({ onboardingCompleted: true });
+  });
+
+  it("locks both complete model forms while onboarding persistence is in flight", async () => {
+    const pending = deferred<Awaited<ReturnType<DesktopApi["models"]["test"]>>>();
+    const { api, listProfiles, testModel } = createApi([], false);
+    listProfiles.mockResolvedValueOnce({
+      ok: true,
+      value: { profiles: [], builtInProfiles: [builtInEmbedding], credentials: [] }
+    });
+    testModel.mockReturnValueOnce(pending.promise);
+    const container = await renderApp(api);
+    const forms = container.querySelectorAll<HTMLElement>(".model-profile-form");
+    await setField(labelledField<HTMLSelectElement>(forms[0]!, "Provider"), "ollama");
+    await click(button(forms[0]!, "Enter model name manually"));
+    await setField(labelledField<HTMLInputElement>(forms[0]!, "Model name"), "llama3.2");
+    await setField(labelledField<HTMLSelectElement>(forms[1]!, "Provider"), "local");
+
+    await click(button(container, "Finish and start"));
+
+    expect([...container.querySelectorAll(".model-profile-form input, .model-profile-form select, .model-profile-form button")]
+      .every((control) => control.matches(":disabled"))).toBe(true);
+    await act(async () => {
+      pending.resolve({
+        ok: true,
+        value: { modelId: "llama3.2", capability: "generation", verifiedBy: "probe" }
+      });
+      await pending.promise;
+      await Promise.resolve();
+    });
+  });
+
+  it("locks both complete model forms while settings persistence is in flight", async () => {
+    const pending = deferred<Awaited<ReturnType<DesktopApi["models"]["test"]>>>();
+    const { api, listProfiles, getDefaultRoutes, testModel } = createApi([], true);
+    listProfiles.mockResolvedValue({
+      ok: true,
+      value: { profiles: [], builtInProfiles: [builtInEmbedding], credentials: [] }
+    });
+    getDefaultRoutes.mockResolvedValue({ ok: true, value: {} });
+    const container = await renderApp(api);
+    await click(button(container, "Settings"));
+    const forms = container.querySelectorAll<HTMLElement>(".model-profile-form");
+    await setField(labelledField<HTMLSelectElement>(forms[0]!, "Provider"), "ollama");
+    await click(button(forms[0]!, "Enter model name manually"));
+    await setField(labelledField<HTMLInputElement>(forms[0]!, "Model name"), "llama3.2");
+    await setField(labelledField<HTMLSelectElement>(forms[1]!, "Provider"), "local");
+    testModel.mockReturnValueOnce(pending.promise);
+
+    await click(button(container, "Save changes"));
+
+    expect([...container.querySelectorAll(".model-profile-form input, .model-profile-form select, .model-profile-form button")]
+      .every((control) => control.matches(":disabled"))).toBe(true);
+    await act(async () => {
+      pending.resolve({
+        ok: true,
+        value: { modelId: "llama3.2", capability: "generation", verifiedBy: "probe" }
+      });
+      await pending.promise;
+      await Promise.resolve();
+    });
+  });
+
+  it("focuses and announces a retryable settings load failure", async () => {
+    const { api, listProfiles } = createApi([], true);
+    listProfiles.mockResolvedValueOnce({
+      ok: false,
+      error: { code: "NETWORK", messageKey: "errors.network", recoverable: true }
+    });
+    const container = await renderApp(api);
+
+    await click(button(container, "Settings"));
+
+    const alert = container.querySelector<HTMLElement>(".settings-load-error[role=alert]");
+    expect(alert?.textContent).toContain("Could not load model settings");
+    expect(document.activeElement).toBe(alert);
+    listProfiles.mockResolvedValueOnce({
+      ok: true,
+      value: { profiles: [], builtInProfiles: [], credentials: [] }
+    });
+    await click(button(container, "Retry"));
+    expect(container.textContent).toContain("Model services");
   });
 
   it("loads projects once under React Strict Mode", async () => {

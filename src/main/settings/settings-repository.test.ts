@@ -12,6 +12,15 @@ import {
 const GENERATION_ID = "11111111-1111-4111-8111-111111111111";
 const FALLBACK_ID = "22222222-2222-4222-8222-222222222222";
 const EMBEDDING_ID = "33333333-3333-4333-8333-333333333333";
+const OTHER_EMBEDDING_ID = "44444444-4444-4444-8444-444444444444";
+const GENERATION_TASKS = [
+  "chat",
+  "note-title",
+  "summary",
+  "key-points",
+  "qa",
+  "custom-transformation"
+] as const;
 
 describe("SettingsRepository", () => {
   let temporaryRoot: string;
@@ -139,6 +148,76 @@ describe("SettingsRepository", () => {
       position: 0,
       profileId: BUILT_IN_LOCAL_EMBEDDING_PROFILE_ID
     }]);
+  });
+
+  it("replaces every default route in one batch and materializes the built-in embedding", () => {
+    repository.saveProfile({
+      id: GENERATION_ID,
+      name: "Generation",
+      provider: "openai",
+      capability: "generation",
+      baseUrl: "https://api.openai.com/v1",
+      modelId: "gpt-test",
+      enabled: true
+    });
+
+    repository.replaceDefaultRoutes(
+      GENERATION_ID,
+      BUILT_IN_LOCAL_EMBEDDING_PROFILE_ID
+    );
+
+    for (const task of GENERATION_TASKS) {
+      expect(repository.getRoute(task)).toEqual([{
+        taskKind: task,
+        position: 0,
+        profileId: GENERATION_ID
+      }]);
+    }
+    expect(repository.getRoute("embedding")).toEqual([{
+      taskKind: "embedding",
+      position: 0,
+      profileId: BUILT_IN_LOCAL_EMBEDDING_PROFILE_ID
+    }]);
+    expect(repository.getProfile(BUILT_IN_LOCAL_EMBEDDING_PROFILE_ID)).toBeDefined();
+  });
+
+  it("rolls back every default route and built-in materialization after a mid-write failure", () => {
+    for (const profile of [
+      { id: GENERATION_ID, capability: "generation" as const },
+      { id: FALLBACK_ID, capability: "generation" as const },
+      { id: EMBEDDING_ID, capability: "embedding" as const },
+      { id: OTHER_EMBEDDING_ID, capability: "embedding" as const }
+    ]) {
+      repository.saveProfile({
+        id: profile.id,
+        name: profile.id,
+        provider: "openai",
+        capability: profile.capability,
+        baseUrl: "https://api.openai.com/v1",
+        modelId: profile.id,
+        enabled: true
+      });
+    }
+    repository.replaceDefaultRoutes(GENERATION_ID, EMBEDDING_ID);
+    appDatabase.connection.exec(`
+      CREATE TRIGGER fail_default_route
+      BEFORE INSERT ON model_routes
+      WHEN NEW.task_kind = 'summary'
+      BEGIN
+        SELECT RAISE(ABORT, 'forced route failure');
+      END
+    `);
+
+    expect(() => repository.replaceDefaultRoutes(
+      FALLBACK_ID,
+      BUILT_IN_LOCAL_EMBEDDING_PROFILE_ID
+    )).toThrow(/forced route failure/i);
+
+    for (const task of GENERATION_TASKS) {
+      expect(repository.getRoute(task)[0]?.profileId).toBe(GENERATION_ID);
+    }
+    expect(repository.getRoute("embedding")[0]?.profileId).toBe(EMBEDDING_ID);
+    expect(repository.getProfile(BUILT_IN_LOCAL_EMBEDDING_PROFILE_ID)).toBeUndefined();
   });
 
   it.each([

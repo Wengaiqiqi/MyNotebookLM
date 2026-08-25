@@ -25,7 +25,7 @@ import {
   modelProfileListDtoSchema,
   modelTestResultDtoSchema,
   saveModelProfileInputSchema,
-  setDefaultModelRouteInputSchema,
+  setDefaultModelRoutesInputSchema,
   testModelInputSchema
 } from "../shared/models";
 import {
@@ -113,10 +113,10 @@ export function createDesktopApi(ipc: IpcInvoker): DesktopApi {
         z.undefined(),
         defaultRoutesResultSchema
       ),
-      setDefaultRoute: (input) => invokeResult(
+      setDefaultRoutes: (input) => invokeResult(
         ipc,
-        MODEL_CHANNELS.setDefaultRoute,
-        setDefaultModelRouteInputSchema,
+        MODEL_CHANNELS.setDefaultRoutes,
+        setDefaultModelRoutesInputSchema,
         defaultRoutesResultSchema,
         input
       ),

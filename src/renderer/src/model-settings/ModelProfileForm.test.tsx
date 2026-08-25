@@ -146,6 +146,7 @@ describe("ModelProfileForm", () => {
     await setValue(provider, "gemini");
     expect(address.value).toBe("https://gateway.example/v1");
     expect(address.readOnly).toBe(false);
+    expect(container.querySelector(".provider-mark")?.getAttribute("data-provider")).toBe("gemini");
   });
 
   it("loads a saved profile and uses a fixed unchanged-credential mask", async () => {
@@ -207,6 +208,9 @@ describe("ModelProfileForm", () => {
     await click(getModels);
     expect(container.querySelector("[role=status]")?.textContent).not.toContain("Fetched successfully");
     expect(getModels.disabled).toBe(true);
+    expect([...container.querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLButtonElement>(
+      "input, select, button"
+    )].every((control) => control.matches(":disabled"))).toBe(true);
     await act(async () => {
       pending.resolve({
         ok: true,
@@ -222,6 +226,92 @@ describe("ModelProfileForm", () => {
     const model = field<HTMLSelectElement>(container, "Model");
     expect([...model.options].map((option) => option.value)).toContain("gpt-test");
     expect([...model.options].map((option) => option.value)).not.toContain("embed-test");
+  });
+
+  it("ignores a stale discovery success after the provider address changes", async () => {
+    const pending = deferred<Awaited<ReturnType<DesktopApi["models"]["discover"]>>>();
+    window.myNotebook.models.discover = vi.fn<DesktopApi["models"]["discover"]>()
+      .mockReturnValueOnce(pending.promise);
+    const { container } = await renderForm();
+    await setValue(field<HTMLInputElement>(container, "API key"), "new-secret");
+    await click(button(container, "Get models"));
+
+    await setValue(field<HTMLInputElement>(container, "API address"), "https://changed.example/v1");
+    await act(async () => {
+      pending.resolve({
+        ok: true,
+        value: [{
+          id: "stale-model",
+          displayName: "Stale model",
+          capabilities: ["generation"],
+          capabilityEvidence: "authoritative"
+        }]
+      });
+      await pending.promise;
+    });
+
+    expect(container.querySelector("[role=status]")?.textContent).not.toContain("Fetched successfully");
+    expect(container.textContent).not.toContain("Stale model");
+  });
+
+  it("keeps the newest discovery result when requests finish in reverse order", async () => {
+    const first = deferred<Awaited<ReturnType<DesktopApi["models"]["discover"]>>>();
+    const second = deferred<Awaited<ReturnType<DesktopApi["models"]["discover"]>>>();
+    window.myNotebook.models.discover = vi.fn<DesktopApi["models"]["discover"]>()
+      .mockReturnValueOnce(first.promise)
+      .mockReturnValueOnce(second.promise);
+    const { container } = await renderForm();
+    await setValue(field<HTMLInputElement>(container, "API key"), "new-secret");
+    await click(button(container, "Get models"));
+    await setValue(field<HTMLInputElement>(container, "API address"), "https://new.example/v1");
+    await click(button(container, "Get models"));
+
+    await act(async () => {
+      second.resolve({
+        ok: true,
+        value: [{
+          id: "new-model",
+          displayName: "New model",
+          capabilities: ["generation"],
+          capabilityEvidence: "authoritative"
+        }]
+      });
+      await second.promise;
+    });
+    await act(async () => {
+      first.resolve({
+        ok: true,
+        value: [{
+          id: "old-model",
+          displayName: "Old model",
+          capabilities: ["generation"],
+          capabilityEvidence: "authoritative"
+        }]
+      });
+      await first.promise;
+    });
+
+    const model = field<HTMLSelectElement>(container, "Model");
+    expect([...model.options].map((option) => option.value)).toContain("new-model");
+    expect([...model.options].map((option) => option.value)).not.toContain("old-model");
+    expect(container.querySelector("[role=status]")?.textContent).toContain("Fetched successfully");
+  });
+
+  it.each([
+    ["AUTH", "errors.authentication", "Authentication failed. Check the API key and provider permissions."],
+    ["NOT_FOUND", "errors.modelNotFound", "The model was not found. Fetch models again or enter a valid model name."],
+    ["TIMEOUT", "errors.timeout", "The provider took too long to respond. Check the address or network, then retry."]
+  ] as const)("renders the actionable %s provider error", async (code, messageKey, message) => {
+    window.myNotebook.models.discover = vi.fn<DesktopApi["models"]["discover"]>()
+      .mockResolvedValue({
+        ok: false,
+        error: { code, messageKey, recoverable: true }
+      });
+    const { container } = await renderForm();
+    await setValue(field<HTMLInputElement>(container, "API key"), "new-secret");
+    await click(button(container, "Get models"));
+
+    expect(container.querySelector("[role=alert]")?.textContent).toBe(message);
   });
 
   it("switches from discovered dropdown to a focused manual model-name input", async () => {

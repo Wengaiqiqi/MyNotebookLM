@@ -100,6 +100,24 @@ class FakeSettingsRepository {
     this.routes.set(taskKind, routes);
     return routes;
   }
+
+  replaceDefaultRoutes(generationProfileId: string, embeddingProfileId: string): void {
+    for (const taskKind of [
+      "chat",
+      "note-title",
+      "summary",
+      "key-points",
+      "qa",
+      "custom-transformation"
+    ] as const) {
+      this.routes.set(taskKind, [{ taskKind, profileId: generationProfileId, position: 0 }]);
+    }
+    this.routes.set("embedding", [{
+      taskKind: "embedding",
+      profileId: embeddingProfileId,
+      position: 0
+    }]);
+  }
 }
 
 class FakeCredentialStore {
@@ -170,7 +188,7 @@ describe("createModelProvider", () => {
 });
 
 describe("ModelService", () => {
-  it("reads and explicitly sets generation and built-in embedding default routes", async () => {
+  it("atomically sets generation and built-in embedding default routes", async () => {
     const { service, repository, factory } = setup();
     repository.profiles.set(PROFILE_ID, dto(profile));
 
@@ -178,12 +196,15 @@ describe("ModelService", () => {
       ok: true,
       value: {}
     });
-    await expect(service.setDefaultRoute({
-      capability: "generation",
-      profileId: PROFILE_ID
+    await expect(service.setDefaultRoutes({
+      generationProfileId: PROFILE_ID,
+      embeddingProfileId: BUILT_IN_LOCAL_EMBEDDING_PROFILE_ID
     })).resolves.toEqual({
       ok: true,
-      value: { generationProfileId: PROFILE_ID }
+      value: {
+        generationProfileId: PROFILE_ID,
+        embeddingProfileId: BUILT_IN_LOCAL_EMBEDDING_PROFILE_ID
+      }
     });
     expect([...repository.routes.entries()]).toEqual([
       ["chat", [{ taskKind: "chat", profileId: PROFILE_ID, position: 0 }]],
@@ -192,18 +213,13 @@ describe("ModelService", () => {
       ["key-points", [{ taskKind: "key-points", profileId: PROFILE_ID, position: 0 }]],
       ["qa", [{ taskKind: "qa", profileId: PROFILE_ID, position: 0 }]],
       ["custom-transformation", [{ taskKind: "custom-transformation", profileId: PROFILE_ID, position: 0 }]]
+      , ["embedding", [{
+        taskKind: "embedding",
+        profileId: BUILT_IN_LOCAL_EMBEDDING_PROFILE_ID,
+        position: 0
+      }]]
     ]);
 
-    await expect(service.setDefaultRoute({
-      capability: "embedding",
-      profileId: BUILT_IN_LOCAL_EMBEDDING_PROFILE_ID
-    })).resolves.toEqual({
-      ok: true,
-      value: {
-        generationProfileId: PROFILE_ID,
-        embeddingProfileId: BUILT_IN_LOCAL_EMBEDDING_PROFILE_ID
-      }
-    });
     expect(repository.routes.get("embedding")).toEqual([{
       taskKind: "embedding",
       profileId: BUILT_IN_LOCAL_EMBEDDING_PROFILE_ID,
@@ -213,16 +229,38 @@ describe("ModelService", () => {
   });
 
   it("rejects missing and wrong-capability default route profiles", async () => {
-    const { service } = setup();
+    const { service, repository } = setup();
+    repository.profiles.set(PROFILE_ID, dto(profile));
 
-    await expect(service.setDefaultRoute({
-      capability: "generation",
-      profileId: BUILT_IN_LOCAL_EMBEDDING_PROFILE_ID
+    await expect(service.setDefaultRoutes({
+      generationProfileId: BUILT_IN_LOCAL_EMBEDDING_PROFILE_ID,
+      embeddingProfileId: BUILT_IN_LOCAL_EMBEDDING_PROFILE_ID
     })).resolves.toMatchObject({ ok: false, error: { code: "VALIDATION" } });
-    await expect(service.setDefaultRoute({
-      capability: "generation",
-      profileId: OTHER_PROFILE_ID
+    await expect(service.setDefaultRoutes({
+      generationProfileId: PROFILE_ID,
+      embeddingProfileId: OTHER_PROFILE_ID
     })).resolves.toMatchObject({ ok: false, error: { code: "NOT_FOUND" } });
+  });
+
+  it("rejects partially present or inconsistent generation default routes", async () => {
+    const { service, repository } = setup();
+    repository.routes.set("chat", [{ taskKind: "chat", position: 0, profileId: PROFILE_ID }]);
+
+    await expect(service.getDefaultRoutes()).resolves.toMatchObject({
+      ok: false,
+      error: { code: "VALIDATION", messageKey: "errors.modelRouteInconsistent" }
+    });
+
+    repository.replaceDefaultRoutes(PROFILE_ID, BUILT_IN_LOCAL_EMBEDDING_PROFILE_ID);
+    repository.routes.set("summary", [{
+      taskKind: "summary",
+      position: 0,
+      profileId: OTHER_PROFILE_ID
+    }]);
+    await expect(service.getDefaultRoutes()).resolves.toMatchObject({
+      ok: false,
+      error: { code: "VALIDATION", messageKey: "errors.modelRouteInconsistent" }
+    });
   });
 
   it("returns settings updates as safe results", async () => {

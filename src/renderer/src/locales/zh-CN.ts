@@ -24,7 +24,8 @@ const zhCN = {
     dark: "深色",
     save: "保存更改",
     saving: "正在保存…",
-    openSettings: "打开设置"
+    openSettings: "打开设置",
+    retry: "重试"
   },
   model: {
     generation: { title: "生成模型", description: "用于对话、总结与内容生成" },
@@ -73,7 +74,27 @@ const zhCN = {
     general: "通用",
     languageAppearance: "语言与外观",
     modelServices: "模型服务",
-    dataIndex: "数据与索引"
+    dataIndex: "数据与索引",
+    loadError: "无法加载模型设置，请检查应用连接后重试。"
+  },
+  errors: {
+    authentication: "身份验证失败，请检查 API Key 和提供商权限。",
+    authorization: "访问被拒绝，请检查 API Key 权限和提供商账户。",
+    builtInModelImmutable: "内置嵌入模型不可编辑，请将它直接选为嵌入路由。",
+    cancelled: "请求已取消，请重试。",
+    configuration: "请检查提供商地址、API Key 和模型配置后重试。",
+    credentialBinding: "已保存的密钥与当前提供商地址不匹配，请重新输入 API Key。",
+    internal: "模型服务无法完成请求，请重试。",
+    invalidResponse: "提供商返回了无效响应，请检查其服务状态后重试。",
+    modelCapability: "此提供商或模型不支持所需能力，请选择其他模型。",
+    modelNotFound: "未找到该模型，请重新获取模型或输入有效的模型名称。",
+    modelProfileNotFound: "此模型配置已不存在，请重新加载设置并选择其他配置。",
+    modelRouteInconsistent: "已保存的模型路由不一致，请重新打开设置并保存两个模型。",
+    network: "无法连接提供商，请检查 API 地址和网络后重试。",
+    provider: "提供商返回无效响应或暂时不可用，请检查其服务状态后重试。",
+    rateLimited: "提供商限制了请求频率，请稍等片刻后重试。",
+    timeout: "提供商响应超时，请检查地址或网络后重试。",
+    validation: "请检查提供商地址、模型名称和必填项。"
   },
   error: {
     loadProjects: "无法加载项目，请重试。",

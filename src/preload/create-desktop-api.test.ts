@@ -32,6 +32,10 @@ const profileDto = {
   updatedAt: "2026-08-25T00:00:00.000Z"
 };
 const credentialStatus = { profileId: profile.id, hasCredential: true, mask: "••••••••" };
+const routeInput = {
+  generationProfileId: profile.id,
+  embeddingProfileId: "00000000-0000-4000-8000-000000000001"
+};
 
 function ok<T>(value: T) {
   return { ok: true as const, value };
@@ -56,7 +60,7 @@ describe("createDesktopApi", () => {
     expect(Object.keys(api.models)).toEqual([
       "listProfiles",
       "getDefaultRoutes",
-      "setDefaultRoute",
+      "setDefaultRoutes",
       "saveProfile",
       "deleteProfile",
       "discover",
@@ -119,7 +123,7 @@ describe("createDesktopApi", () => {
     await api.settings.update({ theme: "dark" });
     await api.models.listProfiles();
     await api.models.getDefaultRoutes();
-    await api.models.setDefaultRoute({ capability: "generation", profileId: profile.id });
+    await api.models.setDefaultRoutes(routeInput);
     await api.models.saveProfile({ profile, apiKey: "secret" });
     await api.models.deleteProfile({ id: profile.id });
     await api.models.discover(discoveryInput);
@@ -131,10 +135,7 @@ describe("createDesktopApi", () => {
     expect(invoke).toHaveBeenNthCalledWith(2, SETTINGS_CHANNELS.update, { theme: "dark" });
     expect(invoke).toHaveBeenNthCalledWith(3, MODEL_CHANNELS.listProfiles);
     expect(invoke).toHaveBeenNthCalledWith(4, MODEL_CHANNELS.getDefaultRoutes);
-    expect(invoke).toHaveBeenNthCalledWith(5, MODEL_CHANNELS.setDefaultRoute, {
-      capability: "generation",
-      profileId: profile.id
-    });
+    expect(invoke).toHaveBeenNthCalledWith(5, MODEL_CHANNELS.setDefaultRoutes, routeInput);
     expect(invoke).toHaveBeenNthCalledWith(6, MODEL_CHANNELS.saveProfile, { profile, apiKey: "secret" });
     expect(invoke).toHaveBeenNthCalledWith(7, MODEL_CHANNELS.deleteProfile, { id: profile.id });
     expect(invoke).toHaveBeenNthCalledWith(8, MODEL_CHANNELS.discover, discoveryInput);
@@ -151,9 +152,9 @@ describe("createDesktopApi", () => {
   it.each([
     ["settings update", (api: DesktopApi) => api.settings.update({} as never)],
     ["profile save", (api: DesktopApi) => api.models.saveProfile({ profile: { ...profile, name: "" } })],
-    ["default route", (api: DesktopApi) => api.models.setDefaultRoute({
-      capability: "generation",
-      profileId: "not-a-uuid"
+    ["default route", (api: DesktopApi) => api.models.setDefaultRoutes({
+      ...routeInput,
+      generationProfileId: "not-a-uuid"
     })],
     ["oversized profile address", (api: DesktopApi) => api.models.saveProfile({
       profile: { ...profile, baseUrl: `https://${"a".repeat(2_049)}.test` }
@@ -179,10 +180,7 @@ describe("createDesktopApi", () => {
     ["settings update", (api: DesktopApi) => api.settings.update({ theme: "dark" })],
     ["profile list", (api: DesktopApi) => api.models.listProfiles()],
     ["default routes", (api: DesktopApi) => api.models.getDefaultRoutes()],
-    ["default route update", (api: DesktopApi) => api.models.setDefaultRoute({
-      capability: "generation",
-      profileId: profile.id
-    })],
+    ["default route update", (api: DesktopApi) => api.models.setDefaultRoutes(routeInput)],
     ["profile save", (api: DesktopApi) => api.models.saveProfile({ profile })],
     ["profile delete", (api: DesktopApi) => api.models.deleteProfile({ id: profile.id })],
     ["discovery", (api: DesktopApi) => api.models.discover({

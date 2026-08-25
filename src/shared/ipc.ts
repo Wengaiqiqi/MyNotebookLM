@@ -12,7 +12,7 @@ import type {
   ModelProfileListDto,
   ModelTestResultDto,
   SaveModelProfileInput,
-  SetDefaultModelRouteInput,
+  SetDefaultModelRoutesInput,
   TestModelInput
 } from "./models";
 import type { AppSettingsDto, UpdateAppSettingsInput } from "./settings";
@@ -34,7 +34,7 @@ export const SETTINGS_CHANNELS = {
 export const MODEL_CHANNELS = {
   listProfiles: "models:v1:list-profiles",
   getDefaultRoutes: "models:v1:get-default-routes",
-  setDefaultRoute: "models:v1:set-default-route",
+  setDefaultRoutes: "models:v1:set-default-routes",
   saveProfile: "models:v1:save-profile",
   deleteProfile: "models:v1:delete-profile",
   discover: "models:v1:discover",
@@ -65,7 +65,7 @@ export interface DesktopApi {
   models: {
     listProfiles(): Promise<Result<ModelProfileListDto>>;
     getDefaultRoutes(): Promise<Result<DefaultModelRoutesDto>>;
-    setDefaultRoute(input: SetDefaultModelRouteInput): Promise<Result<DefaultModelRoutesDto>>;
+    setDefaultRoutes(input: SetDefaultModelRoutesInput): Promise<Result<DefaultModelRoutesDto>>;
     saveProfile(input: SaveModelProfileInput): Promise<Result<ModelProfileDto>>;
     deleteProfile(input: DeleteModelProfileInput): Promise<Result<void>>;
     discover(input: DiscoverModelsInput): Promise<Result<ModelDescriptorDto[]>>;

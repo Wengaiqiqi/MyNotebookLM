@@ -67,6 +67,7 @@ export default function App() {
   const [modelData, setModelData] = useState<ModelSettingsData>();
   const [routes, setRoutes] = useState<DefaultModelRoutesDto>({});
   const [startupError, setStartupError] = useState(false);
+  const [settingsLoadError, setSettingsLoadError] = useState(false);
   const [projects, setProjects] = useState<ProjectDto[]>([]);
   const [selectedId, setSelectedId] = useState<string>();
   const [errorKey, setErrorKey] = useState<ErrorKey>();
@@ -85,6 +86,7 @@ export default function App() {
   const listRequestEpoch = useRef(0);
   const loaded = useRef(false);
   const settingsReturnView = useRef<"onboarding" | "projects">("projects");
+  const settingsLoadErrorRef = useRef<HTMLDivElement>(null);
   const nameInput = useRef<HTMLInputElement>(null);
   const confirmButton = useRef<HTMLButtonElement>(null);
   const dialogCard = useRef<HTMLElement>(null);
@@ -175,6 +177,10 @@ export default function App() {
     syncedTitleOverlayTheme.current = theme;
     void window.myNotebook.titleOverlay.setTheme({ theme }).catch(() => undefined);
   }, [theme]);
+
+  useEffect(() => {
+    if (settingsLoadError) settingsLoadErrorRef.current?.focus();
+  }, [settingsLoadError]);
 
   useEffect(() => {
     if (dialog || openMenu || !pendingFocus.current) return;
@@ -405,9 +411,11 @@ export default function App() {
 
   async function openSettings(): Promise<void> {
     if (view === "loading") return;
+    setSettingsLoadError(false);
     settingsReturnView.current = view === "onboarding" ? "onboarding" : "projects";
     const data = await loadModelData();
     if (data) setView("settings");
+    else setSettingsLoadError(true);
   }
 
   async function finishOnboarding(): Promise<string | undefined> {
@@ -509,6 +517,17 @@ export default function App() {
           <button className="settings-button" type="button" aria-current={view === "settings" ? "page" : undefined} disabled={view === "loading"} onClick={() => void openSettings()}>
             <span aria-hidden="true">⚙</span>{t("app.settings")}
           </button>
+          {settingsLoadError && (
+            <div
+              ref={settingsLoadErrorRef}
+              className="settings-load-error inline-error"
+              role="alert"
+              tabIndex={-1}
+            >
+              <span>{t("settings.loadError")}</span>
+              <button type="button" onClick={() => void openSettings()}>{t("common.retry")}</button>
+            </div>
+          )}
           <div className="preference-row" role="group" aria-label={t("common.language")}>
             <button type="button" aria-pressed={language === "zh-CN"} onClick={() => selectLanguage("zh-CN")}>中文</button>
             <span aria-hidden="true">|</span>
@@ -523,7 +542,13 @@ export default function App() {
       </aside>
 
       {view === "onboarding" && modelData ? (
-        <FirstLaunch data={modelData} onComplete={finishOnboarding} onSkip={finishOnboarding} />
+        <FirstLaunch
+          data={modelData}
+          theme={theme}
+          onThemeChange={selectTheme}
+          onComplete={finishOnboarding}
+          onSkip={finishOnboarding}
+        />
       ) : view === "settings" && modelData ? (
         <SettingsView
           data={modelData}

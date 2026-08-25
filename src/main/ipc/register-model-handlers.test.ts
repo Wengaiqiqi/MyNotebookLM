@@ -9,6 +9,7 @@ import type { ModelService } from "../models/model-service";
 import { registerModelHandlers } from "./register-model-handlers";
 
 const PROFILE_ID = "11111111-1111-4111-8111-111111111111";
+const EMBEDDING_PROFILE_ID = "00000000-0000-4000-8000-000000000001";
 const timestamp = "2026-08-25T00:00:00.000Z";
 const profile = {
   id: PROFILE_ID,
@@ -34,7 +35,8 @@ const descriptors = [{
   capabilities: ["generation" as const],
   capabilityEvidence: "authoritative" as const
 }];
-const routes = { generationProfileId: PROFILE_ID };
+const routes = { generationProfileId: PROFILE_ID, embeddingProfileId: EMBEDDING_PROFILE_ID };
+const routeInput = routes;
 const validationFailure = {
   ok: false,
   error: { code: "VALIDATION", messageKey: "errors.validation", recoverable: false }
@@ -77,7 +79,7 @@ function createService() {
       credentials: [credentialStatus]
     })),
     getDefaultRoutes: vi.fn(async () => ok(routes)),
-    setDefaultRoute: vi.fn(async () => ok(routes)),
+    setDefaultRoutes: vi.fn(async () => ok(routes)),
     saveProfile: vi.fn(async () => ok(profileDto)),
     deleteProfile: vi.fn(async () => ok(undefined)),
     discover: vi.fn(async () => ok(descriptors)),
@@ -126,10 +128,7 @@ describe("registerModelHandlers", () => {
     await invoke(ipc, SETTINGS_CHANNELS.update, { theme: "dark" });
     await invoke(ipc, MODEL_CHANNELS.listProfiles);
     await invoke(ipc, MODEL_CHANNELS.getDefaultRoutes);
-    await invoke(ipc, MODEL_CHANNELS.setDefaultRoute, {
-      capability: "generation",
-      profileId: PROFILE_ID
-    });
+    await invoke(ipc, MODEL_CHANNELS.setDefaultRoutes, routeInput);
     await invoke(ipc, MODEL_CHANNELS.saveProfile, { profile, apiKey: "secret" });
     await invoke(ipc, MODEL_CHANNELS.deleteProfile, { id: PROFILE_ID });
     await invoke(ipc, MODEL_CHANNELS.discover, discoveryInput);
@@ -141,10 +140,7 @@ describe("registerModelHandlers", () => {
     expect(service.updateSettings).toHaveBeenCalledWith({ theme: "dark" });
     expect(service.listProfiles).toHaveBeenCalledWith();
     expect(service.getDefaultRoutes).toHaveBeenCalledWith();
-    expect(service.setDefaultRoute).toHaveBeenCalledWith({
-      capability: "generation",
-      profileId: PROFILE_ID
-    });
+    expect(service.setDefaultRoutes).toHaveBeenCalledWith(routeInput);
     expect(service.saveProfile).toHaveBeenCalledWith({ profile, apiKey: "secret" });
     expect(service.deleteProfile).toHaveBeenCalledWith({ id: PROFILE_ID });
     expect(service.discover).toHaveBeenCalledWith(discoveryInput);
@@ -158,7 +154,7 @@ describe("registerModelHandlers", () => {
     [SETTINGS_CHANNELS.update, {}, "updateSettings"],
     [MODEL_CHANNELS.listProfiles, {}, "listProfiles"],
     [MODEL_CHANNELS.getDefaultRoutes, {}, "getDefaultRoutes"],
-    [MODEL_CHANNELS.setDefaultRoute, { capability: "generation", profileId: "bad" }, "setDefaultRoute"],
+    [MODEL_CHANNELS.setDefaultRoutes, { ...routeInput, generationProfileId: "bad" }, "setDefaultRoutes"],
     [MODEL_CHANNELS.saveProfile, { profile: { ...profile, name: "" } }, "saveProfile"],
     [MODEL_CHANNELS.deleteProfile, { id: "not-a-uuid" }, "deleteProfile"],
     [MODEL_CHANNELS.discover, { ...discoveryInput, baseUrl: "http://localhost:1234" }, "discover"],
@@ -179,7 +175,7 @@ describe("registerModelHandlers", () => {
     [SETTINGS_CHANNELS.update, { theme: "dark" }, "updateSettings"],
     [MODEL_CHANNELS.listProfiles, undefined, "listProfiles"],
     [MODEL_CHANNELS.getDefaultRoutes, undefined, "getDefaultRoutes"],
-    [MODEL_CHANNELS.setDefaultRoute, { capability: "generation", profileId: PROFILE_ID }, "setDefaultRoute"],
+    [MODEL_CHANNELS.setDefaultRoutes, routeInput, "setDefaultRoutes"],
     [MODEL_CHANNELS.saveProfile, { profile }, "saveProfile"],
     [MODEL_CHANNELS.deleteProfile, { id: PROFILE_ID }, "deleteProfile"],
     [MODEL_CHANNELS.discover, discoveryInput, "discover"],

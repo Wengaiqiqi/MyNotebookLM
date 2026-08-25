@@ -1,6 +1,7 @@
 import * as React from "react";
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+import type { DesktopApi } from "../../../shared/ipc";
 import type {
   BuiltInModelProfileDto,
   CredentialStatusDto,
@@ -9,6 +10,7 @@ import type {
   ModelProfileInput,
   ProviderKind
 } from "../../../shared/models";
+import { modelErrorText } from "./model-error-text";
 
 const providerDefaults: Record<Exclude<ProviderKind, "local">, string> = {
   openai: "https://api.openai.com/v1",
@@ -23,8 +25,16 @@ const providersByCapability: Record<ModelCapability, ProviderKind[]> = {
   embedding: ["local", "openai-compatible", "openai", "gemini", "ollama"]
 };
 
-const fixedCredentialMask = "••••••••";
+const providerMarks: Record<ProviderKind, string> = {
+  openai: "◎",
+  "openai-compatible": "◎",
+  anthropic: "A",
+  gemini: "✦",
+  ollama: "◌",
+  local: "⌂"
+};
 
+const fixedCredentialMask = "••••••••";
 function needsCredential(provider: ProviderKind): boolean {
   return provider !== "ollama" && provider !== "local";
 }
@@ -56,6 +66,7 @@ type Props = Readonly<{
   builtInProfiles: readonly BuiltInModelProfileDto[];
   credentials: readonly CredentialStatusDto[];
   initialProfileId?: string;
+  disabled?: boolean;
   onChange(draft: ModelProfileDraft): void;
 }>;
 
@@ -65,6 +76,7 @@ export default function ModelProfileForm({
   builtInProfiles,
   credentials,
   initialProfileId,
+  disabled = false,
   onChange
 }: Props) {
   const { t } = useTranslation();
@@ -96,6 +108,9 @@ export default function ModelProfileForm({
   );
   const [discoveryState, setDiscoveryState] = useState<"idle" | "busy" | "success">("idle");
   const [error, setError] = useState("");
+  const discoveryEpoch = useRef(0);
+  const mounted = useRef(true);
+  const previousCapability = useRef(capability);
   const keyInput = useRef<HTMLInputElement>(null);
   const addressInput = useRef<HTMLInputElement>(null);
   const modelInput = useRef<HTMLInputElement>(null);
@@ -149,7 +164,19 @@ export default function ModelProfileForm({
     if (manual) modelInput.current?.focus();
   }, [manual]);
 
+  useEffect(() => () => {
+    mounted.current = false;
+    discoveryEpoch.current += 1;
+  }, []);
+
+  useEffect(() => {
+    if (previousCapability.current === capability) return;
+    previousCapability.current = capability;
+    resetDiscovery();
+  }, [capability]);
+
   function resetDiscovery(): void {
+    discoveryEpoch.current += 1;
     setDiscoveryState("idle");
     setModels([]);
     setError("");
@@ -205,17 +232,27 @@ export default function ModelProfileForm({
     }
     if (provider === "local") return;
 
+    const requestEpoch = ++discoveryEpoch.current;
     setDiscoveryState("busy");
-    const result = await window.myNotebook.models.discover({
-      ...(hasStoredCredential ? { profileId } : {}),
-      provider,
-      capability,
-      baseUrl,
-      ...(apiKey.trim() ? { apiKey } : {})
-    });
+    let result: Awaited<ReturnType<DesktopApi["models"]["discover"]>>;
+    try {
+      result = await window.myNotebook.models.discover({
+        ...(hasStoredCredential ? { profileId } : {}),
+        provider,
+        capability,
+        baseUrl,
+        ...(apiKey.trim() ? { apiKey } : {})
+      });
+    } catch {
+      if (!mounted.current || requestEpoch !== discoveryEpoch.current) return;
+      setDiscoveryState("idle");
+      setError(t("model.errors.request"));
+      return;
+    }
+    if (!mounted.current || requestEpoch !== discoveryEpoch.current) return;
     if (!result.ok) {
       setDiscoveryState("idle");
-      setError(t(result.error.messageKey, { defaultValue: t("model.errors.request") }));
+      setError(modelErrorText(t, result.error.messageKey));
       return;
     }
     const filtered = result.value.filter((candidate) =>
@@ -232,12 +269,18 @@ export default function ModelProfileForm({
     <section className="model-profile-form" aria-label={t(`model.${capability}.title`)}>
       <div className="model-form-heading">
         <span className="model-step" aria-hidden="true">{capability === "generation" ? "01" : "02"}</span>
+        <span className="provider-mark" data-provider={provider} aria-hidden="true">
+          {(provider === "openai" || provider === "openai-compatible")
+            ? capability === "generation" ? "✾" : "♞"
+            : providerMarks[provider]}
+        </span>
         <div>
           <h3>{t(`model.${capability}.title`)}</h3>
           <p>{t(`model.${capability}.description`)}</p>
         </div>
       </div>
 
+      <fieldset className="model-profile-fields" disabled={disabled || discoveryState === "busy"}>
       {availableProfiles.length > 0 && (
         <label htmlFor={`${prefix}-saved`}>
           {t("model.savedProfile")}
@@ -369,6 +412,7 @@ export default function ModelProfileForm({
           </button>
         </>
       )}
+      </fieldset>
     </section>
   );
 }

@@ -10,7 +10,7 @@ import {
   builtInModelProfileDtoSchema,
   modelProfileInputSchema,
   saveModelProfileInputSchema,
-  setDefaultModelRouteInputSchema,
+  setDefaultModelRoutesInputSchema,
   testModelInputSchema,
   type CredentialInput,
   type CredentialProfileInput,
@@ -25,7 +25,7 @@ import {
   type ModelTestResultDto,
   type ProviderKind,
   type SaveModelProfileInput,
-  type SetDefaultModelRouteInput,
+  type SetDefaultModelRoutesInput,
   type TestModelInput
 } from "../../shared/models";
 import {
@@ -187,8 +187,27 @@ export class ModelService {
 
   async getDefaultRoutes(): Promise<Result<DefaultModelRoutesDto>> {
     try {
-      const generationProfileId = this.settings.getRoute("chat")[0]?.profileId;
-      const embeddingProfileId = this.settings.getRoute("embedding")[0]?.profileId;
+      const generationRoutes = generationTasks.map((task) => this.settings.getRoute(task));
+      const configuredGenerationRoutes = generationRoutes.filter((route) => route.length > 0);
+      if (configuredGenerationRoutes.length > 0) {
+        const generationProfileId = generationRoutes[0]?.[0]?.profileId;
+        const consistent = generationRoutes.every((route) =>
+          route.length === 1 && route[0]?.profileId === generationProfileId
+        );
+        if (!consistent) {
+          return errorResult(appError(
+            "VALIDATION",
+            "errors.modelRouteInconsistent",
+            true
+          ));
+        }
+      }
+      const generationProfileId = generationRoutes[0]?.[0]?.profileId;
+      const embeddingRoutes = this.settings.getRoute("embedding");
+      if (embeddingRoutes.length > 1) {
+        return errorResult(appError("VALIDATION", "errors.modelRouteInconsistent", true));
+      }
+      const embeddingProfileId = embeddingRoutes[0]?.profileId;
       return {
         ok: true,
         value: defaultModelRoutesDtoSchema.parse({
@@ -201,28 +220,30 @@ export class ModelService {
     }
   }
 
-  async setDefaultRoute(
-    input: SetDefaultModelRouteInput
+  async setDefaultRoutes(
+    input: SetDefaultModelRoutesInput
   ): Promise<Result<DefaultModelRoutesDto>> {
-    let parsed: SetDefaultModelRouteInput;
+    let parsed: SetDefaultModelRoutesInput;
     try {
-      parsed = setDefaultModelRouteInputSchema.parse(input);
+      parsed = setDefaultModelRoutesInputSchema.parse(input);
     } catch (reason) {
       return resultFromError(reason);
     }
-    if (isBuiltInLocalEmbeddingProfile(parsed.profileId)) {
-      if (parsed.capability !== "embedding") return capabilityError();
-    } else {
-      const profile = this.settings.getProfile(parsed.profileId);
-      if (!profile) return notFound();
-      if (profile.capability !== parsed.capability) return capabilityError();
+    if (isBuiltInLocalEmbeddingProfile(parsed.generationProfileId)) return capabilityError();
+    const generationProfile = this.settings.getProfile(parsed.generationProfileId);
+    if (!generationProfile) return notFound();
+    if (generationProfile.capability !== "generation") return capabilityError();
+
+    if (!isBuiltInLocalEmbeddingProfile(parsed.embeddingProfileId)) {
+      const embeddingProfile = this.settings.getProfile(parsed.embeddingProfileId);
+      if (!embeddingProfile) return notFound();
+      if (embeddingProfile.capability !== "embedding") return capabilityError();
     }
     try {
-      if (parsed.capability === "embedding") {
-        this.settings.replaceRoute("embedding", [parsed.profileId]);
-      } else {
-        for (const task of generationTasks) this.settings.replaceRoute(task, [parsed.profileId]);
-      }
+      this.settings.replaceDefaultRoutes(
+        parsed.generationProfileId,
+        parsed.embeddingProfileId
+      );
       return this.getDefaultRoutes();
     } catch (reason) {
       return resultFromError(reason);
