@@ -22,6 +22,8 @@ import { createTaskUpdateFanout } from "./task-updates";
 import { readFileSync } from "node:fs";
 import { createMainWindow, registerTitleOverlayHandler } from "./window";
 import { LanceStore } from "./vector/lance-store";
+import { IndexingService } from "./vector/indexing-service";
+import { SpaceRepository } from "./vector/space-repository";
 
 let appDatabase: AppDatabase | undefined;
 let cleanupProjectHandlers: (() => void) | undefined;
@@ -58,12 +60,25 @@ app.whenReady().then(async () => {
   const taskService = new TaskService(new TaskRepository(appDatabase.connection, { onTransition: taskFanout }), { now: () => new Date().toISOString(), random: Math.random, id: randomUUID });
   const pool = new WorkerPool();
   workerPool = pool;
+  const lance = await LanceStore.open(path.join(appPaths.root, "vectors"));
+  const spaces = new SpaceRepository(appDatabase.connection);
+  const indexing = new IndexingService(appDatabase.connection, { embedBatch: async () => { throw new Error("Embedding provider is not configured"); } }, lance);
   const ingestionService = new IngestionService(pool, appDatabase.connection, (taskId) => {
     const revisionId = taskRevisions.get(taskId);
     const row = revisionId ? appDatabase?.connection.prepare("SELECT sr.stored_path, s.kind FROM tasks t JOIN source_revisions sr ON sr.id = ? JOIN sources s ON s.id = t.source_id WHERE t.id = ?").get(revisionId, taskId) as { stored_path?: string; kind?: string } | undefined : undefined;
     if (!row?.stored_path || !row.kind) return undefined;
     try { return { kind: row.kind, data: readFileSync(row.stored_path) }; } catch { return undefined; }
-  });
+  }, undefined, indexing);
+  const continueEmbedding = async (task: { id: string; sourceId: string | null }) => {
+    const revisionId = taskRevisions.get(task.id) ?? (appDatabase?.connection.prepare("SELECT current_revision_id FROM sources WHERE id = ?").get(task.sourceId) as { current_revision_id?: string } | undefined)?.current_revision_id;
+    if (!revisionId) throw new Error("Embedding task has no revision");
+    const space = (appDatabase?.connection.prepare("SELECT es.id, es.dimension FROM source_revisions sr JOIN sources s ON s.id=sr.source_id JOIN project_embedding_spaces pes ON pes.project_id=s.project_id JOIN embedding_spaces es ON es.id=pes.space_id AND es.state='active' WHERE sr.id=?").get(revisionId) as { id: string; dimension: number } | undefined);
+    if (!space) throw new Error("No active embedding space for queued task");
+    await indexing.index({ taskId: task.id, revisionId, space });
+  };
+  if (typeof (appDatabase.connection as { prepare?: unknown }).prepare === "function") {
+    await taskService.recoverAndContinueEmbedding(continueEmbedding, 60 * 60 * 1000);
+  }
   const sourceService = new MainSourceService(appDatabase.connection, taskService, ingestionService, appPaths.files, (taskId, revisionId) => taskRevisions.set(taskId, revisionId));
   cleanupProjectHandlers = registerProjectHandlers(ipcMain, projectService);
   cleanupModelHandlers = registerModelHandlers(ipcMain, modelService);

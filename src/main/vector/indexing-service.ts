@@ -19,13 +19,14 @@ export class IndexingService {
         await this.lance.upsert(input.space, rows);
       }
       const actual = (await this.lance.rows(input.space)).filter(r => r.revisionId === input.revisionId);
-      if (actual.length !== chunks.length || actual.some(r => chunks.find(c => c.id === r.chunkId)?.content_hash !== r.contentHash)) throw new Error("Lance content hash mismatch");
-      if (chunks.length) { const vectors = await this.provider.embedBatch([chunks[0]!.text], input.signal ?? new AbortController().signal, 1); await this.lance.vectorSearch(input.space, vectors[0]!, 1, { revisionId: input.revisionId }); }
+      const source = this.db.prepare("SELECT s.project_id, sr.source_id FROM source_revisions sr JOIN sources s ON s.id = sr.source_id WHERE sr.id = ?").get(input.revisionId) as { project_id: string; source_id: string };
+      if (actual.length !== chunks.length || actual.some(r => { const c = chunks.find(x => x.id === r.chunkId); return !c || c.content_hash !== r.contentHash || r.projectId !== source.project_id || r.spaceId !== input.space.id || r.revisionId !== input.revisionId; })) throw new Error("Lance metadata or content hash mismatch");
+      if (chunks.length) { const vectors = await this.provider.embedBatch([chunks[0]!.text], input.signal ?? new AbortController().signal, 1); const probe = await this.lance.vectorSearch(input.space, vectors[0]!, 1, { revisionId: input.revisionId }); if (probe.length !== 1 || probe[0]!.chunkId !== chunks[0]!.id || probe[0]!.contentHash !== chunks[0]!.content_hash || probe[0]!.revisionId !== input.revisionId || probe[0]!.spaceId !== input.space.id || probe[0]!.projectId !== source.project_id) throw new Error("Lance probe mismatch"); }
       const now = input.now ?? new Date().toISOString();
       this.db.transaction(() => {
-        this.db.prepare("UPDATE source_revisions SET state = 'ready', activated_at = ? WHERE id = ? AND state = 'awaiting_embedding'").run(now, input.revisionId);
-        this.db.prepare("UPDATE sources SET current_revision_id = ?, updated_at = ? WHERE id = (SELECT source_id FROM source_revisions WHERE id = ?)").run(input.revisionId, now, input.revisionId);
-        this.db.prepare("UPDATE tasks SET stage = 'finalizing', state = 'completed', progress_1000 = 1000, updated_at = ? WHERE id = ? AND state = 'running'").run(now, input.taskId);
+        if (this.db.prepare("UPDATE source_revisions SET state = 'ready', activated_at = ? WHERE id = ? AND state = 'awaiting_embedding'").run(now, input.revisionId).changes !== 1) throw new Error("Revision activation precondition failed");
+        if (this.db.prepare("UPDATE sources SET current_revision_id = ?, updated_at = ? WHERE id = (SELECT source_id FROM source_revisions WHERE id = ?)").run(input.revisionId, now, input.revisionId).changes !== 1) throw new Error("Source activation failed");
+        if (this.db.prepare("UPDATE tasks SET stage = 'finalizing', state = 'completed', progress_1000 = 1000, updated_at = ? WHERE id = ? AND state = 'running'").run(now, input.taskId).changes !== 1) throw new Error("Task completion precondition failed");
       })();
     } catch (error) { await this.lance.deleteRevision(input.space, input.revisionId); throw error; }
   }

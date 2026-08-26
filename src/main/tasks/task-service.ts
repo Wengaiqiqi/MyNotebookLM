@@ -139,4 +139,9 @@ export class TaskService {
   retryDelayFor(attempt: number): number {
     return retryDelayMs(attempt, this.deps.random);
   }
+
+  recoverAndContinueEmbedding(continueTask: (task: TaskDto) => Promise<void>, graceMs: number): Promise<TaskDto[]> {
+    const recovered = this.recoverStaleRunning(graceMs);
+    return Promise.all(recovered.filter(task => task.stage === "embedding" && task.state === "queued").map(async task => { await continueTask(task); return task; }));
+  }
 }

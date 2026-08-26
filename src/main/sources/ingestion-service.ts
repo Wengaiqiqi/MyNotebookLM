@@ -11,7 +11,11 @@ export class IngestionService {
     let result;
     try { result = await this.pool.start(input.taskId, input.revisionId, input.kind, input.data); } catch (error) { if ((error as { state?: string }).state === "cancelled") return; throw error; }
     persistParsedResult(this.db, { revisionId: input.revisionId, taskId: input.taskId, chunks: result.chunks, updatedAt: input.updatedAt });
-    if (this.indexing) await this.indexing.index({ taskId: input.taskId, revisionId: input.revisionId, space: (this.db.prepare("SELECT id, dimension FROM embedding_spaces WHERE state = 'active' LIMIT 1").get() as any) });
+    if (this.indexing) {
+      const space = this.db.prepare("SELECT es.id, es.dimension FROM source_revisions sr JOIN sources s ON s.id = sr.source_id JOIN project_embedding_spaces pes ON pes.project_id = s.project_id JOIN embedding_spaces es ON es.id = pes.space_id AND es.state = 'active' WHERE sr.id = ?").get(input.revisionId) as { id: string; dimension: number } | undefined;
+      if (!space) throw new Error("No active embedding space for revision project");
+      await this.indexing.index({ taskId: input.taskId, revisionId: input.revisionId, space });
+    }
   }
   cancel(taskId: string): void { this.pool.cancel(taskId); }
 }
@@ -20,5 +24,5 @@ export function throttleProgress(_taskId: string, emit: (value: number) => void,
   return (value) => { const current = Math.floor(now() / 1000); if (current !== window) { window = current; count = 0; } if (count++ < 10) emit(value); };
 }
 export function persistParsedResult(db: Database.Database, input: { revisionId: string; taskId: string; chunks: PreparedChunk[]; updatedAt: string }): void {
-  db.transaction(() => { const insert = db.prepare("INSERT INTO source_chunks(id, revision_id, ordinal, content_hash, text, locator_json) VALUES (?, ?, ?, ?, ?, ?)"); for (const chunk of input.chunks) insert.run(input.taskId + "-" + chunk.ordinal, input.revisionId, chunk.ordinal, chunk.contentHash, chunk.text, JSON.stringify(chunk.locator)); db.prepare("UPDATE source_revisions SET state = 'awaiting_embedding' WHERE id = ?").run(input.revisionId); db.prepare("UPDATE tasks SET stage = 'embedding', state = 'running', progress_1000 = 1000, updated_at = ? WHERE id = ? AND state = 'running'").run(input.updatedAt, input.taskId); })();
+  db.transaction(() => { const existing = db.prepare("SELECT ordinal, content_hash, text, locator_json FROM source_chunks WHERE revision_id = ? ORDER BY ordinal").all(input.revisionId) as Array<{ ordinal: number; content_hash: string; text: string; locator_json: string }>; const same = existing.length === input.chunks.length && existing.every((row, i) => row.ordinal === input.chunks[i]!.ordinal && row.content_hash === input.chunks[i]!.contentHash && row.text === input.chunks[i]!.text && row.locator_json === JSON.stringify(input.chunks[i]!.locator)); if (!same) { const insert = db.prepare("INSERT INTO source_chunks(id, revision_id, ordinal, content_hash, text, locator_json) VALUES (?, ?, ?, ?, ?, ?)"); for (const chunk of input.chunks) insert.run(input.taskId + "-" + chunk.ordinal, input.revisionId, chunk.ordinal, chunk.contentHash, chunk.text, JSON.stringify(chunk.locator)); } const revision = db.prepare("UPDATE source_revisions SET state = 'awaiting_embedding' WHERE id = ? AND state IN ('pending', 'parsing', 'awaiting_embedding')").run(input.revisionId); if (revision.changes !== 1) throw new Error("Revision is not resumable"); const task = db.prepare("UPDATE tasks SET stage = 'embedding', state = 'running', progress_1000 = 1000, updated_at = ? WHERE id = ? AND state = 'running'").run(input.updatedAt, input.taskId); if (task.changes !== 1) throw new Error("Task is not running"); })();
 }

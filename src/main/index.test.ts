@@ -125,6 +125,7 @@ vi.mock("./window", () => ({
   createMainWindow: mocks.createMainWindow,
   registerTitleOverlayHandler: mocks.registerTitleOverlayHandler
 }));
+vi.mock("./vector/lance-store", () => ({ LanceStore: { open: vi.fn(async () => ({ upsert: vi.fn(), count: vi.fn(), rows: vi.fn(async () => []), vectorSearch: vi.fn(), deleteRevision: vi.fn() })), closeAll: vi.fn(async () => undefined) } }));
 
 describe("main application composition", () => {
   beforeEach(() => {
