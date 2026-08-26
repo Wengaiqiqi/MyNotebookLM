@@ -24,4 +24,8 @@
 
 ## 范围
 
+本轮复审阻断修复：取消在 IngestionService 边界保持 cancelled；5 秒硬终止按 crash 处理并以 taskId + revisionId 校验 durable payload 后重派发；WorkerPool progress 通过 throttleProgress 转发；durable payload 明确携带 revisionId，绑定不匹配不重派发。
+
+最终验证：聚焦 2 文件 / 12 tests、全量 47 文件 / 447 tests、typecheck、build 均通过。未修改 Task10 main/index/main-source/task-updates 文件。
+
 工作树：D:\fix\mynotebokklm\.worktrees\desktop-foundation。保留了已有无关改动；未修改 Task 10 IPC 文件，也未执行 reset/checkout。
