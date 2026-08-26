@@ -17,6 +17,14 @@ describe("IndexingService", () => {
     await expect(new IndexingService(db, { embedBatch: async () => [[1, 0]] } as any, lance as any).index({ taskId: "t1", revisionId: "r1", space: { id: "space", dimension: 2 } })).rejects.toThrow(); expect(lance.deleteRevision).toHaveBeenCalled();
   });
 
+  it("rejects duplicate Lance chunk IDs when the SQLite revision has a different chunk set", async () => {
+    const chunks = [chunk("c0"), chunk("c1")];
+    const db = { prepare: vi.fn(() => ({ all: () => chunks, get: () => ({ project_id: "p1", source_id: "s1" }), run: vi.fn(() => ({ changes: 1 })) })), transaction: (fn: () => unknown) => () => fn() } as any;
+    const lance = { upsert: vi.fn(), count: vi.fn(), rows: vi.fn(async () => [stored("c0", "c0"), stored("c0", "c0")]), vectorSearch: vi.fn(async () => [stored("c0", "c0")]), deleteRevision: vi.fn() };
+    await expect(new IndexingService(db, { embedBatch: async (texts: string[]) => texts.map(() => [1, 0]) }, lance as never).index({ taskId: "t1", revisionId: "r1", space: { id: "space", dimension: 2 }, batchSize: 2 })).rejects.toThrow(/metadata|chunk/i);
+    expect(lance.deleteRevision).toHaveBeenCalled();
+  });
+
   it("rejects rows from another project or space and does not activate", async () => {
     const db = { prepare: vi.fn((sql: string) => ({ all: () => [chunk("c0")], get: () => ({ project_id: "p1", source_id: "s1" }), run: vi.fn(() => ({ changes: 1 })) })), transaction: (fn: () => unknown) => () => fn() } as never;
     const lance = { upsert: vi.fn(), count: vi.fn(), rows: vi.fn(async () => [stored("c0", "c0", "p2", "other")]), vectorSearch: vi.fn(), deleteRevision: vi.fn() };
