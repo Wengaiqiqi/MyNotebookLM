@@ -169,6 +169,15 @@ describe("TaskService", () => {
     expect(recovered[0]!.attempt).toBe(1);
   });
 
+  it("requeues stale awaiting-embedding work without incrementing attempt so indexing can resume", () => {
+    service.createTask({ projectId: PROJECT_ID, sourceId: null, kind: "ingest" });
+    service.start(TASK_ID, "embedding");
+    clock.value = "2026-08-26T12:00:00.000Z";
+    const recovered = service.recoverStaleRunning(60 * 60 * 1000);
+    expect(recovered).toHaveLength(1);
+    expect(recovered[0]).toMatchObject({ state: "queued", stage: "embedding", attempt: 0 });
+  });
+
   it("marks an exhausted stale running task as failed with an interrupted summary", () => {
     const created = service.createTask({
       projectId: PROJECT_ID,

@@ -103,6 +103,16 @@ export class TaskService {
     const cutoff = new Date(Date.parse(this.deps.now()) - graceMs).toISOString();
     const stale = this.repository.listRecoverableRunning(cutoff);
     return stale.map((task) => {
+      if (task.stage === "embedding") {
+        return this.repository.transition({
+          id: task.id,
+          expectedState: "running",
+          nextState: "queued",
+          stage: "embedding",
+          attempt: task.attempt,
+          updatedAt: this.deps.now()
+        });
+      }
       const nextAttempt = task.attempt + 1;
       if (canRetry(nextAttempt)) {
         return this.repository.transition({
