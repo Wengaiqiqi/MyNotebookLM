@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { IndexingService } from "./indexing-service";
 const chunk = (id: string, hash = id) => ({ id, revision_id: "r1", ordinal: Number(id.slice(1)), content_hash: hash, text: id, locator_json: "{}" });
-const stored = (chunkId: string, contentHash: string, projectId = "p1", spaceId = "space", sourceId = "s1") => ({ chunkId, projectId, sourceId, revisionId: "r1", spaceId, ordinal: Number(chunkId.slice(1)), contentHash, text: chunkId, vector: [1, 0], locatorJson: "{}", createdAt: 0 });
+const stored = (chunkId: string, contentHash: string, projectId = "p1", spaceId = "space", sourceId = "s1", overrides: Record<string, unknown> = {}) => ({ chunkId, projectId, sourceId, revisionId: "r1", spaceId, ordinal: Number(chunkId.slice(1)), contentHash, text: chunkId, vector: [1, 0], locator: {}, createdAt: 0, ...overrides });
 describe("IndexingService", () => {
   it("embeds SQLite chunks in batches and activates only after verification", async () => {
     const chunks = [chunk("c0"), chunk("c1")];
@@ -59,5 +59,17 @@ describe("IndexingService", () => {
     const db = { prepare: vi.fn(() => ({ all: () => [chunk("c0")], get: () => ({ project_id: "p1", source_id: "s1" }) })) } as never;
     const lance = { upsert: vi.fn(), count: vi.fn(async () => 1), rows: vi.fn(async () => [stored("c0", "c0", "p1", "space", "s2")]), vectorSearch: vi.fn(async () => [stored("c0", "c0")]) };
     await expect(new IndexingService(db, { embedBatch: async () => [[1, 0]] }, lance as never).rebuild({ revisionId: "r1", space: { id: "space", dimension: 2 } })).rejects.toThrow(/metadata/i);
+  });
+
+  it.each([
+    ["chunkId", { chunkId: "wrong" }], ["contentHash", { contentHash: "wrong" }],
+    ["projectId", { projectId: "wrong" }], ["sourceId", { sourceId: "wrong" }],
+    ["spaceId", { spaceId: "wrong" }], ["revisionId", { revisionId: "wrong" }],
+    ["ordinal", { ordinal: 9 }], ["text", { text: "wrong" }], ["locator", { locator: { line: 9 } }],
+    ["vector dimension", { vector: [1] }], ["vector finite", { vector: [1, Number.NaN] }]
+  ])("rebuild rejects same-chunk probe with wrong %s", async (_field, override) => {
+    const db = { prepare: vi.fn(() => ({ all: () => [chunk("c0")], get: () => ({ project_id: "p1", source_id: "s1" }) })) } as never;
+    const lance = { upsert: vi.fn(), count: vi.fn(async () => 1), rows: vi.fn(async () => [stored("c0", "c0")]), vectorSearch: vi.fn(async () => [stored("c0", "c0", "p1", "space", "s1", override as Record<string, unknown>)]) };
+    await expect(new IndexingService(db, { embedBatch: async () => [[1, 0]] }, lance as never).rebuild({ revisionId: "r1", space: { id: "space", dimension: 2 } })).rejects.toThrow(/probe|metadata|vector/i);
   });
 });

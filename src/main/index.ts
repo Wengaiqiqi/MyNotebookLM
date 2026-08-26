@@ -28,6 +28,9 @@ import { SpaceService } from "./vector/space-service";
 import { backupDatabase } from "./vector/vector-backup";
 import { createLocalModelManager } from "./vector/local-model-manager";
 import { LocalEmbeddingProvider, createTransformersEmbeddingRuntime } from "./vector/local-embedding-provider";
+import { createModelProvider } from "./models/model-service";
+import { BUILT_IN_LOCAL_EMBEDDING_PROFILE, isBuiltInLocalEmbeddingProfile } from "./models/local-embedding-profile";
+import { createEmbeddingProvider } from "./vector/embedding-provider";
 
 let appDatabase: AppDatabase | undefined;
 let cleanupProjectHandlers: (() => void) | undefined;
@@ -73,7 +76,27 @@ app.whenReady().then(async () => {
   const localRuntime = createTransformersEmbeddingRuntime(appPaths.models);
   const localManager = createLocalModelManager(appPaths.models, async (directory, signal) => localRuntime(directory, [], signal));
   const localEmbeddingProvider = new LocalEmbeddingProvider(localManager, localRuntime);
-  const indexing = new IndexingService(appDatabase.connection, localEmbeddingProvider, lance);
+  const resolveEmbeddingProvider = async (revisionId: string, space: { id: string; dimension: number }) => {
+    const row = appDatabase!.connection.prepare(`SELECT es.provider, es.model_id, es.model_revision, es.project_id
+      FROM source_revisions sr JOIN sources s ON s.id = sr.source_id
+      JOIN embedding_spaces es ON es.id = ? AND es.project_id = s.project_id AND es.state = 'active' WHERE sr.id = ?`).get(space.id, revisionId) as { provider: string; model_id: string; model_revision: string; project_id: string } | undefined;
+    if (!row) throw Object.assign(new Error("Active embedding space does not match revision project"), { code: "EMBEDDING_SPACE_PROFILE_MISMATCH", recoverable: false });
+    const profile = row.provider === "local"
+      ? BUILT_IN_LOCAL_EMBEDDING_PROFILE
+      : settingsRepository.listProfiles().find(p => p.capability === "embedding" && p.enabled && p.provider === row.provider && p.modelId === row.model_id);
+    if (!profile || (row.provider === "local" && !isBuiltInLocalEmbeddingProfile(profile))) throw Object.assign(new Error("Embedding profile is missing or mismatched"), { code: "EMBEDDING_PROFILE_MISMATCH", recoverable: false });
+    if (profile.provider === "local") return localEmbeddingProvider;
+    const embed = async (texts: string[], signal: AbortSignal, batchSize?: number) => {
+      const invoke = async (apiKey?: string) => {
+        const model = createModelProvider(profile.provider, profile.baseUrl, apiKey);
+        const provider = createEmbeddingProvider({ provider: profile.provider, model: profile.modelId, adapter: { embed: model.embed.bind(model), describe: () => ({ provider: row.provider, modelId: row.model_id, modelRevision: row.model_revision, dimension: space.dimension, distance: "cosine", pooling: "mean", preprocessVersion: "persisted", chunkingVersion: "persisted" }) } });
+        return provider.embedBatch(texts, signal, batchSize);
+      };
+      return credentialStore.withSecret(profile.id, { provider: profile.provider, baseUrl: profile.baseUrl }, invoke);
+    };
+    return { embedBatch: embed };
+  };
+  const indexing = new IndexingService(appDatabase.connection, resolveEmbeddingProvider, lance);
   (indexing as IndexingService & { setChunkRecovery?: (revisionId: string) => void }).setChunkRecovery?.((revisionId) => ingestionService.reparseRevision(revisionId));
   ingestionService = new IngestionService(pool, appDatabase.connection, (taskId) => {
     const revisionId = taskRevisions.get(taskId);
