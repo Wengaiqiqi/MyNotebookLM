@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+vi.mock("@huggingface/transformers", () => ({ env: {}, pipeline: vi.fn(async () => vi.fn(async () => ({ tolist: () => [[1]] }))) }));
 import { LocalEmbeddingProvider, createTransformersEmbeddingRuntime } from "./local-embedding-provider";
 describe("LocalEmbeddingProvider", () => it("prefixes, batches, normalizes, and cancels", async () => {
   const manager = { ensureReady: vi.fn(async () => ({})) }; const seen: string[][] = [];
@@ -11,4 +12,8 @@ it("passes the caller signal and validates count, finite 384-d vectors", async (
   const embed = new LocalEmbeddingProvider(manager as never, async () => [[1, 2]], 2);
   await expect(embed.embedTexts(["a", "b"], "document", controller.signal)).rejects.toThrow(/count|384|dimension/i);
 });
-it("exposes the transformers singleton runtime factory", () => expect(createTransformersEmbeddingRuntime).toBeTypeOf("function"));
+it("configures the fixed Transformers.js feature extractor contract and returns arrays", async () => {
+  const transformers = await import("@huggingface/transformers"); const runtime = createTransformersEmbeddingRuntime("C:/models");
+  await runtime({}, ["x"], new AbortController().signal); await runtime({}, ["y"], new AbortController().signal);
+  expect(transformers.pipeline).toHaveBeenCalledTimes(1); expect(transformers.pipeline).toHaveBeenCalledWith("feature-extraction", "Xenova/multilingual-e5-small", expect.objectContaining({ revision: expect.any(String), local_files_only: true }));
+});

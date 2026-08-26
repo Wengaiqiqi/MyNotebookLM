@@ -1,5 +1,5 @@
 import { LocalModelManager } from "./local-model-manager";
-import { pipeline, env, mean_pooling } from "@huggingface/transformers";
+import { pipeline, env } from "@huggingface/transformers";
 import { LOCAL_MODEL_ID, LOCAL_MODEL_REVISION } from "./local-model-manifest";
 export type EmbeddingRuntime = (model: unknown, inputs: string[], signal: AbortSignal) => Promise<number[][]>;
 export class LocalEmbeddingProvider {

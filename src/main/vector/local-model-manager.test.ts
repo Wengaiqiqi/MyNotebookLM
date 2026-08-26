@@ -1,8 +1,8 @@
 import { mkdtemp, readFile, rm, writeFile, mkdir } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { describe, expect, it } from "vitest";
-import { LocalModelManager, type ModelDownloader } from "./local-model-manager";
+import { describe, expect, it, vi } from "vitest";
+import { LocalModelManager, createLocalModelDownloader, type ModelDownloader } from "./local-model-manager";
 import { LOCAL_MODEL_MANIFEST } from "./local-model-manifest";
 
 const manifest = { modelId: "fake/model", revision: "rev1", dimension: 2, files: { "tokenizer.json": "UNRESOLVED", "onnx/model.onnx": "UNRESOLVED" } } as const;
@@ -30,9 +30,31 @@ describe("LocalModelManager", () => {
     const manager = new LocalModelManager(root, async file => new TextEncoder().encode(file.includes("tokenizer") ? "corrupt" : "old"), async () => { throw new Error("runtime failed"); }, manifest);
     await expect(manager.ensureReady()).rejects.toThrow("runtime failed"); await expect(readFile(path.join(active, "tokenizer.json"), "utf8")).resolves.toBe("corrupt"); await rm(root, { recursive: true, force: true });
   });
+  it("does not delete the backup until the new runtime succeeds", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "model-")); const active = path.join(root, "fake__model-rev1");
+    await mkdir(path.join(active, "onnx"), { recursive: true }); await writeFile(path.join(active, "tokenizer.json"), "old"); await writeFile(path.join(active, "onnx/model.onnx"), "old");
+    const manager = new LocalModelManager(root, async file => new TextEncoder().encode(file.includes("tokenizer") ? "new" : "new"), async dir => { if (dir === active) throw new Error("old runtime failed"); throw new Error("new runtime failed"); }, manifest);
+    await expect(manager.ensureReady()).rejects.toThrow("new runtime failed");
+    await expect(readFile(path.join(active, "tokenizer.json"), "utf8")).resolves.toBe("old");
+    await rm(root, { recursive: true, force: true });
+  });
+  it("restores the old active directory when runtime fails after activation", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "model-")); const active = path.join(root, "fake__model-rev1");
+    await mkdir(path.join(active, "onnx"), { recursive: true }); await writeFile(path.join(active, "tokenizer.json"), "old"); await writeFile(path.join(active, "onnx/model.onnx"), "old");
+    let calls = 0; const manager = new LocalModelManager(root, async file => new TextEncoder().encode(file.includes("tokenizer") ? "new" : "new"), async dir => { calls++; if (calls === 1) return {}; throw new Error("active runtime failed"); }, manifest);
+    await expect(manager.ensureReady()).rejects.toThrow("active runtime failed"); await expect(readFile(path.join(active, "tokenizer.json"), "utf8")).resolves.toBe("old");
+    await rm(root, { recursive: true, force: true });
+  });
   it("appends resumed bytes and removes corrupt partial artifacts for recovery", async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), "model-")); const staging = path.join(root, "fake__model-rev1.partial"); await mkdir(path.join(staging, "onnx"), { recursive: true }); await writeFile(path.join(staging, "tokenizer.json.part"), Buffer.from("old"));
     const manager = new LocalModelManager(root, async (_file, offset) => new Uint8Array(offset ? Buffer.from("-new") : Buffer.from("new")), async dir => readFile(path.join(dir, "tokenizer.json"), "utf8"), manifest);
     await expect(manager.ensureReady()).resolves.toBe("old-new"); await rm(root, { recursive: true, force: true });
+  });
+  it("downloads only pinned manifest paths and uses Range resume", async () => {
+    const fetcher = vi.fn(async (url: string, init?: RequestInit) => new Response(new Uint8Array([1, 2]), { status: init?.headers ? 206 : 200 }));
+    const download = createLocalModelDownloader(fetcher as typeof fetch); const progress = vi.fn();
+    await expect(download("tokenizer.json", 7, progress, new AbortController().signal)).resolves.toEqual(new Uint8Array([1, 2]));
+    expect(fetcher).toHaveBeenCalledWith("https://huggingface.co/Xenova/multilingual-e5-small/resolve/761b726dd34fb83930e26aab4e9ac3899aa1fa78/tokenizer.json", expect.objectContaining({ headers: { Range: "bytes=7-" } }));
+    await expect(download("other.bin", 0, progress, new AbortController().signal)).rejects.toThrow("不允许");
   });
 });
