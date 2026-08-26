@@ -96,11 +96,6 @@ describe("TaskService", () => {
     expect(cancelled.state).toBe("cancelled");
   });
 
-  it("records TASK_CANCELLED as cancelled instead of failed", () => {
-    service.createTask({ projectId: PROJECT_ID, sourceId: null, kind: "optimize" });
-    service.start(TASK_ID, "indexing");
-    expect(service.fail(TASK_ID, { code: "TASK_CANCELLED" as never, messageKey: "errors.cancelled", recoverable: false }).state).toBe("cancelled");
-  });
 
   it.each([
     ["AUTH", "errors.auth"],

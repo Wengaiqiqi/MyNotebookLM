@@ -13,7 +13,8 @@ export class IndexingService {
   private validateRow(row: StoredLike | undefined, chunk: Chunk | undefined, source: { project_id: string; source_id: string }, revisionId: string, space: LanceSpace): boolean {
     if (!row || !chunk) return false;
     const locator = "locator" in row ? row.locator : (() => { try { return JSON.parse(row.locatorJson ?? ""); } catch { return undefined; } })();
-    return row.chunkId === chunk.id && row.contentHash === chunk.content_hash && row.projectId === source.project_id && row.sourceId === source.source_id && row.spaceId === space.id && row.revisionId === revisionId && row.ordinal === chunk.ordinal && row.text === chunk.text && JSON.stringify(locator) === JSON.stringify(JSON.parse(chunk.locator_json)) && row.vector.length === space.dimension && row.vector.every(Number.isFinite);
+    const vector = Array.from(row.vector as ArrayLike<number>);
+    return row.chunkId === chunk.id && row.contentHash === chunk.content_hash && row.projectId === source.project_id && row.sourceId === source.source_id && row.spaceId === space.id && row.revisionId === revisionId && row.ordinal === chunk.ordinal && row.text === chunk.text && JSON.stringify(locator) === JSON.stringify(JSON.parse(chunk.locator_json)) && vector.length === space.dimension && vector.every(Number.isFinite);
   }
   private validateRows(rows: StoredLike[], chunks: Chunk[], source: { project_id: string; source_id: string }, revisionId: string, space: LanceSpace): void {
     const expected = new Set(chunks.map(c => c.id));

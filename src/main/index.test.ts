@@ -291,4 +291,11 @@ describe("main application composition", () => {
     expect((mocks.SpaceService.mock.instances[0] as { recoverInterrupted: ReturnType<typeof vi.fn> }).recoverInterrupted).toHaveBeenCalledOnce();
     expect(mocks.events).toContain("space-recovery");
   });
+  it("passes optimize cancellation through the production operation", async () => {
+    await import("./index");
+    await vi.waitFor(() => expect(mocks.SpaceService).toHaveBeenCalled());
+    const options = mocks.SpaceService.mock.calls[0]?.[1] as { optimize: (input: unknown) => Promise<void> };
+    const controller = new AbortController();
+    await expect(options.optimize({ taskId: "task-1", space: { id: "s", dimension: 2 }, signal: controller.signal })).rejects.toBeDefined();
+  });
 });
