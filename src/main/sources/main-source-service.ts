@@ -4,11 +4,29 @@ import { readFile } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import type { SourceDto } from "../../shared/sources";
 import type { TaskDto } from "../../shared/tasks";
+import type { TaskErrorSummaryDto } from "../../shared/tasks";
 import type { IngestionService } from "./ingestion-service";
 import type { TaskService } from "../tasks/task-service";
 import { stageFile } from "./managed-files";
 
 type Row = Record<string, unknown>;
+const ERROR_CODES = new Set<TaskErrorSummaryDto["code"]>([
+  "VALIDATION", "NOT_FOUND", "CONFLICT", "CANCELLED", "AUTH",
+  "RATE_LIMITED", "TIMEOUT", "NETWORK", "PROVIDER",
+  "UNSUPPORTED_FORMAT", "UNSAFE_INPUT", "INDEX_UNAVAILABLE", "INTERNAL"
+]);
+function taskError(error: unknown): TaskErrorSummaryDto {
+  const candidate = error as { code?: unknown; message?: unknown };
+  const code = typeof candidate.code === "string" && ERROR_CODES.has(candidate.code as TaskErrorSummaryDto["code"])
+    ? candidate.code as TaskErrorSummaryDto["code"]
+    : "INTERNAL";
+  const raw = typeof candidate.message === "string" && candidate.message.trim() ? candidate.message : "errors.internal";
+  const messageKey = raw
+    .replace(/((?:api[_-]?key|token|secret|password|authorization)\s*[:=]\s*)[^\s,;]+/gi, "$1[REDACTED]")
+    .replace(/(bearer\s+)[^\s,;]+/gi, "$1[REDACTED]")
+    .slice(0, 500);
+  return { code, messageKey, recoverable: false };
+}
 export class MainSourceService {
   constructor(private readonly db: Database.Database, private readonly tasks: TaskService, private readonly ingestion: IngestionService, private readonly storageRoot?: string, private readonly bindRevision?: (taskId: string, revisionId: string) => void) {}
   listSources(projectId: string): SourceDto[] { return this.db.prepare("SELECT * FROM sources WHERE project_id = ? AND status <> 'deleted' ORDER BY updated_at DESC").all(projectId).map((row) => this.source(row as Row)); }
@@ -33,7 +51,10 @@ export class MainSourceService {
       return task;
     })();
     this.bindRevision?.(created.id, revisionId);
-    void this.ingestion.run({ taskId: created.id, revisionId, kind, data: bytes, updatedAt: now }).catch(() => { this.db.prepare("UPDATE tasks SET state = 'failed', updated_at = ? WHERE id = ?").run(new Date().toISOString(), created.id); this.db.prepare("UPDATE source_revisions SET state = 'failed' WHERE id = ?").run(revisionId); });
+    void this.ingestion.run({ taskId: created.id, revisionId, kind, data: bytes, updatedAt: now }).catch((error) => {
+      this.tasks.fail(created.id, taskError(error));
+      this.db.prepare("UPDATE source_revisions SET state = 'failed' WHERE id = ?").run(revisionId);
+    });
     return this.source(this.db.prepare("SELECT * FROM sources WHERE id = ?").get(sourceId) as Row);
   }
   private kind(file: string): SourceDto["kind"] { const ext = file.toLowerCase().split(".").pop(); return ({ md: "markdown", markdown: "markdown", pdf: "pdf", docx: "docx", pptx: "pptx", xlsx: "xlsx", csv: "csv", txt: "text" } as Record<string, SourceDto["kind"]>)[ext ?? ""] ?? "text"; }

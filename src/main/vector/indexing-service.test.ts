@@ -51,6 +51,23 @@ describe("IndexingService", () => {
     expect(provider.embedBatch).toHaveBeenCalledTimes(3); expect(lance.vectorSearch).toHaveBeenCalled();
     expect(lance.count).toHaveBeenCalledWith({ id: "space", dimension: 2 }, { revisionId: "r1" });
   });
+
+  it("creates the Lance Space before the first indexing write", async () => {
+    const db = { prepare: vi.fn(() => ({ all: () => [chunk("c0")], get: () => ({ project_id: "p1", source_id: "s1", ...persistedSpace }), run: vi.fn(() => ({ changes: 1 })) })), transaction: (fn: () => unknown) => () => fn() } as any;
+    const createSpace = vi.fn(async () => undefined);
+    const lance = { createSpace, upsert: vi.fn(), count: vi.fn(async () => 1), rows: vi.fn(async () => [stored("c0", "c0")]), vectorSearch: vi.fn(async () => [stored("c0", "c0")]), deleteRevision: vi.fn() };
+    await new IndexingService(db, { embedBatch: async () => [[1, 0]] } as any, lance as never).index({ taskId: "t1", revisionId: "r1", space: { id: "space", dimension: 2 } });
+    expect(createSpace).toHaveBeenCalledWith({ id: "space", dimension: 2 });
+    expect(createSpace.mock.invocationCallOrder[0]).toBeLessThan(lance.upsert.mock.invocationCallOrder[0] ?? Number.POSITIVE_INFINITY);
+  });
+  it("creates the Lance Space before the first rebuild write", async () => {
+    const db = { prepare: vi.fn(() => ({ all: () => [chunk("c0")], get: () => ({ project_id: "p1", source_id: "s1", ...persistedSpace, space_state: "building" }) })) } as any;
+    const createSpace = vi.fn(async () => undefined);
+    const lance = { createSpace, upsert: vi.fn(), count: vi.fn(async () => 1), rows: vi.fn(async () => [stored("c0", "c0")]), vectorSearch: vi.fn(async () => [stored("c0", "c0")]) };
+    await new IndexingService(db, { embedBatch: async () => [[1, 0]] } as any, lance as never).rebuild({ revisionId: "r1", space: { id: "space", dimension: 2 } });
+    expect(createSpace).toHaveBeenCalledWith({ id: "space", dimension: 2 });
+    expect(createSpace.mock.invocationCallOrder[0]).toBeLessThan(lance.upsert.mock.invocationCallOrder[0] ?? Number.POSITIVE_INFINITY);
+  });
   it("deletes incomplete Lance rows on verification failure", async () => {
     const db = { prepare: vi.fn(() => ({ all: () => [chunk("c0")], get: () => ({ project_id: "p1", source_id: "s1", ...persistedSpace }), run: vi.fn(() => ({ changes: 1 })) })), transaction: (fn: () => unknown) => () => fn() } as any;
     const lance = { upsert: vi.fn(), count: vi.fn(async () => 0), rows: vi.fn(async () => []), deleteRevision: vi.fn() };

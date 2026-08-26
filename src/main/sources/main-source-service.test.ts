@@ -35,4 +35,22 @@ describe("main source import orchestration", () => {
     expect(tasks.createTask).toHaveBeenCalledWith(expect.objectContaining({ projectId: source.projectId, kind: "ingest" }));
     expect(ingestion.run).toHaveBeenCalledWith(expect.objectContaining({ taskId: "00000000-0000-4000-8000-000000000003", kind: "text" }));
   });
+
+  it("persists sanitized error evidence when ingestion fails", async () => {
+    const rows: Record<string, unknown>[] = [];
+    const db = { prepare: vi.fn((sql: string) => ({
+      run: (...args: unknown[]) => { if (sql.includes("sources")) rows.push({ id: args[0], project_id: args[1], kind: args[2], display_name: args[3], status: "active", current_revision_id: null, created_at: "2026-01-01T00:00:00.000Z", updated_at: "2026-01-01T00:00:00.000Z", deleted_at: null }); },
+      get: () => rows[0],
+      all: () => rows
+    })), transaction: (fn: () => void) => () => fn() } as any;
+    const fail = vi.fn();
+    const tasks = { createTask: vi.fn(() => ({ id: "00000000-0000-4000-8000-000000000003" })), fail } as any;
+    const ingestion = { run: vi.fn(async () => { throw Object.assign(new Error("provider failed api_key=SECRET"), { code: "PROVIDER" }); }) } as any;
+    const service = new MainSourceService(db, tasks, ingestion);
+    await service.importFile({ projectId: "00000000-0000-4000-8000-000000000001", path: "src/test/fixtures/text/bilingual-sample.txt" });
+    await vi.waitFor(() => expect(fail).toHaveBeenCalledOnce());
+    expect(fail).toHaveBeenCalledWith("00000000-0000-4000-8000-000000000003", expect.objectContaining({ code: "PROVIDER", recoverable: false }));
+    expect(fail.mock.calls[0]![1].messageKey).toContain("provider failed");
+    expect(fail.mock.calls[0]![1].messageKey).not.toContain("SECRET");
+  });
 });

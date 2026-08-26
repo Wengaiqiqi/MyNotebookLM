@@ -107,7 +107,7 @@ app.whenReady().then(async () => {
     try { return { kind: row.kind, data: readFileSync(row.stored_path) }; } catch { return undefined; }
   }, undefined, indexing);
   const continueEmbedding = async (task: { id: string; sourceId: string | null }) => {
-    const revisionId = taskRevisions.get(task.id) ?? (appDatabase?.connection.prepare("SELECT current_revision_id FROM sources WHERE id = ?").get(task.sourceId) as { current_revision_id?: string } | undefined)?.current_revision_id;
+    const revisionId = taskRevisions.get(task.id) ?? (appDatabase?.connection.prepare("SELECT sr.id FROM tasks t JOIN sources s ON s.id = t.source_id JOIN source_revisions sr ON sr.source_id = s.id AND (sr.id = s.current_revision_id OR (s.current_revision_id IS NULL AND sr.state = 'awaiting_embedding')) WHERE t.id = ? AND t.project_id = s.project_id AND t.source_id = ? ORDER BY CASE WHEN sr.id = s.current_revision_id THEN 0 ELSE 1 END, sr.created_at DESC LIMIT 1").get(task.id, task.sourceId) as { id?: string } | undefined)?.id;
     if (!revisionId) throw new Error("Embedding task has no revision");
     const space = (appDatabase?.connection.prepare("SELECT es.id, es.dimension FROM source_revisions sr JOIN sources s ON s.id=sr.source_id JOIN project_embedding_spaces pes ON pes.project_id=s.project_id JOIN embedding_spaces es ON es.id=pes.space_id AND es.state='active' WHERE sr.id=?").get(revisionId) as { id: string; dimension: number } | undefined);
     if (!space) throw new Error("No active embedding space for queued task");

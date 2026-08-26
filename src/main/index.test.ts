@@ -7,10 +7,11 @@ type Callback = (...args: unknown[]) => void;
 const mocks = vi.hoisted(() => {
   const events: string[] = [];
   const callbacks = new Map<string, Callback>();
-  const connection = {};
+  const connection = { prepare: vi.fn() };
   const ipcMain = {};
   let databasePending: Promise<void> = Promise.resolve();
   let databaseError: Error | undefined;
+  let recoveryTask: { id: string; projectId: string; sourceId: string } | undefined;
   const close = vi.fn(() => events.push("close"));
   const cleanupProject = vi.fn(() => events.push("project-cleanup"));
   const cleanupModel = vi.fn(() => events.push("model-cleanup"));
@@ -22,12 +23,27 @@ const mocks = vi.hoisted(() => {
     connection,
     setDatabasePending: (pending: Promise<void>) => { databasePending = pending; },
     setDatabaseError: (error?: Error) => { databaseError = error; },
+    setRecoveryTask: (task?: { id: string; projectId: string; sourceId: string }) => { recoveryTask = task; },
     ipcMain,
     close,
     cleanupProject,
     cleanupModel,
     cleanupTitleOverlay,
-    IndexingService: vi.fn(function (this: Record<string, unknown>, _db: unknown, provider: unknown) { this.provider = provider; }),
+    IndexingService: vi.fn(function (this: Record<string, unknown>, _db: unknown, provider: unknown) { this.provider = provider; this.index = vi.fn(async () => undefined); this.rebuild = vi.fn(async () => undefined); }),
+    TaskService: vi.fn(function (this: Record<string, unknown>) {
+      this.createTask = vi.fn(() => ({ id: "task-1" }));
+      this.start = vi.fn(() => ({ id: "task-1" }));
+      this.advance = vi.fn(() => ({ id: "task-1" }));
+      this.complete = vi.fn(() => ({ id: "task-1" }));
+      this.fail = vi.fn(() => ({ id: "task-1" }));
+      this.cancel = vi.fn(() => ({ id: "task-1" }));
+      this.recoverAndContinueEmbedding = vi.fn(async (continueTask: (task: { id: string; projectId: string; sourceId: string }) => Promise<void>) => {
+        if (recoveryTask) {
+          try { await continueTask(recoveryTask); } catch { /* startup recovery reports the task failure */ }
+        }
+        return recoveryTask ? [recoveryTask] : [];
+      });
+    }),
     SpaceRepository: vi.fn(function (this: Record<string, unknown>, db: unknown) { events.push("space-repository"); this.db = db; this.recoverInterrupted = vi.fn(() => events.push("space-recovery")); }),
     SpaceService: vi.fn(function (this: Record<string, unknown>, repository: unknown, options: unknown, backup: unknown) { events.push("space-service"); this.repository = repository; this.options = options; this.backup = backup; this.recoverInterrupted = vi.fn(() => events.push("space-recovery")); }),
     app: {
@@ -114,6 +130,7 @@ vi.mock("electron", () => ({
 vi.mock("node:fs/promises", () => ({ mkdir: mocks.mkdir }));
 vi.mock("./platform/paths", () => ({ getAppPaths: mocks.getAppPaths }));
 vi.mock("./db/database", () => ({ openAppDatabaseAsync: mocks.openAppDatabaseAsync }));
+vi.mock("./tasks/task-service", () => ({ TaskService: mocks.TaskService }));
 vi.mock("./projects/project-repository", () => ({
   ProjectRepository: mocks.ProjectRepository
 }));
@@ -158,6 +175,7 @@ describe("main application composition", () => {
     mocks.callbacks.clear();
     mocks.setDatabasePending(Promise.resolve());
     mocks.setDatabaseError();
+    mocks.setRecoveryTask();
   });
 
   afterEach(() => {
@@ -307,6 +325,24 @@ describe("main application composition", () => {
     expect(mocks.SpaceService).toHaveBeenCalledWith(mocks.SpaceRepository.mock.instances[0], expect.any(Object), expect.any(Function));
     expect((mocks.SpaceService.mock.instances[0] as { recoverInterrupted: ReturnType<typeof vi.fn> }).recoverInterrupted).toHaveBeenCalledOnce();
     expect(mocks.events).toContain("space-recovery");
+  });
+
+  it("resumes awaiting-embedding revisions when the source has no current revision", async () => {
+    mocks.setRecoveryTask({ id: "task-1", projectId: "project-1", sourceId: "source-1" });
+    mocks.connection.prepare.mockImplementation((sql: string) => ({
+      get: vi.fn(() => sql.includes("embedding_spaces") ? { id: "space-1", dimension: 2 } : sql.includes("source_revisions") ? { id: "revision-awaiting" } : undefined),
+      all: vi.fn(() => [{ id: "revision-awaiting" }])
+    }));
+
+    await import("./index");
+    await vi.waitFor(() => expect(mocks.createMainWindow).toHaveBeenCalledOnce());
+
+    const indexing = mocks.IndexingService.mock.instances[0] as { index: ReturnType<typeof vi.fn> };
+    expect(indexing.index).toHaveBeenCalledWith({
+      taskId: "task-1",
+      revisionId: "revision-awaiting",
+      space: { id: "space-1", dimension: 2 }
+    });
   });
 
   it("waits for async database migration before constructing startup dependencies", async () => {

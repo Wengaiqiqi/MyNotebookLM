@@ -9,7 +9,7 @@ type StoredLike = Omit<LanceRow, "locator"> & { locatorJson?: string; locator?: 
 type SpaceBoundary = { project_id: string; source_id: string; space_id?: string; space_project_id?: string; space_dimension?: number; space_state?: string; active_space_id?: string };
 export class IndexingService {
   private recoverChunks?: (revisionId: string) => Promise<void>;
-  constructor(private readonly db: Database.Database, private readonly provider: ProviderResolver, private readonly lance: Pick<LanceStore, "upsert" | "count" | "rows" | "vectorSearch" | "deleteRevision">) {}
+  constructor(private readonly db: Database.Database, private readonly provider: ProviderResolver, private readonly lance: Pick<LanceStore, "createSpace" | "upsert" | "count" | "rows" | "vectorSearch" | "deleteRevision">) {}
   private async resolveProvider(revisionId: string, space: LanceSpace) { return typeof this.provider === "function" ? this.provider(revisionId, space) : this.provider; }
   private validateSpace(revisionId: string, space: LanceSpace, operation: "index" | "rebuild"): { project_id: string; source_id: string } {
     const row = this.db.prepare("SELECT sr.source_id, s.project_id, es.id AS space_id, es.project_id AS space_project_id, es.dimension AS space_dimension, es.state AS space_state, pes.space_id AS active_space_id FROM source_revisions sr JOIN sources s ON s.id = sr.source_id LEFT JOIN embedding_spaces es ON es.id = ? LEFT JOIN project_embedding_spaces pes ON pes.project_id = s.project_id WHERE sr.id = ?").get(space.id, revisionId) as SpaceBoundary | undefined;
@@ -31,9 +31,10 @@ export class IndexingService {
   setChunkRecovery(recover: (revisionId: string) => Promise<void>): void { this.recoverChunks = recover; }
   async index(input: Input): Promise<void> {
     const source = this.validateSpace(input.revisionId, input.space, "index");
-    const provider = await this.resolveProvider(input.revisionId, input.space);
-    const chunks = this.db.prepare("SELECT id, ordinal, content_hash, text, locator_json FROM source_chunks WHERE revision_id = ? ORDER BY ordinal").all(input.revisionId) as Chunk[];
     try {
+      await this.lance.createSpace?.(input.space);
+      const provider = await this.resolveProvider(input.revisionId, input.space);
+      const chunks = this.db.prepare("SELECT id, ordinal, content_hash, text, locator_json FROM source_chunks WHERE revision_id = ? ORDER BY ordinal").all(input.revisionId) as Chunk[];
       const size = Math.max(1, input.batchSize ?? 32);
       for (let i = 0; i < chunks.length; i += size) {
         const part = chunks.slice(i, i + size);
@@ -56,11 +57,12 @@ export class IndexingService {
   }
   async rebuild(input: { revisionId: string; space: LanceSpace; signal?: AbortSignal; batchSize?: number }): Promise<void> {
     const source = this.validateSpace(input.revisionId, input.space, "rebuild");
-    const provider = await this.resolveProvider(input.revisionId, input.space);
     let chunks = this.db.prepare("SELECT id, ordinal, content_hash, text, locator_json FROM source_chunks WHERE revision_id = ? ORDER BY ordinal").all(input.revisionId) as Chunk[];
     if (chunks.length === 0 && this.recoverChunks) { await this.recoverChunks(input.revisionId); }
     chunks = this.db.prepare("SELECT id, ordinal, content_hash, text, locator_json FROM source_chunks WHERE revision_id = ? ORDER BY ordinal").all(input.revisionId) as Chunk[];
     if (chunks.length === 0) throw Object.assign(new Error("No SQLite source_chunks available for rebuild and no recoverable managed original was supplied"), { code: "SPACE_REBUILD_SOURCE_UNRECOVERABLE", recoverable: false });
+    await this.lance.createSpace?.(input.space);
+    const provider = await this.resolveProvider(input.revisionId, input.space);
     for (let i = 0; i < chunks.length; i += Math.max(1, input.batchSize ?? 32)) {
       if (input.signal?.aborted) throw Object.assign(new Error("Space build cancelled"), { code: "SPACE_BUILD_CANCELLED" });
       const part = chunks.slice(i, i + Math.max(1, input.batchSize ?? 32));
