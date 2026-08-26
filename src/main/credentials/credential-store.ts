@@ -46,6 +46,34 @@ type StoredCredentialRow = Readonly<{
   profile_base_url: string;
 }>;
 
+const STANDARD_ERROR_STACK_GETTER = Object.getOwnPropertyDescriptor(new Error(), "stack")?.get;
+
+function containsSecret(value: unknown, secret: string, seen = new WeakSet<object>()): boolean {
+  if (typeof value === "string") {
+    return value.includes(secret);
+  }
+  if (value === null || (typeof value !== "object" && typeof value !== "function")) return false;
+
+  try {
+    const object = value as object;
+    if (seen.has(object)) return false;
+    seen.add(object);
+    for (const key of Reflect.ownKeys(object)) {
+      const descriptor = Object.getOwnPropertyDescriptor(object, key);
+      if (!descriptor) return true;
+      if (!("value" in descriptor)) {
+        if (key === "stack" && value instanceof Error
+          && descriptor.get === STANDARD_ERROR_STACK_GETTER) continue;
+        return true;
+      }
+      if (containsSecret(descriptor.value, secret, seen)) return true;
+    }
+    return false;
+  } catch {
+    return true;
+  }
+}
+
 export function canonicalCredentialBaseUrl(baseUrl: string): string {
   const address = new URL(baseUrl);
   address.pathname = address.pathname.replace(/\/+$/, "");
@@ -161,7 +189,7 @@ export class CredentialStore implements CredentialStore {
     try {
       return await use(apiKey);
     } catch (reason) {
-      if (String(reason).includes(apiKey)) throw new Error("Credential could not be used");
+      if (containsSecret(reason, apiKey)) throw new Error("Credential could not be used");
       throw reason;
     }
   }

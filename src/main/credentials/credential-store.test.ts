@@ -4,6 +4,7 @@ import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { openAppDatabase, type AppDatabase } from "../db/database";
 import { SettingsRepository } from "../settings/settings-repository";
+import { ProviderRequestError } from "../models/http-client";
 import { CredentialStore, type SecretProtector } from "./credential-store";
 
 const PROFILE_ID = "11111111-1111-4111-8111-111111111111";
@@ -201,5 +202,59 @@ describe("CredentialStore", () => {
     expect(error).toBeInstanceOf(Error);
     expect((error as Error).message).toBe("Credential could not be used");
     expect((error as Error).message).not.toContain(apiKey);
+  });
+
+  it.each([
+    "nested field",
+    "error cause"
+  ])("replaces callback errors whose %s contains the api key", async (location) => {
+    const store = new CredentialStore(appDatabase.connection, new DeterministicProtector());
+    const apiKey = "ApiKey-42";
+    await store.set(PROFILE_ID, apiKey);
+    const error = new Error("safe message");
+    if (location === "nested field") {
+      Object.assign(error, { context: { request: { secret: apiKey } } });
+    } else {
+      Object.defineProperty(error, "cause", {
+        value: { secret: apiKey },
+        enumerable: false
+      });
+    }
+
+    await expect(store.withSecret(
+      PROFILE_ID,
+      { provider: "openai", baseUrl: "https://api.openai.com/v1" },
+      async () => { throw error; }
+    )).rejects.toThrow("Credential could not be used");
+  });
+
+  it("handles cyclic callback errors and preserves safe provider error metadata", async () => {
+    const store = new CredentialStore(appDatabase.connection, new DeterministicProtector());
+    const apiKey = "ApiKey-42";
+    await store.set(PROFILE_ID, apiKey);
+    const cyclic: { self?: unknown } = {};
+    cyclic.self = cyclic;
+    const safeError = new ProviderRequestError({
+      error: {
+        code: "RATE_LIMITED",
+        messageKey: "errors.rateLimited",
+        recoverable: true,
+        retryAfterMs: 1500
+      },
+      fallbackEligible: true
+    });
+    Object.assign(safeError, { context: cyclic });
+
+    await expect(store.withSecret(
+      PROFILE_ID,
+      { provider: "openai", baseUrl: "https://api.openai.com/v1" },
+      async () => { throw safeError; }
+    )).rejects.toBe(safeError);
+    expect(safeError.failure.error).toEqual({
+      code: "RATE_LIMITED",
+      messageKey: "errors.rateLimited",
+      recoverable: true,
+      retryAfterMs: 1500
+    });
   });
 });
