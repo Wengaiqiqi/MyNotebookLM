@@ -4,7 +4,8 @@ import { appErrorCodeSchema } from "./app-errors";
 export const taskKindSchema = z.enum([
   "validation",
   "ingest",
-  "delete"
+  "delete",
+  "optimize"
 ]);
 
 export const taskStateSchema = z.enum([

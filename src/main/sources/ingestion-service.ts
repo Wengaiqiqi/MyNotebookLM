@@ -1,4 +1,6 @@
 import type Database from "better-sqlite3";
+import { randomUUID } from "node:crypto";
+import { readFile } from "node:fs/promises";
 import type { PreparedChunk } from "../../workers/ingestion/types";
 import type { DurableWorkerPayload, WorkerPool } from "../tasks/worker-pool";
 import type { IndexingService } from "../vector/indexing-service";
@@ -18,6 +20,17 @@ export class IngestionService {
     }
   }
   cancel(taskId: string): void { this.pool.cancel(taskId); }
+  async reparseRevision(revisionId: string): Promise<void> {
+    const row = this.db.prepare("SELECT stored_path, s.kind FROM source_revisions sr JOIN sources s ON s.id = sr.source_id WHERE sr.id = ?").get(revisionId) as { stored_path?: string; kind?: string } | undefined;
+    if (!row?.stored_path || !row.kind) throw Object.assign(new Error("Managed original is unavailable"), { code: "SPACE_REBUILD_SOURCE_UNRECOVERABLE" });
+    let result;
+    try { result = await this.pool.start(randomUUID(), revisionId, row.kind, await readFile(row.stored_path)); }
+    catch (error) { throw Object.assign(new Error("Managed original could not be parsed", { cause: error }), { code: "SPACE_REBUILD_SOURCE_UNRECOVERABLE" }); }
+    const revision = this.db.prepare("SELECT source_id FROM source_revisions WHERE id = ?").get(revisionId) as { source_id: string } | undefined;
+    if (!revision) throw new Error("revision not found");
+    const insert = this.db.prepare("INSERT OR REPLACE INTO source_chunks(id, revision_id, ordinal, content_hash, text, locator_json) VALUES (?, ?, ?, ?, ?, ?)");
+    this.db.transaction(() => { for (const chunk of result.chunks) insert.run(revisionId + "-" + chunk.ordinal, revisionId, chunk.ordinal, chunk.contentHash, chunk.text, JSON.stringify(chunk.locator)); })();
+  }
 }
 export function throttleProgress(_taskId: string, emit: (value: number) => void, now = Date.now): (value: number) => void {
   let window = -1, count = 0;

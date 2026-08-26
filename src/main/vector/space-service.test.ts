@@ -28,4 +28,14 @@ describe("SpaceService", () => {
     const calls: string[] = []; const service = new SpaceService({ createOrReuse: () => ({ id: "new", projectId: "p", state: "preparing" }), activate: () => calls.push("active"), fail: () => calls.push("failed"), cancel: async () => calls.push("cancelled") } as never, { rebuild: async () => { throw Object.assign(new Error("cancel"), { code: "SPACE_BUILD_CANCELLED" }); }, optimize: async () => {} });
     await expect(service.rebuild({ spec: { projectId: "p" } })).rejects.toMatchObject({ code: "SPACE_BUILD_CANCELLED" }); expect(calls).toEqual(["cancelled"]);
   });
+
+  it("passes a durable task through optimize and records completion", async () => {
+    const calls: string[] = [];
+    const service = new SpaceService({ createOrReuse: () => ({ id: "new", projectId: "p", state: "preparing" }) } as never, {
+      rebuild: async () => {},
+      optimize: async (input: unknown) => { calls.push((input as { taskId: string }).taskId); }
+    });
+    await service.optimize({ taskId: "task-1" });
+    expect(calls).toEqual(["task-1"]);
+  });
 });

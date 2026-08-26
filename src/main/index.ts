@@ -65,15 +65,17 @@ app.whenReady().then(async () => {
   const taskService = new TaskService(new TaskRepository(appDatabase.connection, { onTransition: taskFanout }), { now: () => new Date().toISOString(), random: Math.random, id: randomUUID });
   const pool = new WorkerPool();
   workerPool = pool;
+  let ingestionService!: IngestionService;
   const lance = await LanceStore.open(path.join(appPaths.root, "vectors"));
   const spaces = new SpaceRepository(appDatabase.connection);
-  const spaceService = new SpaceService(spaces, { rebuild: async () => { throw new Error("Space rebuild is not wired"); }, optimize: async () => { throw new Error("Space optimize is not wired"); } }, async () => backupDatabase(appDatabase!.connection, appPaths.database + ".space-backup-" + Date.now() + ".db"));
+  const spaceService = new SpaceService(spaces, { rebuild: async (raw: unknown) => { const input = raw as { space: { id: string; dimension: number }; spec: { projectId: string }; signal?: AbortSignal; revisionId?: string }; const revisions = input.revisionId ? [{ id: input.revisionId }] : appDatabase!.connection.prepare("SELECT current_revision_id AS id FROM sources WHERE project_id = ? AND status = 'active' AND current_revision_id IS NOT NULL").all(input.spec.projectId) as Array<{ id: string }>; for (const revision of revisions) await indexing.rebuild(input.signal ? { revisionId: revision.id, space: input.space, signal: input.signal } : { revisionId: revision.id, space: input.space }); }, optimize: async (raw: unknown) => { const value = raw as { taskId?: string; projectId?: string; space: { id: string; dimension: number } }; const taskId = value.taskId ?? (value.projectId ? taskService.createTask({ projectId: value.projectId, sourceId: null, kind: "optimize" }).id : undefined); if (!taskId) throw new Error("optimize requires taskId or projectId"); taskService.start(taskId, "indexing"); try { taskService.advance(taskId, "indexing", 500); await lance.optimize(value.space); taskService.complete(taskId); } catch (error) { taskService.fail(taskId, { code: "INTERNAL", messageKey: error instanceof Error ? error.message : "errors.internal", recoverable: false }); throw error; } } }, async () => backupDatabase(appDatabase!.connection, appPaths.database + ".space-backup-" + Date.now() + ".db"));
   spaceService.recoverInterrupted();
   const localRuntime = createTransformersEmbeddingRuntime(appPaths.models);
   const localManager = createLocalModelManager(appPaths.models, async (directory, signal) => localRuntime(directory, [], signal));
   const localEmbeddingProvider = new LocalEmbeddingProvider(localManager, localRuntime);
   const indexing = new IndexingService(appDatabase.connection, localEmbeddingProvider, lance);
-  const ingestionService = new IngestionService(pool, appDatabase.connection, (taskId) => {
+  (indexing as IndexingService & { setChunkRecovery?: (revisionId: string) => void }).setChunkRecovery?.((revisionId) => ingestionService.reparseRevision(revisionId));
+  ingestionService = new IngestionService(pool, appDatabase.connection, (taskId) => {
     const revisionId = taskRevisions.get(taskId);
     const row = revisionId ? appDatabase?.connection.prepare("SELECT sr.stored_path, s.kind FROM tasks t JOIN source_revisions sr ON sr.id = ? JOIN sources s ON s.id = t.source_id WHERE t.id = ?").get(revisionId, taskId) as { stored_path?: string; kind?: string } | undefined : undefined;
     if (!row?.stored_path || !row.kind) return undefined;
