@@ -25,4 +25,8 @@ describe("SpaceRepository", () => {
     const interrupted = repo.createOrReuse({ ...spec, fingerprint: "fp2" }); d.prepare("UPDATE embedding_spaces SET state='building' WHERE id=?").run(interrupted.id);
     repo.recoverInterrupted(); expect(repo.get(interrupted.id)?.state).toBe("failed"); expect(repo.active("p")?.id).toBe(active.id);
   });
+  it("cleans Lance rows when cancelling a shadow space", () => {
+    const d = db(); const deleted: string[] = []; const repo = new SpaceRepository(d as never, () => "now", undefined, { deleteSpace: async (space: { id: string }) => { deleted.push(space.id); } } as never);
+    const space = repo.createOrReuse({ projectId: "p", provider: "o", modelId: "m", modelRevision: "r", dimension: 3, distance: "cosine", pooling: "mean", preprocessVersion: "1", chunkingVersion: "1", fingerprint: "x" }); repo.cancel(space.id); expect(repo.get(space.id)?.state).toBe("failed"); expect(deleted).toEqual([space.id]);
+  });
 });

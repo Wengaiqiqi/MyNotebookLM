@@ -11,4 +11,8 @@ describe("SpaceService", () => {
     const error = await service.build({} as never, async () => {}, AbortSignal.abort()).catch(e => e);
     expect(error).toMatchObject({ code: "SPACE_BUILD_CANCELLED" }); expect(states).toEqual(["cancelled"]);
   });
+  it("runs startup recovery, rebuilds from SQLite, and schedules optimize", async () => {
+    const calls: string[] = []; const service = new SpaceService({ recoverInterrupted: () => { calls.push("recover"); } } as never, { rebuild: async () => { calls.push("rebuild"); }, optimize: async () => { calls.push("optimize"); } });
+    service.recoverInterrupted(); await service.rebuild({} as never); const task = service.optimize({} as never); expect(task).toBeInstanceOf(Promise); await task; expect(calls).toEqual(["recover", "rebuild", "optimize"]);
+  });
 });
