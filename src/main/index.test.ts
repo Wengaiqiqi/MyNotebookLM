@@ -24,6 +24,8 @@ const mocks = vi.hoisted(() => {
     cleanupModel,
     cleanupTitleOverlay,
     IndexingService: vi.fn(function (this: Record<string, unknown>, _db: unknown, provider: unknown) { this.provider = provider; }),
+    SpaceRepository: vi.fn(function (this: Record<string, unknown>, db: unknown) { events.push("space-repository"); this.db = db; this.recoverInterrupted = vi.fn(() => events.push("space-recovery")); }),
+    SpaceService: vi.fn(function (this: Record<string, unknown>, repository: unknown, options: unknown, backup: unknown) { events.push("space-service"); this.repository = repository; this.options = options; this.backup = backup; this.recoverInterrupted = vi.fn(() => events.push("space-recovery")); }),
     app: {
       isPackaged: false,
       whenReady: vi.fn(() => Promise.resolve()),
@@ -129,6 +131,8 @@ vi.mock("./window", () => ({
 }));
 vi.mock("./vector/lance-store", () => ({ LanceStore: { open: vi.fn(async () => ({ upsert: vi.fn(), count: vi.fn(), rows: vi.fn(async () => []), vectorSearch: vi.fn(), deleteRevision: vi.fn() })), closeAll: vi.fn(async () => undefined) } }));
 vi.mock("./vector/indexing-service", () => ({ IndexingService: mocks.IndexingService }));
+vi.mock("./vector/space-repository", () => ({ SpaceRepository: mocks.SpaceRepository }));
+vi.mock("./vector/space-service", () => ({ SpaceService: mocks.SpaceService }));
 vi.mock("./vector/local-model-manager", () => ({ createLocalModelManager: vi.fn(() => ({ ensureReady: vi.fn() })) }));
 vi.mock("./vector/local-embedding-provider", () => ({
   createTransformersEmbeddingRuntime: vi.fn(() => vi.fn()),
@@ -180,6 +184,9 @@ describe("main application composition", () => {
       "protector",
       "credentials",
       "model-service",
+      "space-repository",
+      "space-service",
+      "space-recovery",
       "project-handlers",
       "model-handlers",
       "title-overlay-handlers",
@@ -268,5 +275,14 @@ describe("main application composition", () => {
     expect(on).toHaveBeenCalledWith("destroyed", expect.any(Function));
     cleanup();
     expect(removeListener).toHaveBeenCalledWith("destroyed", expect.any(Function));
+  });
+
+  it("recovers interrupted Spaces during startup and constructs the lifecycle service", async () => {
+    await import("./index");
+    await vi.waitFor(() => expect(mocks.createMainWindow).toHaveBeenCalledOnce());
+    expect(mocks.SpaceRepository).toHaveBeenCalledWith(mocks.connection);
+    expect(mocks.SpaceService).toHaveBeenCalledWith(mocks.SpaceRepository.mock.instances[0], expect.any(Object), expect.any(Function));
+    expect((mocks.SpaceService.mock.instances[0] as { recoverInterrupted: ReturnType<typeof vi.fn> }).recoverInterrupted).toHaveBeenCalledOnce();
+    expect(mocks.events).toContain("space-recovery");
   });
 });

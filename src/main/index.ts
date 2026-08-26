@@ -24,6 +24,8 @@ import { createMainWindow, registerTitleOverlayHandler } from "./window";
 import { LanceStore } from "./vector/lance-store";
 import { IndexingService } from "./vector/indexing-service";
 import { SpaceRepository } from "./vector/space-repository";
+import { SpaceService } from "./vector/space-service";
+import { backupDatabase } from "./vector/vector-backup";
 import { createLocalModelManager } from "./vector/local-model-manager";
 import { LocalEmbeddingProvider, createTransformersEmbeddingRuntime } from "./vector/local-embedding-provider";
 
@@ -65,6 +67,8 @@ app.whenReady().then(async () => {
   workerPool = pool;
   const lance = await LanceStore.open(path.join(appPaths.root, "vectors"));
   const spaces = new SpaceRepository(appDatabase.connection);
+  const spaceService = new SpaceService(spaces, { rebuild: async () => { throw new Error("Space rebuild is not wired"); }, optimize: async () => { throw new Error("Space optimize is not wired"); } }, async () => backupDatabase(appDatabase!.connection, appPaths.database + ".space-backup-" + Date.now() + ".db"));
+  spaceService.recoverInterrupted();
   const localRuntime = createTransformersEmbeddingRuntime(appPaths.models);
   const localManager = createLocalModelManager(appPaths.models, async (directory, signal) => localRuntime(directory, [], signal));
   const localEmbeddingProvider = new LocalEmbeddingProvider(localManager, localRuntime);
