@@ -7,6 +7,7 @@ import type { TaskDto } from "../../shared/tasks";
 import type { TaskErrorSummaryDto } from "../../shared/tasks";
 import type { IngestionService } from "./ingestion-service";
 import type { TaskService } from "../tasks/task-service";
+import { isRetryableCode } from "../tasks/retry-policy";
 import { stageFile } from "./managed-files";
 
 type Row = Record<string, unknown>;
@@ -59,5 +60,16 @@ export class MainSourceService {
   }
   private kind(file: string): SourceDto["kind"] { const ext = file.toLowerCase().split(".").pop(); return ({ md: "markdown", markdown: "markdown", pdf: "pdf", docx: "docx", pptx: "pptx", xlsx: "xlsx", csv: "csv", txt: "text" } as Record<string, SourceDto["kind"]>)[ext ?? ""] ?? "text"; }
   private source(row: Row): SourceDto { return { id: String(row.id), projectId: String(row.project_id), kind: row.kind as SourceDto["kind"], displayName: String(row.display_name), status: row.status as SourceDto["status"], currentRevisionId: row.current_revision_id ? String(row.current_revision_id) : null, createdAt: String(row.created_at), updatedAt: String(row.updated_at), deletedAt: row.deleted_at ? String(row.deleted_at) : null }; }
-  private task(row: Row): TaskDto { return { id: String(row.id), projectId: String(row.project_id), sourceId: row.source_id ? String(row.source_id) : null, kind: row.kind as TaskDto["kind"], state: row.state as TaskDto["state"], stage: row.stage as TaskDto["stage"], progress: Number(row.progress_1000), attempt: Number(row.attempt), error: null, idempotencyKey: row.idempotency_key ? String(row.idempotency_key) : null, createdAt: String(row.created_at), updatedAt: String(row.updated_at) }; }
+  private task(row: Row): TaskDto {
+    const errorCode = typeof row.error_code === "string" && ERROR_CODES.has(row.error_code as TaskErrorSummaryDto["code"])
+      ? row.error_code as TaskErrorSummaryDto["code"]
+      : null;
+    return {
+      id: String(row.id), projectId: String(row.project_id), sourceId: row.source_id ? String(row.source_id) : null,
+      kind: row.kind as TaskDto["kind"], state: row.state as TaskDto["state"], stage: row.stage as TaskDto["stage"],
+      progress: Number(row.progress_1000), attempt: Number(row.attempt),
+      error: errorCode ? { code: errorCode, messageKey: typeof row.error_message === "string" && row.error_message.trim() ? row.error_message : "errors.internal", recoverable: isRetryableCode(errorCode) } : null,
+      idempotencyKey: row.idempotency_key ? String(row.idempotency_key) : null, createdAt: String(row.created_at), updatedAt: String(row.updated_at)
+    };
+  }
 }

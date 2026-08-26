@@ -53,4 +53,30 @@ describe("main source import orchestration", () => {
     expect(fail.mock.calls[0]![1].messageKey).toContain("provider failed");
     expect(fail.mock.calls[0]![1].messageKey).not.toContain("SECRET");
   });
+
+  it("returns persisted failure evidence when listing tasks", () => {
+    const taskRow = {
+      id: "00000000-0000-4000-8000-000000000003",
+      project_id: "00000000-0000-4000-8000-000000000001",
+      source_id: null,
+      kind: "ingest",
+      state: "failed",
+      stage: "parsing",
+      progress_1000: 0,
+      attempt: 0,
+      error_code: "PROVIDER",
+      error_message: "errors.provider_failed",
+      idempotency_key: null,
+      created_at: "2026-01-01T00:00:00.000Z",
+      updated_at: "2026-01-01T00:00:00.000Z"
+    };
+    const db = { prepare: vi.fn(() => ({ all: vi.fn(() => [taskRow]) })) } as any;
+    const service = new MainSourceService(db, {} as any, {} as any);
+
+    expect(service.listTasks(taskRow.project_id)[0]?.error).toEqual({
+      code: "PROVIDER",
+      messageKey: "errors.provider_failed",
+      recoverable: true
+    });
+  });
 });
