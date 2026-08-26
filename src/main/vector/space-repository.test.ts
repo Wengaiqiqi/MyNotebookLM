@@ -7,8 +7,22 @@ describe("SpaceRepository", () => {
   it("reuses a fingerprint and atomically activates a shadow space", () => {
     const d = db(); const repo = new SpaceRepository(d as never, () => "now");
     const spec = { projectId: "p", provider: "openai", modelId: "m", modelRevision: "r", dimension: 3, distance: "cosine" as const, pooling: "mean" as const, preprocessVersion: "1", chunkingVersion: "1", fingerprint: "fp" };
-    const first = repo.createOrReuse(spec); repo.activate("p", first.id); expect(repo.createOrReuse(spec).id).toBe(first.id);
-    const shadow = repo.createOrReuse({ ...spec, fingerprint: "fp2" }); repo.activate("p", shadow.id);
+    const first = repo.createOrReuse(spec); d.prepare("UPDATE embedding_spaces SET state='validating' WHERE id=?").run(first.id); repo.activate("p", first.id); expect(repo.createOrReuse(spec).id).toBe(first.id);
+    const shadow = repo.createOrReuse({ ...spec, fingerprint: "fp2" }); d.prepare("UPDATE embedding_spaces SET state='validating' WHERE id=?").run(shadow.id); repo.activate("p", shadow.id);
     expect(repo.active("p")?.id).toBe(shadow.id); expect(repo.get(first.id)?.state).toBe("retired");
+  });
+  it("rejects activation for another project and for non-validating spaces", () => {
+    const d = db(); const repo = new SpaceRepository(d as never, () => "now");
+    const spec = { projectId: "p", provider: "openai", modelId: "m", modelRevision: "r", dimension: 3, distance: "cosine" as const, pooling: "mean" as const, preprocessVersion: "1", chunkingVersion: "1", fingerprint: "fp" };
+    const space = repo.createOrReuse(spec);
+    expect(() => repo.activate("other", space.id)).toThrow(/project/);
+    expect(() => repo.activate("p", space.id)).toThrow(/validating/);
+  });
+  it("recovers interrupted states without changing the active space", () => {
+    const d = db(); const repo = new SpaceRepository(d as never, () => "now");
+    const spec = { projectId: "p", provider: "openai", modelId: "m", modelRevision: "r", dimension: 3, distance: "cosine" as const, pooling: "mean" as const, preprocessVersion: "1", chunkingVersion: "1", fingerprint: "fp" };
+    const active = repo.createOrReuse(spec); d.prepare("UPDATE embedding_spaces SET state='active' WHERE id=?").run(active.id); d.prepare("INSERT INTO project_embedding_spaces VALUES(?,?,?)").run("p", active.id, "now");
+    const interrupted = repo.createOrReuse({ ...spec, fingerprint: "fp2" }); d.prepare("UPDATE embedding_spaces SET state='building' WHERE id=?").run(interrupted.id);
+    repo.recoverInterrupted(); expect(repo.get(interrupted.id)?.state).toBe("failed"); expect(repo.active("p")?.id).toBe(active.id);
   });
 });
