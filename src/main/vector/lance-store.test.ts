@@ -72,6 +72,16 @@ describe("LanceStore", () => {
     try { await store.createSpace(space); await store.upsert(space, [row("read", [1, 0, 0], "read")]); const started = Date.now(); await Promise.all([store.optimize(space), store.count(space)]); expect(Date.now() - started).toBeLessThan(5000); expect(await store.count(space)).toBe(1); } finally { await store.close(); await rm(dir, { recursive: true, force: true }); }
   });
 
+  it("serializes filtered count and optimize with writes and deletes, and close waits", async () => {
+    const dir = await mkdtemp(path.join(os.tmpdir(), "lance-lifecycle-")); const store = await LanceStore.open(dir);
+    try {
+      await store.createSpace(space); await store.upsert(space, [row("one", [1, 0, 0], "one")]);
+      const pending = store.optimize(space); const closing = store.close();
+      await expect(store.count(space)).rejects.toThrow(/closed|closing/); await pending; await closing;
+      await expect(store.rows(space)).rejects.toThrow(/closed|closing/);
+    } finally { await rm(dir, { recursive: true, force: true }); }
+  }, 30_000);
+
   it("rejects non-UUID spaces and rows with invalid columns or vectors", async () => {
     const dir = await mkdtemp(path.join(os.tmpdir(), "lance-validation-"));
     const store = await LanceStore.open(dir);
