@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { mkdir, readFile, rename, rm, stat, writeFile, appendFile } from "node:fs/promises";
+import { mkdir, readFile, rename, rm, stat, appendFile } from "node:fs/promises";
 import path from "node:path";
 import { LOCAL_MODEL_ID, LOCAL_MODEL_MANIFEST, LOCAL_MODEL_REVISION, type LocalModelManifest } from "./local-model-manifest";
 export type ModelManifest = { modelId: string; revision: string; dimension: number; files: Readonly<Record<string, string>> };
