@@ -59,11 +59,11 @@
 - Create: `src/main/chat/citation-parser.ts`
 - Create: `src/main/chat/citation-parser.test.ts`
 
-- [ ] Write failing tests for single/multiple citations, repeated markers, unknown IDs, markers split across stream chunks, code blocks, malformed markers and exact character ranges.
-- [ ] Implement incremental text buffering for display and a final parser that recognizes `[S1]` through `[S12]` outside fenced/inline code.
-- [ ] Remove unknown markers from structured citation records but leave original answer text visible; flag `hasInvalidCitations` for diagnostics without inventing sources.
-- [ ] Resolve recognized IDs only against the request's retrieval map and persist normalized citation rows.
-- [ ] Run focused tests; review and commit `feat: validate generated citation markers`.
+- [x] Write failing tests for single/multiple citations, repeated markers, unknown IDs, markers split across stream chunks, code blocks, malformed markers and exact character ranges.
+- [x] Implement incremental text buffering for display and a final parser that recognizes `[S1]` through `[S12]` outside fenced/inline code.
+- [x] Remove unknown markers from structured citation records but leave original answer text visible; flag `hasInvalidCitations` for diagnostics without inventing sources.
+- [x] Resolve recognized IDs only against the request's retrieval map and persist normalized citation rows.
+- [x] Run focused tests; review and commit `feat: validate generated citation markers`.
 
 ## Task 4: Implement Streaming Chat Orchestration
 
