@@ -21,9 +21,11 @@ describe("LanceStore", () => {
         expect((await store.vectorSearch(space, [1, 0, 0], 10, { [key]: value })).length).toBe(2);
       }
       expect((await store.vectorSearch(space, [1, 0, 0], 10, { projectId: "other" })).length).toBe(0);
+      await store.upsert(space, [row("quoted", [1, 0, 0], "quoted", { projectId: "O'Reilly" })]);
+      expect((await store.vectorSearch(space, [1, 0, 0], 10, { projectId: "O'Reilly" })).map(item => item.chunkId)).toEqual(["quoted"]);
       await expect(store.vectorSearch(space, [1, 0, 0], 10, { unknown: "value" })).rejects.toThrow(/filter field/);
       const reopened = await LanceStore.open(dir);
-      expect(await reopened.count(space)).toBe(2);
+      expect(await reopened.count(space)).toBe(3);
       await reopened.close();
       await store.deleteRevision(space, "revision-1");
       expect(await store.count(space)).toBe(0);
@@ -45,6 +47,18 @@ describe("LanceStore", () => {
       await store.upsert(space, [row("indexed", [1, 0, 0], "x")]);
       const indexes = await (store as any).db.openTable("space_00000000_0000_4000_8000_000000000001").then((t: any) => t.listIndices());
       expect(indexes.map((index: any) => index.name)).toEqual(expect.arrayContaining(["projectId_idx", "sourceId_idx", "revisionId_idx", "spaceId_idx"]));
+    } finally { await store.close(); await rm(dir, { recursive: true, force: true }); }
+  });
+
+  it("serializes concurrent operations and releases the space lock", async () => {
+    const dir = await mkdtemp(path.join(os.tmpdir(), "lance-lock-"));
+    const store = await LanceStore.open(dir);
+    try {
+      await store.createSpace(space);
+      await Promise.all([store.deleteSpace(space), store.deleteSpace(space)]);
+      await store.createSpace(space);
+      await store.upsert(space, [row("after-lock", [1, 0, 0], "x")]);
+      expect(await store.count(space)).toBe(1);
     } finally { await store.close(); await rm(dir, { recursive: true, force: true }); }
   });
 
@@ -78,6 +92,7 @@ describe("LanceStore", () => {
       const indexes = await (store as any).db.openTable("space_00000000_0000_4000_8000_000000000001").then((t: any) => t.listIndices());
       expect(indexes).toEqual(expect.arrayContaining([expect.objectContaining({ name: "vector_ann_idx" })]));
       expect((await store.vectorSearch(space, [0, 1, 0], 1))[0]?.chunkId).toBe("target");
+      await expect(store.upsert(space, [row("target", [0, 1, 0], "target")])).resolves.toBeUndefined();
     } finally { await store.close(); await rm(dir, { recursive: true, force: true }); }
   }, 30_000);
 });
