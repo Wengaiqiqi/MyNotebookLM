@@ -7,6 +7,7 @@ export type ModelManifest = { modelId: string; revision: string; dimension: numb
 export type DownloadProgress = (value: number) => void;
 export type ModelDownloader = (file: string, offset: number, onProgress: DownloadProgress, signal: AbortSignal) => Promise<Uint8Array>;
 export type ModelRuntime<T> = (directory: string, signal: AbortSignal) => Promise<T>;
+export function managedActiveDirectory(root: string, manifest: Pick<ModelManifest, "modelId" | "revision">): string { return path.join(path.resolve(root), `${manifest.modelId.replaceAll("/", "__")}-${manifest.revision}`); }
 const MODEL_FILES = new Set(Object.keys(LOCAL_MODEL_MANIFEST.files));
 const HF_ROOT = `https://huggingface.co/${LOCAL_MODEL_ID}/resolve/${LOCAL_MODEL_REVISION}`;
 export function createLocalModelDownloader(fetcher: typeof fetch = fetch): ModelDownloader {
@@ -26,7 +27,7 @@ export class OfflineModelError extends Error { constructor() { super("本地模�
 export class LocalModelManager<T = unknown> {
   private loading: Promise<T> | undefined;
   constructor(private readonly root: string, private readonly downloader: ModelDownloader, private readonly runtime: ModelRuntime<T>, private readonly manifest: ModelManifest = LOCAL_MODEL_MANIFEST) {}
-  private activeDir() { return path.join(this.root, `${this.manifest.modelId.replaceAll("/", "__")}-${this.manifest.revision}`); }
+  private activeDir() { return managedActiveDirectory(this.root, this.manifest); }
   async ensureReady(offline = false, onProgress: DownloadProgress = () => {}, signal = new AbortController().signal): Promise<T> {
     if (this.loading) return this.loading;
     this.loading = this.load(offline, onProgress, signal).finally(() => { this.loading = undefined; });

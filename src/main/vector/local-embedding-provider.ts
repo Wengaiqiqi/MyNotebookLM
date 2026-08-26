@@ -15,19 +15,20 @@ export class LocalEmbeddingProvider {
   }
 }
 const singletons = new Map<string, Promise<any>>();
-export function createTransformersEmbeddingRuntime(modelDir?: string): EmbeddingRuntime {
+export function createTransformersEmbeddingRuntime(modelDir?: string, managedActiveDir?: string): EmbeddingRuntime {
   env.allowRemoteModels = false;
   return async (model, inputs) => {
     if (typeof model !== "string") throw new Error("模型目录未由 manager 校验");
     if (!modelDir) throw new Error("模型根目录未配置");
+    const active = canonicalPath(model);
+    const expected = canonicalPath(managedActiveDir ?? modelDir);
+    if (active.toLowerCase() !== expected.toLowerCase()) throw new Error("模型目录未由 manager 校验");
     const root = path.resolve(modelDir);
-    const active = path.resolve(model);
-    const relative = path.relative(root, active);
-    if (relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) throw new Error("模型目录未由 manager 校验");
     env.localModelPath = root;
     let singleton = singletons.get(active);
-    if (!singleton) { singleton = pipeline("feature-extraction", active, { revision: LOCAL_MODEL_REVISION, local_files_only: true }); singletons.set(active, singleton); }
+    if (!singleton) { singleton = pipeline("feature-extraction", expected, { revision: LOCAL_MODEL_REVISION, local_files_only: true }); singletons.set(expected, singleton); }
     const extractor: any = await singleton; const result: any = await extractor(inputs, { pooling: "mean", normalize: true }); return (result.tolist?.() ?? result) as number[][];
   };
 }
 function normalize(v: number[]) { const n = Math.hypot(...v); return n ? v.map(x => x / n) : v; }
+function canonicalPath(value: string): string { return /^[a-z]:[\\/]/i.test(value) ? path.win32.resolve(value) : path.resolve(value); }

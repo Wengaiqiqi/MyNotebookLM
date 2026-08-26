@@ -13,13 +13,17 @@ it("passes the caller signal and validates count, finite 384-d vectors", async (
   const embed = new LocalEmbeddingProvider(manager as never, async () => [[1, 2]], 2);
   await expect(embed.embedTexts(["a", "b"], "document", controller.signal)).rejects.toThrow(/count|384|dimension/i);
 });
-it("loads each verified active directory as the pipeline model path", async () => {
+it("rejects any directory other than the manager-owned active directory", async () => {
   const transformers = await import("@huggingface/transformers");
-  const first = createTransformersEmbeddingRuntime("C:/models");
-  const second = createTransformersEmbeddingRuntime("C:/models");
-  await first("C:/models/active-one", ["x"], new AbortController().signal);
-  await second("C:/models/active-two", ["y"], new AbortController().signal);
-  expect(transformers.pipeline).toHaveBeenNthCalledWith(1, "feature-extraction", path.resolve("C:/models/active-one"), expect.objectContaining({ revision: expect.any(String), local_files_only: true }));
-  expect(transformers.pipeline).toHaveBeenNthCalledWith(2, "feature-extraction", path.resolve("C:/models/active-two"), expect.objectContaining({ revision: expect.any(String), local_files_only: true }));
-  await expect(first("C:/models/../outside", ["z"], new AbortController().signal)).rejects.toThrow("未由 manager 校验");
+  const runtime = createTransformersEmbeddingRuntime("C:/models", "C:/models/active-one");
+  await expect(runtime("C:/models/active-two", ["x"], new AbortController().signal)).rejects.toThrow("未由 manager 校验");
+  await expect(runtime("C:/models", ["x"], new AbortController().signal)).rejects.toThrow("未由 manager 校验");
+  await expect(runtime("C:/models/../outside", ["x"], new AbortController().signal)).rejects.toThrow("未由 manager 校验");
+  expect(transformers.pipeline).not.toHaveBeenCalled();
+});
+it("accepts only the exact manager active directory after Windows normalization", async () => {
+  const transformers = await import("@huggingface/transformers");
+  const runtime = createTransformersEmbeddingRuntime("C:/models", "C:/models/active-one");
+  await runtime("c:/models/active-one", ["x"], new AbortController().signal);
+  expect(transformers.pipeline).toHaveBeenCalledWith("feature-extraction", path.resolve("C:/models/active-one"), expect.anything());
 });
