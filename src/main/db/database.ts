@@ -1,6 +1,7 @@
 import Database from "better-sqlite3";
 import { mkdirSync, readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
+import { backupDatabase } from "../vector/vector-backup";
 
 export type AppDatabase = Readonly<{
   connection: Database.Database;
@@ -77,54 +78,7 @@ export function openAppDatabase(
   const connection = new Database(databasePath);
 
   try {
-    connection.pragma("journal_mode = WAL");
-    connection.pragma("foreign_keys = ON");
-    connection.pragma("busy_timeout = 5000");
-    connection.exec(`
-      CREATE TABLE IF NOT EXISTS schema_migrations (
-        version INTEGER PRIMARY KEY,
-        name TEXT NOT NULL,
-        applied_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
-      )
-    `);
-
-    const columns = connection.pragma("table_info(schema_migrations)") as Array<{
-      name: string;
-    }>;
-    const legacyHistory = connection
-      .prepare("SELECT version FROM schema_migrations ORDER BY version")
-      .all() as Array<{ version: number }>;
-    validateAppliedHistory(legacyHistory, migrations);
-
-    if (!columns.some((column) => column.name === "name")) {
-      connection.transaction(() => {
-        connection.exec("ALTER TABLE schema_migrations ADD COLUMN name TEXT NOT NULL DEFAULT ''");
-        const update = connection.prepare(
-          "UPDATE schema_migrations SET name = ? WHERE version = ?"
-        );
-        for (const applied of legacyHistory) {
-          update.run(migrations[applied.version - 1]!.name, applied.version);
-        }
-      })();
-    }
-
-    const applied = connection
-      .prepare("SELECT version, name FROM schema_migrations ORDER BY version")
-      .all() as AppliedMigration[];
-    validateAppliedHistory(applied, migrations);
-    const appliedVersions = new Set(applied.map(({ version }) => version));
-    const apply = connection.transaction((migration: Migration, sql: string) => {
-      connection.exec(sql);
-      connection
-        .prepare("INSERT INTO schema_migrations(version, name) VALUES (?, ?)")
-        .run(migration.version, migration.name);
-    });
-
-    for (const migration of migrations) {
-      if (!appliedVersions.has(migration.version)) {
-        apply(migration, readFileSync(migration.filePath, "utf8"));
-      }
-    }
+    migrateConnection(connection, migrations);
   } catch (error) {
     connection.close();
     throw error;
@@ -134,4 +88,65 @@ export function openAppDatabase(
     connection,
     close: () => connection.close()
   };
+}
+
+function migrateConnection(connection: Database.Database, migrations: readonly Migration[]): void {
+  connection.pragma("journal_mode = WAL");
+  connection.pragma("foreign_keys = ON");
+  connection.pragma("busy_timeout = 5000");
+  connection.exec(`
+    CREATE TABLE IF NOT EXISTS schema_migrations (
+      version INTEGER PRIMARY KEY,
+      name TEXT NOT NULL,
+      applied_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+    )
+  `);
+
+  const columns = connection.pragma("table_info(schema_migrations)") as Array<{ name: string }>;
+  const legacyHistory = connection
+    .prepare("SELECT version FROM schema_migrations ORDER BY version")
+    .all() as Array<{ version: number }>;
+  validateAppliedHistory(legacyHistory, migrations);
+
+  if (!columns.some((column) => column.name === "name")) {
+    connection.transaction(() => {
+      connection.exec("ALTER TABLE schema_migrations ADD COLUMN name TEXT NOT NULL DEFAULT ''");
+      const update = connection.prepare("UPDATE schema_migrations SET name = ? WHERE version = ?");
+      for (const applied of legacyHistory) update.run(migrations[applied.version - 1]!.name, applied.version);
+    })();
+  }
+
+  const applied = connection
+    .prepare("SELECT version, name FROM schema_migrations ORDER BY version")
+    .all() as AppliedMigration[];
+  validateAppliedHistory(applied, migrations);
+  const appliedVersions = new Set(applied.map(({ version }) => version));
+  const apply = connection.transaction((migration: Migration, sql: string) => {
+    connection.exec(sql);
+    connection.prepare("INSERT INTO schema_migrations(version, name) VALUES (?, ?)").run(migration.version, migration.name);
+  });
+  for (const migration of migrations) {
+    if (!appliedVersions.has(migration.version)) apply(migration, readFileSync(migration.filePath, "utf8"));
+  }
+}
+
+export async function openAppDatabaseAsync(
+  databasePath: string,
+  migrationsDir: string,
+  backupPath = `${databasePath}.migration-backup-${Date.now()}.db`
+): Promise<AppDatabase> {
+  const migrations = readMigrations(migrationsDir);
+  mkdirSync(path.dirname(databasePath), { recursive: true });
+  const connection = new Database(databasePath);
+  try {
+    connection.pragma("journal_mode = WAL");
+    connection.pragma("foreign_keys = ON");
+    connection.pragma("busy_timeout = 5000");
+    await backupDatabase(connection, backupPath);
+    migrateConnection(connection, migrations);
+  } catch (error) {
+    connection.close();
+    throw error;
+  }
+  return { connection, close: () => connection.close() };
 }

@@ -1,5 +1,5 @@
 import Database from "better-sqlite3";
-import { mkdtemp, readdir, rm, writeFile, readFile } from "node:fs/promises";
+import { access, mkdtemp, readdir, rm, writeFile, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
@@ -28,5 +28,33 @@ describe("vector backups", () => {
   it("does not replace a verified backup when backup fails", async () => {
     const dir = await mkdtemp(path.join(tmpdir(), "mynotebooklm-backup-"));
     try { const target = path.join(dir, "backup.db"); const db = new Database(":memory:"); db.exec("CREATE TABLE x (v TEXT); INSERT INTO x VALUES ('good')"); await backupDatabase(db, target); db.exec("DROP TABLE x"); db.close(); await expect(backupDatabase(db, target)).rejects.toThrow(); const copy = new Database(target); expect(copy.prepare("SELECT name FROM sqlite_master WHERE name='x'").get()).toBeDefined(); copy.close(); } finally { await rm(dir, { recursive: true, force: true }); }
+  });
+
+  it("does not count a corrupt verified-looking file or temporary file toward three backups", async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), "mynotebooklm-backup-"));
+    try {
+      const db = new Database(":memory:"); db.exec("CREATE TABLE x (v TEXT); INSERT INTO x VALUES ('ok')");
+      const paths = ["one", "two", "three"].map((name) => path.join(dir, `backup-${name}.db`));
+      for (const target of paths) await backupDatabase(db, target);
+      const corrupt = path.join(dir, "backup-corrupt.db");
+      await writeFile(corrupt, "corrupt");
+      await writeFile(corrupt + ".json", JSON.stringify({ verified: true, createdAt: Date.now() + 1, path: corrupt, sha256: "bad" }));
+      await writeFile(path.join(dir, "backup-temp.db.tmp"), "temporary");
+      const latest = path.join(dir, "backup-four.db");
+      await backupDatabase(db, latest);
+      const valid = [] as string[];
+      for (const target of [...paths, latest]) {
+        try {
+          await access(target);
+          const copy = new Database(target);
+          if (copy.pragma("integrity_check", { simple: true }) === "ok") valid.push(target);
+          copy.close();
+        } catch {}
+      }
+      expect(valid).toHaveLength(3);
+      expect(valid).not.toContain(corrupt);
+      expect((await readdir(dir)).filter((file) => file.endsWith(".tmp") || file.endsWith(".verify"))).toEqual(["backup-temp.db.tmp"]);
+      db.close();
+    } finally { await rm(dir, { recursive: true, force: true }); }
   });
 });

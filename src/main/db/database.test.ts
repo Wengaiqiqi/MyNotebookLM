@@ -2,6 +2,7 @@ import Database from "better-sqlite3";
 import {
   mkdirSync,
   mkdtempSync,
+  existsSync,
   readFileSync,
   rmSync,
   unlinkSync,
@@ -11,6 +12,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { openAppDatabase } from "./database";
+import * as databaseModule from "./database";
 
 const initialMigration = readFileSync(
   new URL("./migrations/001_initial.sql", import.meta.url),
@@ -132,6 +134,84 @@ describe("openAppDatabase", () => {
     expect(connection.prepare("SELECT name FROM sqlite_master WHERE name LIKE 'tasks_before_%'").all()).toEqual([]);
     expect(connection.prepare("SELECT version FROM schema_migrations ORDER BY version").pluck().all()).toEqual([1, 2, 3, 4, 5]);
     connection.close();
+  });
+
+  it("creates a verified 005 backup before a real 006 migration starts", async () => {
+    writeFileSync(path.join(migrationsDir, "002_settings_models.sql"), settingsModelsMigration);
+    writeFileSync(path.join(migrationsDir, "003_credential_binding.sql"), credentialBindingMigration);
+    writeFileSync(path.join(migrationsDir, "004_sources_tasks.sql"), sourcesTasksMigration);
+    writeFileSync(path.join(migrationsDir, "005_embedding_spaces.sql"), spacesMigration);
+    const before = openAppDatabase(databaseFile, migrationsDir);
+    before.connection.prepare("INSERT INTO projects(id, name) VALUES (?, ?)").run("p1", "Project");
+    before.close();
+    writeFileSync(path.join(migrationsDir, "006_space_tasks.sql"), spaceTasksMigration);
+    const backupPath = path.join(temporaryRoot, "migration-005.db");
+    const openAsync = (databaseModule as typeof databaseModule & { openAppDatabaseAsync?: Function }).openAppDatabaseAsync;
+    expect(openAsync).toBeTypeOf("function");
+    const migrated = await openAsync!(databaseFile, migrationsDir, backupPath);
+    expect(migrated.connection.prepare("SELECT version FROM schema_migrations ORDER BY version").pluck().all()).toEqual([1, 2, 3, 4, 5, 6]);
+    migrated.close();
+    const backup = new Database(backupPath);
+    expect(backup.pragma("integrity_check", { simple: true })).toBe("ok");
+    expect(backup.prepare("SELECT version FROM schema_migrations ORDER BY version").pluck().all()).toEqual([1, 2, 3, 4, 5]);
+    expect(backup.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'tasks'").pluck().get()).not.toContain("optimize");
+    backup.close();
+  });
+
+  it("keeps the verified pre-migration database recoverable when 006 fails", async () => {
+    writeFileSync(path.join(migrationsDir, "002_settings_models.sql"), settingsModelsMigration);
+    writeFileSync(path.join(migrationsDir, "003_credential_binding.sql"), credentialBindingMigration);
+    writeFileSync(path.join(migrationsDir, "004_sources_tasks.sql"), sourcesTasksMigration);
+    writeFileSync(path.join(migrationsDir, "005_embedding_spaces.sql"), spacesMigration);
+    const before = openAppDatabase(databaseFile, migrationsDir);
+    before.connection.prepare("INSERT INTO projects(id, name) VALUES (?, ?)").run("p1", "Project");
+    before.close();
+    writeFileSync(path.join(migrationsDir, "006_space_tasks.sql"), spaceTasksMigration + "\nCREATE TABLE broken (");
+    const backupPath = path.join(temporaryRoot, "migration-005-failed.db");
+    const openAsync = (databaseModule as typeof databaseModule & { openAppDatabaseAsync?: Function }).openAppDatabaseAsync;
+    expect(openAsync).toBeTypeOf("function");
+    await expect(openAsync!(databaseFile, migrationsDir, backupPath)).rejects.toThrow();
+    const backup = new Database(backupPath);
+    expect(backup.pragma("integrity_check", { simple: true })).toBe("ok");
+    expect(backup.prepare("SELECT version FROM schema_migrations ORDER BY version").pluck().all()).toEqual([1, 2, 3, 4, 5]);
+    backup.close();
+    const original = new Database(databaseFile);
+    expect(original.prepare("SELECT version FROM schema_migrations ORDER BY version").pluck().all()).toEqual([1, 2, 3, 4, 5]);
+    original.close();
+  });
+
+  it("retains only the latest three verified migration backups", async () => {
+    writeFileSync(path.join(migrationsDir, "002_settings_models.sql"), settingsModelsMigration);
+    writeFileSync(path.join(migrationsDir, "003_credential_binding.sql"), credentialBindingMigration);
+    writeFileSync(path.join(migrationsDir, "004_sources_tasks.sql"), sourcesTasksMigration);
+    writeFileSync(path.join(migrationsDir, "005_embedding_spaces.sql"), spacesMigration);
+    const before = openAppDatabase(databaseFile, migrationsDir);
+    before.close();
+    writeFileSync(path.join(migrationsDir, "006_space_tasks.sql"), spaceTasksMigration);
+    const openAsync = (databaseModule as typeof databaseModule & { openAppDatabaseAsync?: Function }).openAppDatabaseAsync;
+    expect(openAsync).toBeTypeOf("function");
+    for (const name of ["one", "two", "three"]) {
+      const backupPath = path.join(temporaryRoot, `migration-${name}.db`);
+      const opened = await openAsync!(databaseFile, migrationsDir, backupPath);
+      opened.close();
+    }
+    writeFileSync(path.join(temporaryRoot, "migration-corrupt.db"), "not sqlite");
+    writeFileSync(path.join(temporaryRoot, "migration-corrupt.db.json"), JSON.stringify({ verified: true, createdAt: Date.now() + 1, path: path.join(temporaryRoot, "migration-corrupt.db"), sha256: "bad" }));
+    writeFileSync(path.join(temporaryRoot, "migration-temp.db.tmp"), "not a backup");
+    const opened = await openAsync!(databaseFile, migrationsDir, path.join(temporaryRoot, "migration-four.db"));
+    opened.close();
+    const verified = [] as string[];
+    for (const name of ["one", "two", "three", "four"]) {
+      const file = path.join(temporaryRoot, `migration-${name}.db`);
+      try {
+        if (!existsSync(file)) continue;
+        const db = new Database(file);
+        if (db.pragma("integrity_check", { simple: true }) === "ok") verified.push(file);
+        db.close();
+      } catch {}
+    }
+    expect(verified).toHaveLength(3);
+    expect(verified).not.toContain(path.join(temporaryRoot, "migration-one.db"));
   });
 
   it("upgrades a legacy applied history without changing its recorded version", () => {

@@ -1,4 +1,5 @@
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import Database from "better-sqlite3";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -7,6 +8,8 @@ import { LanceStore } from "./lance-store";
 import { SpaceRepository } from "./space-repository";
 import { IndexingService } from "./indexing-service";
 import { IngestionService } from "../sources/ingestion-service";
+import { SpaceService } from "./space-service";
+import { backupDatabase } from "./vector-backup";
 
 const spec = (projectId: string, fingerprint: string) => ({ projectId, provider: "local", modelId: "m", modelRevision: "r", dimension: 2, distance: "cosine" as const, pooling: "mean" as const, preprocessVersion: "1", chunkingVersion: "1", fingerprint });
 const row = (spaceId: string, id: string) => ({ chunkId: id, projectId: "p", sourceId: "src", revisionId: "rev", spaceId, ordinal: 0, contentHash: id, text: id, vector: [1, 0], locator: { id }, createdAt: 1 });
@@ -25,7 +28,7 @@ describe("Space lifecycle real restart recovery", () => {
     reopened.close(); await reopenedLance.close();
   }, 30000);
   it("does not mark a shadow recovered when Lance cleanup fails", async () => {
-    const root = await mkdtemp(path.join(os.tmpdir(), "space-recovery-error-")); roots.push(root); const db = openAppDatabase(path.join(root, "app.db"), path.resolve("src/main/db/migrations")); db.connection.prepare("INSERT INTO projects(id,name) VALUES(?,?)").run("p", "P"); const base = new SpaceRepository(db.connection); const s = base.createOrReuse(spec("p", "bad")); const repo = new SpaceRepository(db.connection, undefined, undefined, { deleteSpace: async () => { throw new Error("cleanup failed"); } }); await expect(repo.recoverInterrupted()).rejects.toThrow("cleanup failed"); expect(repo.get(s.id)?.state).toBe("preparing"); db.close();
+    const root = await mkdtemp(path.join(os.tmpdir(), "space-recovery-error-")); roots.push(root); const db = openAppDatabase(path.join(root, "app.db"), path.resolve("src/main/db/migrations")); db.connection.prepare("INSERT INTO projects(id,name) VALUES(?,?)").run("p", "P"); const base = new SpaceRepository(db.connection); const s = base.createOrReuse(spec("p", "bad")); const repo = new SpaceRepository(db.connection, undefined, undefined, { deleteSpace: async () => { throw new Error("cleanup failed"); } }); await expect(repo.recoverInterrupted()).rejects.toMatchObject({ name: "AggregateError" }); expect(repo.get(s.id)?.state).toBe("preparing"); db.close();
   });
   it("rebuilds from SQLite chunks and cancels across batches without activation", async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), "space-rebuild-real-")); roots.push(root); const db = openAppDatabase(path.join(root, "app.db"), path.resolve("src/main/db/migrations")); const c = db.connection; c.prepare("INSERT INTO projects(id,name) VALUES(?,?)").run("p", "P"); c.prepare("INSERT INTO sources(id,project_id,kind,display_name) VALUES(?,?,?,?)").run("src", "p", "text", "x"); c.prepare("INSERT INTO source_revisions(id,source_id,original_path,stored_path,source_hash,locator_kind,chunking_version,state) VALUES(?,?,?,?,?,?,?,?)").run("rev", "src", "none", "none", "h", "offset", "v1", "awaiting_embedding");
@@ -53,5 +56,32 @@ describe("Space lifecycle real restart recovery", () => {
   });
   it("does not activate a space when production validation rejects vector dimension", async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), "space-validation-real-")); roots.push(root); const db = openAppDatabase(path.join(root, "app.db"), path.resolve("src/main/db/migrations")); const c = db.connection; c.prepare("INSERT INTO projects(id,name) VALUES(?,?)").run("p", "P"); c.prepare("INSERT INTO sources(id,project_id,kind,display_name) VALUES(?,?,?,?)").run("src", "p", "text", "x"); c.prepare("INSERT INTO source_revisions(id,source_id,original_path,stored_path,source_hash,locator_kind,chunking_version,state) VALUES(?,?,?,?,?,?,?,?)").run("rev", "src", "none", "none", "h", "offset", "v1", "awaiting_embedding"); c.prepare("INSERT INTO source_chunks(id,revision_id,ordinal,content_hash,text,locator_json) VALUES(?,?,?,?,?,?)").run("c1", "rev", 0, "h1", "one", "{}"); const lance = await LanceStore.open(path.join(root, "vectors")); const repo = new SpaceRepository(c, undefined, undefined, lance); const active = repo.createOrReuse(spec("p", "active")); c.prepare("UPDATE embedding_spaces SET state='active' WHERE id=?").run(active.id); c.prepare("INSERT INTO project_embedding_spaces VALUES(?,?,?)").run("p", active.id, "now"); await lance.createSpace(active); await lance.upsert(active, [row(active.id, "old")]); const indexing = new IndexingService(c, { embedBatch: async () => [[1, 2, 3]] }, lance); const shadow = repo.createOrReuse(spec("p", "bad")); await lance.createSpace(shadow); const service = new (await import("./space-service")).SpaceService(repo, { rebuild: async (input: unknown) => indexing.rebuild(input as never), optimize: async () => {} }); await expect(service.rebuild({ spec: spec("p", "bad"), revisionId: "rev" })).rejects.toThrow(); expect(repo.active("p")?.id).toBe(active.id); await expect(lance.count(shadow)).rejects.toThrow(); await lance.close(); db.close();
+  });
+
+  it("activates only after a real verified SQLite backup", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "space-backup-real-")); roots.push(root);
+    const databasePath = path.join(root, "app.db"); const db = openAppDatabase(databasePath, path.resolve("src/main/db/migrations")); const c = db.connection;
+    c.prepare("INSERT INTO projects(id,name) VALUES(?,?)").run("p", "P");
+    const repo = new SpaceRepository(c); const backupPath = path.join(root, "space.db");
+    const service = new SpaceService(repo, undefined, async () => backupDatabase(c, backupPath));
+    const space = repo.createOrReuse(spec("p", "verified"));
+    await service.build(spec("p", "verified"), async () => repo.setState(space.id, "validating", 1000));
+    expect(repo.active("p")?.fingerprint).toBe("verified");
+    const backup = new Database(backupPath);
+    expect(backup.pragma("integrity_check", { simple: true })).toBe("ok");
+    expect(backup.prepare("SELECT state FROM embedding_spaces WHERE fingerprint='verified'").get()).toEqual({ state: "validating" });
+    backup.close(); db.close();
+  });
+
+  it("does not activate when the real SQLite backup fails", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "space-backup-failure-")); roots.push(root);
+    const db = openAppDatabase(path.join(root, "app.db"), path.resolve("src/main/db/migrations")); const c = db.connection;
+    c.prepare("INSERT INTO projects(id,name) VALUES(?,?)").run("p", "P");
+    const repo = new SpaceRepository(c); const service = new SpaceService(repo, undefined, async () => { throw new Error("backup failed"); });
+    const space = repo.createOrReuse(spec("p", "failed"));
+    await expect(service.build(spec("p", "failed"), async () => repo.setState(space.id, "validating", 1000))).rejects.toThrow("backup failed");
+    expect(repo.active("p")).toBeUndefined();
+    expect(repo.createOrReuse(spec("p", "failed")).state).toBe("failed");
+    db.close();
   });
 });

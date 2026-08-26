@@ -27,6 +27,27 @@ describe("SpaceRepository", () => {
     await recovering.recoverInterrupted(); expect(recovering.get(interrupted.id)?.state).toBe("failed"); expect(recovering.active("p")?.id).toBe(active.id); expect(deleted).toEqual([interrupted.id]);
     await recovering.recoverInterrupted(); expect(deleted).toEqual([interrupted.id]);
   });
+
+  it("continues recovering other shadows and reports cleanup failures together", async () => {
+    const d = db(); const base = new SpaceRepository(d as never, () => "now");
+    const spec = { projectId: "p", provider: "openai", modelId: "m", modelRevision: "r", dimension: 3, distance: "cosine" as const, pooling: "mean" as const, preprocessVersion: "1", chunkingVersion: "1", fingerprint: "fp" };
+    const shadows = ["one", "two", "three"].map((fingerprint) => base.createOrReuse({ ...spec, fingerprint }));
+    d.prepare("UPDATE embedding_spaces SET state='building' WHERE id=?").run(shadows[0]!.id);
+    d.prepare("UPDATE embedding_spaces SET state='validating' WHERE id=?").run(shadows[1]!.id);
+    d.prepare("UPDATE embedding_spaces SET state='preparing' WHERE id=?").run(shadows[2]!.id);
+    let failedId = shadows[1]!.id;
+    const deleted: string[] = [];
+    const recovering = new SpaceRepository(d as never, () => "now", undefined, { deleteSpace: async ({ id }: { id: string }) => { deleted.push(id); if (id === failedId) throw new Error("cleanup failed"); } });
+    await expect(recovering.recoverInterrupted()).rejects.toMatchObject({ name: "AggregateError" });
+    expect(recovering.get(shadows[0]!.id)?.state).toBe("failed");
+    expect(recovering.get(shadows[1]!.id)?.state).toBe("validating");
+    expect(recovering.get(shadows[2]!.id)?.state).toBe("failed");
+    expect(deleted).toEqual(shadows.map(({ id }) => id));
+    failedId = "";
+    await recovering.recoverInterrupted();
+    expect(shadows.map(({ id }) => recovering.get(id)?.state)).toEqual(["failed", "failed", "failed"]);
+    d.close();
+  });
   it("cleans Lance rows when cancelling a shadow space", async () => {
     const d = db(); const deleted: string[] = []; const repo = new SpaceRepository(d as never, () => "now", undefined, { deleteSpace: async (space: { id: string }) => { deleted.push(space.id); } } as never);
     const space = repo.createOrReuse({ projectId: "p", provider: "o", modelId: "m", modelRevision: "r", dimension: 3, distance: "cosine", pooling: "mean", preprocessVersion: "1", chunkingVersion: "1", fingerprint: "x" }); await repo.cancel(space.id); expect(repo.get(space.id)?.state).toBe("failed"); expect(deleted).toEqual([space.id]);
