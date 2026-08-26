@@ -1,15 +1,17 @@
 import type Database from "better-sqlite3";
 import type { PreparedChunk } from "../../workers/ingestion/types";
 import type { DurableWorkerPayload, WorkerPool } from "../tasks/worker-pool";
+import type { IndexingService } from "../vector/indexing-service";
 
 export type IngestionRun = { taskId: string; revisionId: string; kind: string; data: Uint8Array; updatedAt: string };
 
 export class IngestionService {
-  constructor(private readonly pool: Pick<WorkerPool, "start" | "cancel"> & Partial<Pick<WorkerPool, "setDurablePayloadLoader" | "setProgressCallback">>, private readonly db: Database.Database, durablePayload?: (taskId: string, revisionId: string) => DurableWorkerPayload | undefined, onProgress?: (taskId: string, value: number) => void) { if (durablePayload) this.pool.setDurablePayloadLoader?.(durablePayload); if (onProgress) this.pool.setProgressCallback?.((taskId, value) => throttleProgress(taskId, (v) => onProgress(taskId, v))(value)); }
+  constructor(private readonly pool: Pick<WorkerPool, "start" | "cancel"> & Partial<Pick<WorkerPool, "setDurablePayloadLoader" | "setProgressCallback">>, private readonly db: Database.Database, durablePayload?: (taskId: string, revisionId: string) => DurableWorkerPayload | undefined, onProgress?: (taskId: string, value: number) => void, private readonly indexing?: IndexingService) { if (durablePayload) this.pool.setDurablePayloadLoader?.(durablePayload); if (onProgress) this.pool.setProgressCallback?.((taskId, value) => throttleProgress(taskId, (v) => onProgress(taskId, v))(value)); }
   async run(input: IngestionRun): Promise<void> {
     let result;
     try { result = await this.pool.start(input.taskId, input.revisionId, input.kind, input.data); } catch (error) { if ((error as { state?: string }).state === "cancelled") return; throw error; }
     persistParsedResult(this.db, { revisionId: input.revisionId, taskId: input.taskId, chunks: result.chunks, updatedAt: input.updatedAt });
+    if (this.indexing) await this.indexing.index({ taskId: input.taskId, revisionId: input.revisionId, space: (this.db.prepare("SELECT id, dimension FROM embedding_spaces WHERE state = 'active' LIMIT 1").get() as any) });
   }
   cancel(taskId: string): void { this.pool.cancel(taskId); }
 }
