@@ -56,6 +56,9 @@ describe("finalizeCitations", () => {
     const text = 'Use `[S1]` inline, real [S1]';
     const result = finalizeCitations(text, retrievals);
     expect(result.citations.map((c) => c.label)).toEqual(["S1"]);
+    const real = result.citations[0]!;
+    expect(text.slice(real.start, real.end)).toBe("[S1]");
+    expect(real.start).toBe(24);
   });
 
   it("treats malformed markers as plain text without records", () => {

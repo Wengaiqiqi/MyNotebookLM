@@ -63,17 +63,21 @@ describe("ConversationRepository", () => {
     expect(repository.listMessages(PROJECT_ID, CONVERSATION_ID).map((message) => message.id)).toEqual([USER_ID, ASSISTANT_ID, REGENERATED_ID]);
   });
 
-  it("persists normalized completion metadata and unique citations", () => {
+  it("persists normalized completion metadata and citations unique per position", () => {
     createConversation();
     repository.appendUserMessage({ projectId: PROJECT_ID, conversationId: CONVERSATION_ID, id: USER_ID, content: "Question", createdAt: AT });
     repository.startAssistantMessage({ projectId: PROJECT_ID, conversationId: CONVERSATION_ID, id: ASSISTANT_ID, replyToMessageId: USER_ID, provider: "ollama", profileId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaab", model: "llama", createdAt: AT });
     const completed = repository.completeAssistantMessage({ projectId: PROJECT_ID, conversationId: CONVERSATION_ID, id: ASSISTANT_ID, content: "Answer", usage: { inputTokens: 12, outputTokens: 8, totalTokens: 20 }, completionReason: "stop", updatedAt: AT });
     expect(completed).toMatchObject({ state: "completed", content: "Answer", provider: "ollama", model: "llama", usage: { inputTokens: 12, outputTokens: 8, totalTokens: 20 }, completionReason: "stop" });
 
-    const citation = repository.addCitation({ projectId: PROJECT_ID, messageId: ASSISTANT_ID, id: CITATION_ID, label: "S1", sourceId: SOURCE_ID, sourceChunkId: CHUNK_ID, sourceDisplayName: "Research PDF", sourceKind: "pdf", locator: { kind: "page", page: 2 }, quote: "Evidence", createdAt: AT });
+    const citation = repository.addCitation({ projectId: PROJECT_ID, messageId: ASSISTANT_ID, id: CITATION_ID, label: "S1", sourceId: SOURCE_ID, sourceChunkId: CHUNK_ID, sourceDisplayName: "Research PDF", sourceKind: "pdf", locator: { kind: "page", page: 2 }, quote: "Evidence", createdAt: AT, start: 4 });
     expect(citation.label).toBe("S1");
     expect(repository.getMessage(PROJECT_ID, ASSISTANT_ID)?.citations).toHaveLength(1);
-    expect(() => repository.addCitation({ projectId: PROJECT_ID, messageId: ASSISTANT_ID, id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", label: "S1", sourceId: SOURCE_ID, sourceChunkId: CHUNK_ID, sourceDisplayName: "Research PDF", sourceKind: "pdf", locator: { kind: "page", page: 2 }, createdAt: AT })).toThrow();
+    // Same label at a different character offset is a separate citation row.
+    repository.addCitation({ projectId: PROJECT_ID, messageId: ASSISTANT_ID, id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", label: "S1", sourceId: SOURCE_ID, sourceChunkId: CHUNK_ID, sourceDisplayName: "Research PDF", sourceKind: "pdf", locator: { kind: "page", page: 2 }, createdAt: AT, start: 12 });
+    expect(repository.getMessage(PROJECT_ID, ASSISTANT_ID)?.citations).toHaveLength(2);
+    // Fully repeated label + position is rejected.
+    expect(() => repository.addCitation({ projectId: PROJECT_ID, messageId: ASSISTANT_ID, id: "cccccccc-cccc-4ccc-8ccc-cccccccccccc", label: "S1", sourceId: SOURCE_ID, sourceChunkId: CHUNK_ID, sourceDisplayName: "Research PDF", sourceKind: "pdf", locator: { kind: "page", page: 2 }, createdAt: AT, start: 4 })).toThrow();
   });
 
   it("soft-deletes conversations and cascades all data with project deletion", () => {

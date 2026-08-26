@@ -30,6 +30,7 @@ export function persistParsedCitations(
       sourceKind: match.sourceKind,
       locator: match.locator,
       createdAt,
+      start: c.start,
     });
   });
 }

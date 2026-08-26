@@ -22,16 +22,19 @@ export type ParsedCitations = {
 };
 
 const MARKER_RE = /\[S(\d{1,2})\]/g;
+type Region = CitationRegion & { start: number };
+
 /** Split answer into code / non-code regions; [S#] markers only count in "text". */
-function splitCodeRegions(text: string): CitationRegion[] {
-  const regions: CitationRegion[] = [];
+function splitCodeRegions(text: string): Region[] {
+  const regions: Region[] = [];
   let buf = "";
   let mode: "text" | "inline" | "fence" = "text";
   const flush = () => {
     if (!buf) return;
-    regions.push({ type: mode === "text" ? "text" : "code", text: buf });
+    regions.push({ type: mode === "text" ? "text" : "code", text: buf, start: bufStart });
     buf = "";
   };
+  let bufStart = 0;
   let i = 0;
   while (i < text.length) {
     const ch = text[i];
@@ -42,10 +45,12 @@ function splitCodeRegions(text: string): CitationRegion[] {
         const closeIdx = text.indexOf("\n```", i + 3);
         if (closeIdx === -1) {
           buf = text.slice(i);
+          bufStart = i;
           flush();
           return regions;
         }
         buf = text.slice(i, closeIdx + 4);
+        bufStart = i;
         flush();
         i = closeIdx + 4;
         mode = "text";
@@ -55,12 +60,14 @@ function splitCodeRegions(text: string): CitationRegion[] {
         flush();
         mode = "inline";
         i++;
+        bufStart = i;
         continue;
       }
       if (mode === "inline") {
         flush();
         mode = "text";
         i++;
+        bufStart = i;
         continue;
       }
       // Backtick inside a fenced block is literal content.
@@ -76,12 +83,6 @@ function findMarkers(text: string): { valid: ParsedCitation[]; invalid: boolean 
   const valid: ParsedCitation[] = [];
   let invalid = false;
   const regions = splitCodeRegions(text);
-  let offset = 0;
-  const offsets = regions.map((r) => {
-    const o = offset;
-    offset += r.text.length;
-    return o;
-  });
   // Loose shape used only for diagnostics: bracketed S+digits or bare digits.
   const LOOSE_RE = /\[[Ss]?[ \t]*-?[ \t]*\d{1,3}(?:[ \t]*-[ \t]*\d{1,3})?[ \t]*\]/g;
   for (let idx = 0; idx < regions.length; idx++) {
@@ -91,7 +92,7 @@ function findMarkers(text: string): { valid: ParsedCitation[]; invalid: boolean 
     let m: RegExpExecArray | null;
     while ((m = MARKER_RE.exec(region.text)) !== null) {
       const n = Number(m[1]);
-      const start = offsets[idx]! + m.index;
+      const start = region.start + m.index;
       if (n >= 1 && n <= 12) {
         valid.push({ label: `S${n}`, start, end: start + m[0].length });
       } else {
@@ -102,7 +103,7 @@ function findMarkers(text: string): { valid: ParsedCitation[]; invalid: boolean 
     LOOSE_RE.lastIndex = 0;
     let d: RegExpExecArray | null;
     while ((d = LOOSE_RE.exec(region.text)) !== null) {
-      const start = offsets[idx]! + d.index;
+      const start = region.start + d.index;
       const overlapsValid = valid.some((v) => start >= v.start && start < v.end);
       if (!overlapsValid) {
         // Malformed citation attempt ([s1], [ S2 ], [S-3], ...) or stale id text:
@@ -150,4 +151,3 @@ export class CitationStreamBuffer {
     return out;
   }
 }
-
