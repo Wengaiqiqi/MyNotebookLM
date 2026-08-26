@@ -54,7 +54,7 @@ export class OllamaProvider implements ModelProvider {
       if (!isRecord(model)) throw malformedResponse();
       const id = typeof model.name === "string" && model.name ? model.name : model.model;
       if (typeof id !== "string" || !id) throw malformedResponse();
-      return { id, displayName: id, capabilities: [], capabilityEvidence: "probe-required" };
+      return { id, displayName: id, capabilities: [] };
     });
   }
 

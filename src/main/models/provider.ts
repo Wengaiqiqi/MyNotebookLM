@@ -9,7 +9,7 @@ export interface ModelDescriptor {
   id: string;
   displayName: string;
   capabilities: ModelCapability[];
-  capabilityEvidence: CapabilityEvidence;
+  capabilityEvidence?: CapabilityEvidence;
 }
 
 export interface GenerateRequest {

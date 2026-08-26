@@ -260,7 +260,10 @@ export class ModelService {
     }
     return this.withProvider(parsed, async (provider) => {
       const discovered = modelDescriptorSchema.array().parse(
-        await provider.discover(new AbortController().signal)
+        (await provider.discover(new AbortController().signal)).map((model) => ({
+          ...model,
+          capabilityEvidence: model.capabilityEvidence ?? "probe-required"
+        }))
       );
       return discovered.filter((model) =>
         model.capabilityEvidence === "probe-required"
