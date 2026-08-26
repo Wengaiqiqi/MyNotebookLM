@@ -88,4 +88,31 @@ describe("ConversationRepository", () => {
     expect(database.connection.prepare("SELECT count(*) AS count FROM conversations WHERE id = ?").get(CONVERSATION_ID)).toEqual({ count: 0 });
     expect(database.connection.prepare("SELECT count(*) AS count FROM messages WHERE id = ?").get(USER_ID)).toEqual({ count: 0 });
   });
+
+  it("rejects citations for messages of another project without writing rows", () => {
+    createConversation();
+    repository.appendUserMessage({ projectId: PROJECT_ID, conversationId: CONVERSATION_ID, id: USER_ID, content: "Question", createdAt: AT });
+    expect(() => repository.addCitation({ projectId: OTHER_PROJECT_ID, messageId: USER_ID, id: CITATION_ID, label: "S1", sourceId: SOURCE_ID, sourceChunkId: CHUNK_ID, sourceDisplayName: "Research PDF", sourceKind: "pdf", locator: { kind: "page", page: 2 }, createdAt: AT })).toThrow();
+    expect(database.connection.prepare("SELECT count(*) AS count FROM message_citations WHERE id = ?").get(CITATION_ID)).toEqual({ count: 0 });
+  });
+
+  it("rejects writes into soft-deleted conversations", () => {
+    createConversation();
+    repository.removeConversation(PROJECT_ID, CONVERSATION_ID, AT);
+    expect(() => repository.appendUserMessage({ projectId: PROJECT_ID, conversationId: CONVERSATION_ID, id: USER_ID, content: "Question", createdAt: AT })).toThrow();
+    expect(() => repository.startAssistantMessage({ projectId: PROJECT_ID, conversationId: CONVERSATION_ID, id: ASSISTANT_ID, replyToMessageId: USER_ID, provider: "openai", profileId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaab", model: "gpt-test", createdAt: AT })).toThrow();
+  });
+
+  it("only completes streaming assistant messages once", () => {
+    createConversation();
+    const completion = { projectId: PROJECT_ID, conversationId: CONVERSATION_ID, id: ASSISTANT_ID, content: "Answer", usage: { inputTokens: 12, outputTokens: 8, totalTokens: 20 }, updatedAt: AT };
+    expect(() => repository.completeAssistantMessage(completion)).toThrow();
+
+    repository.appendUserMessage({ projectId: PROJECT_ID, conversationId: CONVERSATION_ID, id: USER_ID, content: "Question", createdAt: AT });
+    expect(() => repository.completeAssistantMessage(completion)).toThrow();
+
+    repository.startAssistantMessage({ projectId: PROJECT_ID, conversationId: CONVERSATION_ID, id: ASSISTANT_ID, replyToMessageId: USER_ID, provider: "openai", profileId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaab", model: "gpt-test", createdAt: AT });
+    expect(repository.completeAssistantMessage(completion)?.state).toBe("completed");
+    expect(() => repository.completeAssistantMessage(completion)).toThrow();
+  });
 });
