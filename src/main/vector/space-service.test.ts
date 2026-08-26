@@ -60,4 +60,17 @@ describe("SpaceService", () => {
     await vi.waitFor(() => expect(signal).toBeInstanceOf(AbortSignal));
     expect(service.cancel("task-1")).toBe(true); expect(signal.aborted).toBe(true); resolve(); await expect(running).rejects.toMatchObject({ code: "TASK_CANCELLED" });
   });
+
+  it("cancels an in-flight rebuild through its task signal and keeps the old space", async () => {
+    let resolve!: () => void; let signal!: AbortSignal;
+    const service = new SpaceService({ createOrReuse: () => ({ id: "shadow", projectId: "p", state: "preparing" }), cancel: vi.fn(), activate: vi.fn() } as never, {
+      rebuild: async (input: unknown) => { signal = (input as { signal: AbortSignal }).signal; await new Promise<void>(r => { resolve = r; }); }, optimize: async () => {}
+    });
+    const running = service.rebuild({ taskId: "task-1", spec: { projectId: "p" } } as never);
+    await vi.waitFor(() => expect(signal).toBeInstanceOf(AbortSignal));
+    expect(service.cancel("task-1")).toBe(true);
+    expect(signal.aborted).toBe(true);
+    resolve();
+    await expect(running).rejects.toMatchObject({ code: "SPACE_BUILD_CANCELLED" });
+  });
 });

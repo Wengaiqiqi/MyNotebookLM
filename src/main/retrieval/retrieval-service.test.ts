@@ -15,4 +15,17 @@ describe("RetrievalService", () => {
     const service = new RetrievalService({ db: {} as any, lance: {} as any, provider: {} as any, resolveSpace: async () => null });
     await expect(service.search("p1", "x")).rejects.toMatchObject({ code: "INDEX_UNAVAILABLE", repair: true });
   });
+
+  it("resolves the query provider from the active project's persisted space", async () => {
+    const provider = { embedBatch: vi.fn(async () => [[1, 0]]) };
+    const resolveSpace = vi.fn(async (projectId: string) => {
+      expect(projectId).toBe("p1");
+      return { id: "sp1", dimension: 2, state: "active", provider } as never;
+    });
+    const lance = { vectorSearch: vi.fn(async () => []), textSearch: vi.fn(async () => []) };
+    const db = { prepare: vi.fn(() => ({ get: () => ({ space_id: "sp1", dimension: 2 }) })) } as any;
+    const service = new RetrievalService({ db, lance: lance as any, provider: { embedBatch: vi.fn(async () => [[9, 9]]) } as any, resolveSpace });
+    await service.search({ projectId: "p1", query: "hello", limit: 1 });
+    expect(provider.embedBatch).toHaveBeenCalled();
+  });
 });

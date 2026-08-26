@@ -7,17 +7,17 @@ import { diversifyHits, reciprocalRankFusion, type RetrievalCandidate } from "./
 type Row = RetrievalCandidate & { revisionId: string; text: string; locatorJson: string; vector?: number[] };
 type SearchInput = { projectId: string; query: string; limit: number; signal?: AbortSignal };
 export class RetrievalService {
-  private readonly store: Pick<LanceStore, "vectorSearch" | "textSearch">; private readonly provider: Pick<EmbeddingProvider, "embedBatch">; private readonly db: Database.Database; private readonly resolveSpace?: () => Promise<{id:string;dimension:number;state:string}|null>;
+  private readonly store: Pick<LanceStore, "vectorSearch" | "textSearch">; private readonly provider: Pick<EmbeddingProvider, "embedBatch">; private readonly db: Database.Database; private readonly resolveSpace?: (projectId: string, space: { id:string; dimension:number }) => Promise<{provider:Pick<EmbeddingProvider, "embedBatch">}|null>;
   constructor(a: any, b?: any, c?: any) { if (a?.lance) { this.db=a.db; this.store=a.lance; this.provider=a.provider; this.resolveSpace=a.resolveSpace; } else { this.store=a; this.provider=b; this.db=c; } }
   async search(input: SearchInput | string, query?: string): Promise<any> {
     if (typeof input === "string") { const result = await this.search({ projectId: input, query: query ?? "", limit: 20 }); if (!result.ok) throw { code: result.error.code, repair: result.error.code === "INDEX_UNAVAILABLE" }; return result.value; }
     try {
-      const resolved = this.resolveSpace ? await this.resolveSpace() : null;
-      const space = resolved ? { space_id: resolved.id, dimension: resolved.dimension } : this.db.prepare("SELECT pes.space_id, es.dimension FROM project_embedding_spaces pes JOIN embedding_spaces es ON es.id = pes.space_id WHERE pes.project_id = ? AND pes.status = 'active' AND es.state = 'active'").get(input.projectId) as { space_id: string; dimension: number } | undefined;
+      const space = this.db.prepare("SELECT pes.space_id, es.dimension FROM project_embedding_spaces pes JOIN embedding_spaces es ON es.id = pes.space_id WHERE pes.project_id = ? AND es.state = 'active'").get(input.projectId) as { space_id: string; dimension: number } | undefined;
       if (!space) return this.failure("NOT_FOUND", false);
+      const resolved = this.resolveSpace ? await this.resolveSpace(input.projectId, { id: space.space_id, dimension: space.dimension }) : null;
       const spec: LanceSpace = { id: space.space_id, dimension: space.dimension };
       const textPromise = this.store.textSearch(spec, input.query, input.limit * 3);
-      const [vector] = await this.provider.embedBatch([input.query], input.signal ?? new AbortController().signal);
+      const [vector] = await (resolved?.provider ?? this.provider).embedBatch([input.query], input.signal ?? new AbortController().signal);
       if (!vector) throw new Error("embedding unavailable");
       const [ann, bm25] = await Promise.all([this.store.vectorSearch(spec, vector, input.limit * 3, { projectId: input.projectId }), textPromise]);
       const fused = reciprocalRankFusion([ann as Row[], bm25 as Row[]], input.limit * 3);

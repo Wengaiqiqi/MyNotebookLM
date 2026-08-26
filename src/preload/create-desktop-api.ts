@@ -98,7 +98,7 @@ export function createDesktopApi(ipc: IpcInvoker): DesktopApi {
         const channel = SOURCE_CHANNELS.update + ":" + parsed.data;
         const handler = (_event: unknown, raw: unknown) => {
           const task = taskDtoSchema.safeParse(raw);
-          if (task.success) listener(task.data);
+          if (task.success && task.data.projectId === parsed.data) listener(task.data);
         };
         ipc.on?.(channel, handler);
         return () => ipc.removeListener?.(channel, handler);

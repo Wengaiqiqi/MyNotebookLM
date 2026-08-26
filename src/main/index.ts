@@ -1,5 +1,5 @@
 import { app, BrowserWindow, ipcMain, Menu } from "electron";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { mkdir } from "node:fs/promises";
 import path from "node:path";
 import { type AppDatabase, openAppDatabaseAsync } from "./db/database";
@@ -84,28 +84,32 @@ app.whenReady().then(async () => {
   const stagingRuntime = createTransformersEmbeddingRuntime(appPaths.models, managedStagingDirectory(appPaths.models, LOCAL_MODEL_MANIFEST));
   const localManager = createLocalModelManager(appPaths.models, async (directory, signal) => localRuntime(directory, [], signal), fetch, async (directory, signal) => stagingRuntime(directory, [], signal));
   const localEmbeddingProvider = new LocalEmbeddingProvider(localManager, localRuntime);
-  const resolveEmbeddingProvider = async (revisionId: string, space: { id: string; dimension: number }) => {
-    const row = appDatabase!.connection.prepare(`SELECT es.provider, es.model_id, es.model_revision, es.project_id
-      FROM source_revisions sr JOIN sources s ON s.id = sr.source_id
-      JOIN embedding_spaces es ON es.id = ? AND es.project_id = s.project_id AND es.state = 'active' WHERE sr.id = ?`).get(space.id, revisionId) as { provider: string; model_id: string; model_revision: string; project_id: string } | undefined;
-    if (!row) throw Object.assign(new Error("Active embedding space does not match revision project"), { code: "EMBEDDING_SPACE_PROFILE_MISMATCH", recoverable: false });
+  const createProviderForSpace = async (row: { provider: string; model_id: string; model_revision: string }, space: { id: string; dimension: number }) => {
     const profile = row.provider === "local"
       ? BUILT_IN_LOCAL_EMBEDDING_PROFILE
       : settingsRepository.listProfiles().find(p => p.capability === "embedding" && p.enabled && p.provider === row.provider && p.modelId === row.model_id);
     if (!profile || (row.provider === "local" && !isBuiltInLocalEmbeddingProfile(profile))) throw Object.assign(new Error("Embedding profile is missing or mismatched"), { code: "EMBEDDING_PROFILE_MISMATCH", recoverable: false });
     if (profile.provider === "local") return localEmbeddingProvider;
-    const embed = async (texts: string[], signal: AbortSignal, batchSize?: number) => {
-      const invoke = async (apiKey?: string) => {
+    return {
+      embedBatch: async (texts: string[], signal: AbortSignal, batchSize?: number) => credentialStore.withSecret(profile.id, { provider: profile.provider, baseUrl: profile.baseUrl }, async (apiKey) => {
         const model = createModelProvider(profile.provider, profile.baseUrl, apiKey);
         const provider = createEmbeddingProvider({ provider: profile.provider, model: profile.modelId, adapter: { embed: model.embed.bind(model), describe: () => ({ provider: row.provider, modelId: row.model_id, modelRevision: row.model_revision, dimension: space.dimension, distance: "cosine", pooling: "mean", preprocessVersion: "persisted", chunkingVersion: "persisted" }) } });
         return provider.embedBatch(texts, signal, batchSize);
-      };
-      return credentialStore.withSecret(profile.id, { provider: profile.provider, baseUrl: profile.baseUrl }, invoke);
+      })
     };
-    return { embedBatch: embed };
+  };
+  const resolveEmbeddingProvider = async (revisionId: string, space: { id: string; dimension: number }) => {
+    const row = appDatabase!.connection.prepare(`SELECT es.provider, es.model_id, es.model_revision, es.project_id
+      FROM source_revisions sr JOIN sources s ON s.id = sr.source_id
+      JOIN embedding_spaces es ON es.id = ? AND es.project_id = s.project_id AND es.state IN ('active','preparing','building','validating') WHERE sr.id = ?`).get(space.id, revisionId) as { provider: string; model_id: string; model_revision: string; project_id: string } | undefined;
+    if (!row) throw Object.assign(new Error("Active embedding space does not match revision project"), { code: "EMBEDDING_SPACE_PROFILE_MISMATCH", recoverable: false });
+    return createProviderForSpace(row, space);
   };
   const indexing = new IndexingService(appDatabase.connection, resolveEmbeddingProvider, lance);
-  const retrieval = new RetrievalService({ db: appDatabase.connection, lance, provider: localEmbeddingProvider });
+  const retrieval = new RetrievalService({ db: appDatabase.connection, lance, provider: localEmbeddingProvider, resolveSpace: async (projectId: string, space: { id: string; dimension: number }) => {
+    const row = appDatabase!.connection.prepare("SELECT provider, model_id, model_revision FROM embedding_spaces WHERE id = ? AND project_id = ? AND state = 'active'").get(space.id, projectId) as { provider: string; model_id: string; model_revision: string } | undefined;
+    return row ? { provider: await createProviderForSpace(row, space) } : null;
+  }});
   (indexing as IndexingService & { setChunkRecovery?: (revisionId: string) => void }).setChunkRecovery?.((revisionId) => ingestionService.reparseRevision(revisionId));
   ingestionService = new IngestionService(pool, appDatabase.connection, (taskId) => {
     const revisionId = taskRevisions.get(taskId);
@@ -132,7 +136,10 @@ app.whenReady().then(async () => {
   const runTask = (task: TaskDto, work: () => Promise<void>): TaskDto => {
     taskService.start(task.id, task.kind === "optimize" ? "indexing" : "validating");
     void work().then(() => taskService.complete(task.id)).catch((error) => {
-      if ((error as { code?: string }).code === "TASK_CANCELLED" || (error as { code?: string }).code === "SPACE_BUILD_CANCELLED") taskService.cancel(task.id);
+      if ((error as { code?: string }).code === "TASK_CANCELLED" || (error as { code?: string }).code === "SPACE_BUILD_CANCELLED") {
+        const current = taskService.getById?.(task.id);
+        if (current?.state === "queued" || current?.state === "running") taskService.cancel(task.id);
+      }
       else taskService.fail(task.id, { code: "INTERNAL", messageKey: "errors.internal", recoverable: false });
     });
     return task;
@@ -150,8 +157,14 @@ app.whenReady().then(async () => {
       if (existing) return failure("CONFLICT", "errors.taskConflict", true);
       const current = spaces.active(projectId);
       if (!current) return failure("VALIDATION", "errors.embeddingProfileUnavailable");
+      const provider = await createProviderForSpace({ provider: profile.provider, model_id: profile.modelId, model_revision: profile.provider === "local" ? LOCAL_MODEL_MANIFEST.revision : "probe" }, current);
+      const probe = await provider.embedBatch(["embedding profile probe"], new AbortController().signal, 1);
+      const dimension = probe[0]?.length;
+      if (!dimension) return failure("VALIDATION", "errors.embeddingProfileUnavailable");
+      const modelRevision = profile.provider === "local" ? LOCAL_MODEL_MANIFEST.revision : `probe-${createHash("sha256").update(`${profile.provider}:${profile.modelId}:${dimension}`).digest("hex").slice(0, 16)}`;
+      const fingerprint = createHash("sha256").update(JSON.stringify({ provider: profile.provider, modelId: profile.modelId, modelRevision, dimension, distance: "cosine", pooling: "mean", preprocessVersion: "persisted", chunkingVersion: "persisted" })).digest("hex");
       const task = taskService.createTask({ projectId, sourceId: null, kind: "validation" });
-      return { ok: true, value: runTask(task, () => spaceService.rebuild({ spec: { projectId, provider: profile.provider, modelId: profile.modelId, modelRevision: profile.modelId, dimension: current.dimension, distance: "cosine", pooling: "mean", preprocessVersion: "persisted", chunkingVersion: "persisted", fingerprint: `${profile.provider}:${profile.modelId}` } })) };
+      return { ok: true, value: runTask(task, () => spaceService.rebuild({ taskId: task.id, spec: { projectId, provider: profile.provider, modelId: profile.modelId, modelRevision, dimension, distance: "cosine", pooling: "mean", preprocessVersion: "persisted", chunkingVersion: "persisted", fingerprint } })) };
     },
     rebuild: async ({ projectId, spaceId }: { projectId: string; spaceId: string }): Promise<Result<TaskDto>> => {
       const space = spaces.get(spaceId);
@@ -159,7 +172,7 @@ app.whenReady().then(async () => {
       const existing = activeTask(projectId);
       if (existing) return failure("CONFLICT", "errors.taskConflict", true);
       const task = taskService.createTask({ projectId, sourceId: null, kind: "validation" });
-      return { ok: true, value: runTask(task, () => spaceService.rebuild({ spec: space })) };
+      return { ok: true, value: runTask(task, () => spaceService.rebuild({ taskId: task.id, spec: space })) };
     },
     optimize: async ({ projectId, spaceId }: { projectId: string; spaceId: string }): Promise<Result<TaskDto>> => {
       const space = spaces.get(spaceId);

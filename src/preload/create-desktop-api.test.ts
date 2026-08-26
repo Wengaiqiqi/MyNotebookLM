@@ -117,6 +117,17 @@ describe("createDesktopApi", () => {
     expect(removeListener).toHaveBeenCalledWith("tasks:v1:update:" + project.id, registered);
   });
 
+  it("does not deliver a valid task from another project", () => {
+    const on = vi.fn();
+    const listener = vi.fn();
+    const api = createDesktopApi({ invoke: vi.fn(), on });
+    api.vector.subscribe(project.id, listener);
+    const registered = on.mock.calls[0]?.[1] as (_event: unknown, value: unknown) => void;
+    const task = { id: "22222222-2222-4222-8222-222222222222", projectId: "33333333-3333-4333-8333-333333333333", sourceId: null, kind: "optimize" as const, state: "running" as const, stage: "indexing" as const, progress: 10, attempt: 0, error: null, idempotencyKey: null, createdAt: "2026-08-26T00:00:00.000Z", updatedAt: "2026-08-26T00:00:00.000Z" };
+    registered({}, task);
+    expect(listener).not.toHaveBeenCalled();
+  });
+
   it("validates and routes title-overlay theme updates through a versioned result boundary", async () => {
     const invoke = vi.fn().mockResolvedValue(ok(undefined));
     const api = createDesktopApi({ invoke });

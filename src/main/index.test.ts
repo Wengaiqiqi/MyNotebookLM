@@ -8,7 +8,8 @@ const mocks = vi.hoisted(() => {
   const events: string[] = [];
   const callbacks = new Map<string, Callback>();
   const connection = { prepare: vi.fn() };
-  const ipcMain = {};
+  const ipcMain = { handle: vi.fn(), removeHandler: vi.fn() };
+  let vectorService: Record<string, (...args: any[]) => any> | undefined;
   let databasePending: Promise<void> = Promise.resolve();
   let databaseError: Error | undefined;
   let recoveryTask: { id: string; projectId: string; sourceId: string } | undefined;
@@ -16,10 +17,12 @@ const mocks = vi.hoisted(() => {
   const cleanupProject = vi.fn(() => events.push("project-cleanup"));
   const cleanupModel = vi.fn(() => events.push("model-cleanup"));
   const cleanupTitleOverlay = vi.fn(() => events.push("title-overlay-cleanup"));
+  const createModelProvider = vi.fn(() => ({ embed: vi.fn(async () => [[1, 2, 3, 4]]) }));
 
   return {
     events,
     callbacks,
+    getVectorService: () => vectorService,
     connection,
     setDatabasePending: (pending: Promise<void>) => { databasePending = pending; },
     setDatabaseError: (error?: Error) => { databaseError = error; },
@@ -29,6 +32,7 @@ const mocks = vi.hoisted(() => {
     cleanupProject,
     cleanupModel,
     cleanupTitleOverlay,
+    createModelProvider,
     IndexingService: vi.fn(function (this: Record<string, unknown>, _db: unknown, provider: unknown) { this.provider = provider; this.index = vi.fn(async () => undefined); this.rebuild = vi.fn(async () => undefined); }),
     TaskService: vi.fn(function (this: Record<string, unknown>) {
       this.createTask = vi.fn(() => ({ id: "task-1" }));
@@ -44,8 +48,9 @@ const mocks = vi.hoisted(() => {
         return recoveryTask ? [recoveryTask] : [];
       });
     }),
-    SpaceRepository: vi.fn(function (this: Record<string, unknown>, db: unknown) { events.push("space-repository"); this.db = db; this.recoverInterrupted = vi.fn(() => events.push("space-recovery")); }),
-    SpaceService: vi.fn(function (this: Record<string, unknown>, repository: unknown, options: unknown, backup: unknown) { events.push("space-service"); this.repository = repository; this.options = options; this.backup = backup; this.recoverInterrupted = vi.fn(() => events.push("space-recovery")); }),
+    SpaceRepository: vi.fn(function (this: Record<string, unknown>, db: unknown) { events.push("space-repository"); this.db = db; this.active = vi.fn(() => ({ id: "old", projectId: "project-1", dimension: 2 })); this.get = vi.fn(() => ({ id: "old", projectId: "project-1", dimension: 2 })); this.recoverInterrupted = vi.fn(() => events.push("space-recovery")); }),
+    SpaceService: vi.fn(function (this: Record<string, any>, repository: unknown, options: any, backup: unknown) { events.push("space-service"); this.repository = repository; this.options = { ...options, rebuild: vi.fn(options.rebuild) }; this.backup = backup; this.rebuild = vi.fn((input: unknown) => this.options.rebuild(input)); this.optimize = vi.fn((input: unknown) => this.options.optimize(input)); this.cancel = vi.fn(() => false); this.recoverInterrupted = vi.fn(() => events.push("space-recovery")); }),
+    registerVectorHandlers: vi.fn((_ipc: unknown, service: Record<string, (...args: any[]) => any>) => { vectorService = service; return vi.fn(); }),
     app: {
       isPackaged: false,
       whenReady: vi.fn(() => Promise.resolve()),
@@ -142,7 +147,7 @@ vi.mock("./credentials/safe-storage-adapter", () => ({
   SafeStorageAdapter: mocks.SafeStorageAdapter
 }));
 vi.mock("./credentials/credential-store", () => ({ CredentialStore: mocks.CredentialStore }));
-vi.mock("./models/model-service", () => ({ ModelService: mocks.ModelService }));
+vi.mock("./models/model-service", () => ({ ModelService: mocks.ModelService, createModelProvider: mocks.createModelProvider }));
 vi.mock("./ipc/register-project-handlers", () => ({
   registerProjectHandlers: mocks.registerProjectHandlers
 }));
@@ -153,6 +158,7 @@ vi.mock("./window", () => ({
   createMainWindow: mocks.createMainWindow,
   registerTitleOverlayHandler: mocks.registerTitleOverlayHandler
 }));
+vi.mock("./ipc/register-vector-handlers", () => ({ registerVectorHandlers: mocks.registerVectorHandlers }));
 vi.mock("./vector/lance-store", () => ({ LanceStore: { open: vi.fn(async () => ({ upsert: vi.fn(), count: vi.fn(), rows: vi.fn(async () => []), vectorSearch: vi.fn(), deleteRevision: vi.fn() })), closeAll: vi.fn(async () => undefined) } }));
 vi.mock("./vector/indexing-service", () => ({ IndexingService: mocks.IndexingService }));
 vi.mock("./vector/space-repository", () => ({ SpaceRepository: mocks.SpaceRepository }));
@@ -381,5 +387,34 @@ describe("main application composition", () => {
     const options = mocks.SpaceService.mock.calls[0]?.[1] as { optimize: (input: unknown) => Promise<void> };
     const controller = new AbortController();
     await expect(options.optimize({ taskId: "task-1", space: { id: "s", dimension: 2 }, signal: controller.signal })).rejects.toBeDefined();
+  });
+
+  it("builds migration spec from the target provider probe", async () => {
+    const profile = { id: "profile-1", provider: "openai", capability: "embedding", enabled: true, modelId: "text-embedding-3-small", baseUrl: "https://api.example.test" };
+    mocks.connection.prepare.mockImplementation((sql: string) => ({
+      get: vi.fn(() => sql.includes("model_profiles") ? profile : sql.includes("embedding_spaces") ? { id: "old", projectId: "project-1", dimension: 2 } : undefined),
+      all: vi.fn(() => []),
+      run: vi.fn(() => ({ changes: 1 }))
+    }));
+    mocks.SettingsRepository.mockImplementation(function (this: Record<string, unknown>, db: unknown) {
+      this.db = db;
+      this.getProfile = vi.fn(() => profile);
+      this.listProfiles = vi.fn(() => [profile]);
+    });
+    mocks.CredentialStore.mockImplementation(function (this: Record<string, unknown>, db: unknown, protector: unknown) {
+      this.db = db;
+      this.protector = protector;
+      this.withSecret = vi.fn(async (_id: string, _binding: unknown, invoke: (key: string) => Promise<unknown>) => invoke("secret"));
+    });
+    await import("./index");
+    await vi.waitFor(() => expect(mocks.createMainWindow).toHaveBeenCalledOnce());
+    const service = mocks.getVectorService() as { startMigration: (input: unknown) => Promise<any> };
+    const result = await service.startMigration({ projectId: "project-1", profileId: "profile-1" });
+    expect(result.ok).toBe(true);
+    await vi.waitFor(() => expect((mocks.SpaceService.mock.instances[0] as any).options.rebuild).toHaveBeenCalled());
+    const spec = ((mocks.SpaceService.mock.instances[0] as any).options.rebuild.mock.calls[0][0]).spec;
+    expect(spec.dimension).toBe(4);
+    expect(spec.modelRevision).not.toBe(profile.modelId);
+    expect(spec.fingerprint).toBe("ff3443d873004d4a23a4f9a4175f5062a2544986bef770a6210d32e01c4a0c30");
   });
 });
