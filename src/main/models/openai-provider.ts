@@ -83,7 +83,7 @@ export class OpenAiProvider implements ModelProvider {
       if (finishReasons.length > 1 || (finishReason !== undefined && finishReasons.length > 0)) {
         throw malformedResponse();
       }
-      if (chunk.usage !== undefined) {
+      if (chunk.usage !== undefined && chunk.usage !== null) {
         if (!isRecord(chunk.usage)) throw malformedResponse();
         const inputTokens = optionalFiniteNumber(chunk.usage.prompt_tokens);
         const outputTokens = optionalFiniteNumber(chunk.usage.completion_tokens);

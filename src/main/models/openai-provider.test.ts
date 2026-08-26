@@ -111,6 +111,39 @@ describe("OpenAI-compatible provider", () => {
     ]);
   });
 
+  it("ignores usage null on ordinary chunks before the usage-only tail", async () => {
+    const fake = await server((_request, response) => {
+      response.writeHead(200, { "content-type": "text/event-stream" });
+      response.write('data: {"choices":[{"delta":{"content":"Hi"},"finish_reason":null}],"usage":null}\n\n');
+      response.write('data: {"choices":[{"finish_reason":"stop"}],"usage":null}\n\n');
+      response.write('data: {"choices":[],"usage":{"prompt_tokens":3,"completion_tokens":2}}\n\n');
+      response.end("data: [DONE]\n\n");
+    });
+    const events: unknown[] = [];
+    for await (const event of new OpenAiProvider({ baseUrl: fake.baseUrl }).generate({
+      model: "gpt-test", messages: [{ role: "user", content: "Hello" }]
+    }, new AbortController().signal)) events.push(event);
+
+    expect(events).toEqual([
+      { type: "text-delta", text: "Hi" },
+      { type: "usage", inputTokens: 3, outputTokens: 2 },
+      { type: "done", finishReason: "stop" }
+    ]);
+  });
+
+  it("rejects a non-null non-object usage value", async () => {
+    const fake = await server((_request, response) => {
+      response.writeHead(200, { "content-type": "text/event-stream" });
+      response.end('data: {"choices":[{"finish_reason":"stop"}],"usage":"invalid"}\n\n');
+    });
+    const error = await providerError(async () => {
+      for await (const _event of new OpenAiProvider({ baseUrl: fake.baseUrl }).generate({
+        model: "gpt-test", messages: [{ role: "user", content: "Hello" }]
+      }, new AbortController().signal)) { /* malformed usage */ }
+    });
+    expect(error.failure.error.code).toBe("PROVIDER");
+  });
+
   it.each([
     ["text", '{"choices":[{"delta":{"content":"late"}}]}'],
     ["second completion", '{"choices":[{"finish_reason":"length"}]}']

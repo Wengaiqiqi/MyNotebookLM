@@ -80,7 +80,8 @@ export class AnthropicProvider implements ModelProvider {
       signal
     })) {
       if (!isRecord(event) || typeof event.type !== "string") throw malformedResponse();
-      if (messageStopped || (stopReason !== undefined && event.type !== "message_stop")) {
+      if (messageStopped || (stopReason !== undefined
+        && (event.type === "message_delta" || event.type === "content_block_delta"))) {
         throw malformedResponse();
       }
       if (event.type === "error") {

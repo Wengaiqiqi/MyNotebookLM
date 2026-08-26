@@ -129,6 +129,40 @@ describe("Anthropic provider", () => {
     expect(error.failure.error.code).toBe("PROVIDER");
   });
 
+  it("allows ping and unknown events between stop_reason and message_stop", async () => {
+    const fake = await server((_request, response) => {
+      response.writeHead(200, { "content-type": "text/event-stream" });
+      response.write('data: {"type":"message_delta","delta":{"stop_reason":"end_turn"}}\n\n');
+      response.write('data: {"type":"ping"}\n\n');
+      response.write('data: {"type":"future_event","value":1}\n\n');
+      response.end('data: {"type":"message_stop"}\n\n');
+    });
+
+    const events: unknown[] = [];
+    for await (const event of new AnthropicProvider({ baseUrl: origin(fake) }).generate({
+      model: "claude-test", messages: [{ role: "user", content: "Hello" }]
+    }, new AbortController().signal)) events.push(event);
+
+    expect(events).toEqual([{ type: "done", finishReason: "end_turn" }]);
+  });
+
+  it("rejects known text events after stop_reason", async () => {
+    const fake = await server((_request, response) => {
+      response.writeHead(200, { "content-type": "text/event-stream" });
+      response.write('data: {"type":"message_delta","delta":{"stop_reason":"end_turn"}}\n\n');
+      response.write('data: {"type":"content_block_delta","delta":{"type":"text_delta","text":"late"}}\n\n');
+      response.end('data: {"type":"message_stop"}\n\n');
+    });
+    const events: unknown[] = [];
+    const error = await providerError(async () => {
+      for await (const event of new AnthropicProvider({ baseUrl: origin(fake) }).generate({
+        model: "claude-test", messages: [{ role: "user", content: "Hello" }]
+      }, new AbortController().signal)) events.push(event);
+    });
+    expect(events).not.toContainEqual(expect.objectContaining({ type: "done" }));
+    expect(error.failure.error.code).toBe("PROVIDER");
+  });
+
   it("rejects events after message_stop without emitting completion", async () => {
     const fake = await server((_request, response) => {
       response.writeHead(200, { "content-type": "text/event-stream" });
