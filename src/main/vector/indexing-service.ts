@@ -22,6 +22,7 @@ export class IndexingService {
       const source = this.db.prepare("SELECT s.project_id, sr.source_id FROM source_revisions sr JOIN sources s ON s.id = sr.source_id WHERE sr.id = ?").get(input.revisionId) as { project_id: string; source_id: string };
       const expectedIds = new Set(chunks.map(c => c.id));
       const actualIds = new Set(actual.map(r => r.chunkId));
+      if (await this.lance.count(input.space, { revisionId: input.revisionId }) !== chunks.length) throw new Error("Lance row count mismatch");
       if (actual.length !== chunks.length || actualIds.size !== expectedIds.size || [...expectedIds].some(id => !actualIds.has(id)) || actual.some(r => { const c = chunks.find(x => x.id === r.chunkId); return !c || c.content_hash !== r.contentHash || r.projectId !== source.project_id || r.spaceId !== input.space.id || r.revisionId !== input.revisionId; })) throw new Error("Lance metadata or content hash mismatch");
       if (chunks.length) { const vectors = await this.provider.embedBatch([chunks[0]!.text], input.signal ?? new AbortController().signal, 1); const probe = await this.lance.vectorSearch(input.space, vectors[0]!, 1, { revisionId: input.revisionId }); if (probe.length !== 1 || probe[0]!.chunkId !== chunks[0]!.id || probe[0]!.contentHash !== chunks[0]!.content_hash || probe[0]!.revisionId !== input.revisionId || probe[0]!.spaceId !== input.space.id || probe[0]!.projectId !== source.project_id) throw new Error("Lance probe mismatch"); }
       const now = input.now ?? new Date().toISOString();
