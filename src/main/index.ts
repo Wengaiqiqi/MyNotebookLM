@@ -8,6 +8,7 @@ import { SafeStorageAdapter } from "./credentials/safe-storage-adapter";
 import { registerProjectHandlers } from "./ipc/register-project-handlers";
 import { registerModelHandlers } from "./ipc/register-model-handlers";
 import { registerSourceHandlers } from "./ipc/register-source-handlers";
+import { registerVectorHandlers } from "./ipc/register-vector-handlers";
 import { ModelService } from "./models/model-service";
 import { getAppPaths } from "./platform/paths";
 import { ProjectRepository } from "./projects/project-repository";
@@ -32,12 +33,17 @@ import { LOCAL_MODEL_MANIFEST } from "./vector/local-model-manifest";
 import { createModelProvider } from "./models/model-service";
 import { BUILT_IN_LOCAL_EMBEDDING_PROFILE, isBuiltInLocalEmbeddingProfile } from "./models/local-embedding-profile";
 import { createEmbeddingProvider } from "./vector/embedding-provider";
+import { RetrievalService } from "./retrieval/retrieval-service";
+import type { Result } from "../shared/app-errors";
+import type { TaskDto } from "../shared/tasks";
+import type { SearchHitDto, VectorHealthDto } from "../shared/vector";
 
 let appDatabase: AppDatabase | undefined;
 let cleanupProjectHandlers: (() => void) | undefined;
 let cleanupModelHandlers: (() => void) | undefined;
 let cleanupTitleOverlayHandler: (() => void) | undefined;
 let cleanupSourceHandlers: (() => void) | undefined;
+let cleanupVectorHandlers: (() => void) | undefined;
 let workerPool: WorkerPool | undefined;
 let taskFanout: ReturnType<typeof createTaskUpdateFanout> | undefined;
 const taskRevisions = new Map<string, string>();
@@ -99,6 +105,7 @@ app.whenReady().then(async () => {
     return { embedBatch: embed };
   };
   const indexing = new IndexingService(appDatabase.connection, resolveEmbeddingProvider, lance);
+  const retrieval = new RetrievalService({ db: appDatabase.connection, lance, provider: localEmbeddingProvider });
   (indexing as IndexingService & { setChunkRecovery?: (revisionId: string) => void }).setChunkRecovery?.((revisionId) => ingestionService.reparseRevision(revisionId));
   ingestionService = new IngestionService(pool, appDatabase.connection, (taskId) => {
     const revisionId = taskRevisions.get(taskId);
@@ -117,6 +124,63 @@ app.whenReady().then(async () => {
     await taskService.recoverAndContinueEmbedding(continueEmbedding, 60 * 60 * 1000);
   }
   const sourceService = new MainSourceService(appDatabase.connection, taskService, ingestionService, appPaths.files, (taskId, revisionId) => taskRevisions.set(taskId, revisionId));
+  const failure = <T>(code: "VALIDATION" | "NOT_FOUND" | "CONFLICT" | "CANCELLED" | "INDEX_UNAVAILABLE" | "INTERNAL", messageKey: string, recoverable = false): Result<T> => ({ ok: false, error: { code, messageKey, recoverable } });
+  const activeTask = (projectId: string): TaskDto | undefined => {
+    const row = appDatabase!.connection.prepare("SELECT * FROM tasks WHERE project_id = ? AND state IN ('queued','running') AND kind IN ('validation','optimize') ORDER BY created_at DESC LIMIT 1").get(projectId) as { id?: string } | undefined;
+    return row?.id ? (taskService.getById?.(row.id) ?? undefined) : undefined;
+  };
+  const runTask = (task: TaskDto, work: () => Promise<void>): TaskDto => {
+    taskService.start(task.id, task.kind === "optimize" ? "indexing" : "validating");
+    void work().then(() => taskService.complete(task.id)).catch((error) => {
+      if ((error as { code?: string }).code === "TASK_CANCELLED" || (error as { code?: string }).code === "SPACE_BUILD_CANCELLED") taskService.cancel(task.id);
+      else taskService.fail(task.id, { code: "INTERNAL", messageKey: "errors.internal", recoverable: false });
+    });
+    return task;
+  };
+  const vectorService = {
+    getHealth: async ({ projectId }: { projectId: string }): Promise<Result<VectorHealthDto>> => {
+      const space = spaces.active(projectId);
+      if (!space) return failure("NOT_FOUND", "errors.notFound");
+      try { return { ok: true, value: { spaceId: space.id, healthy: (await lance.count(space)) >= 0, indexedCount: await lance.count(space) } }; } catch { return failure("INDEX_UNAVAILABLE", "errors.indexUnavailable", true); }
+    },
+    startMigration: async ({ projectId, profileId }: { projectId: string; profileId: string }): Promise<Result<TaskDto>> => {
+      const profile = settingsRepository.getProfile(profileId);
+      if (!profile || !profile.enabled || profile.capability !== "embedding") return failure("VALIDATION", "errors.modelCapability");
+      const existing = activeTask(projectId);
+      if (existing) return failure("CONFLICT", "errors.taskConflict", true);
+      const current = spaces.active(projectId);
+      if (!current) return failure("VALIDATION", "errors.embeddingProfileUnavailable");
+      const task = taskService.createTask({ projectId, sourceId: null, kind: "validation" });
+      return { ok: true, value: runTask(task, () => spaceService.rebuild({ spec: { projectId, provider: profile.provider, modelId: profile.modelId, modelRevision: profile.modelId, dimension: current.dimension, distance: "cosine", pooling: "mean", preprocessVersion: "persisted", chunkingVersion: "persisted", fingerprint: `${profile.provider}:${profile.modelId}` } })) };
+    },
+    rebuild: async ({ projectId, spaceId }: { projectId: string; spaceId: string }): Promise<Result<TaskDto>> => {
+      const space = spaces.get(spaceId);
+      if (!space || space.projectId !== projectId) return failure("NOT_FOUND", "errors.notFound");
+      const existing = activeTask(projectId);
+      if (existing) return failure("CONFLICT", "errors.taskConflict", true);
+      const task = taskService.createTask({ projectId, sourceId: null, kind: "validation" });
+      return { ok: true, value: runTask(task, () => spaceService.rebuild({ spec: space })) };
+    },
+    optimize: async ({ projectId, spaceId }: { projectId: string; spaceId: string }): Promise<Result<TaskDto>> => {
+      const space = spaces.get(spaceId);
+      if (!space || space.projectId !== projectId) return failure("NOT_FOUND", "errors.notFound");
+      const existing = activeTask(projectId);
+      if (existing) return failure("CONFLICT", "errors.taskConflict", true);
+      const task = taskService.createTask({ projectId, sourceId: null, kind: "optimize" });
+      return { ok: true, value: runTask(task, () => spaceService.optimize({ taskId: task.id, projectId, space })) };
+    },
+    cancelTask: async ({ projectId, taskId }: { projectId: string; taskId: string }): Promise<Result<TaskDto>> => {
+      const task = taskService.getById?.(taskId);
+      if (!task || task.projectId !== projectId) return failure("NOT_FOUND", "errors.notFound");
+      spaceService.cancel(taskId);
+      try { return { ok: true, value: taskService.cancel(taskId) }; } catch { return failure("CONFLICT", "errors.taskConflict", true); }
+    },
+    search: async ({ projectId, query, limit }: { projectId: string; query: string; limit: number }): Promise<Result<SearchHitDto[]>> => {
+      const result = await retrieval.search({ projectId, query, limit });
+      if (!result.ok) return result as Result<SearchHitDto[]>;
+      return { ok: true, value: result.value.map((hit: { chunkId: string; score?: number; text: string; locator: unknown }) => ({ chunkId: hit.chunkId, score: hit.score ?? 0, text: hit.text, locator: hit.locator })) };
+    }
+  };
   cleanupProjectHandlers = registerProjectHandlers(ipcMain, projectService);
   cleanupModelHandlers = registerModelHandlers(ipcMain, modelService);
   if (typeof (ipcMain as { handle?: unknown }).handle === "function") {
@@ -126,6 +190,7 @@ app.whenReady().then(async () => {
       removeSource: sourceService.removeSource.bind(sourceService), retryTask: sourceService.retryTask.bind(sourceService),
       cancelTask: sourceService.cancelTask.bind(sourceService), ownsSource: sourceService.ownsSource.bind(sourceService), ownsTask: sourceService.ownsTask.bind(sourceService)
     });
+    cleanupVectorHandlers = registerVectorHandlers(ipcMain, vectorService);
   }
   cleanupTitleOverlayHandler = registerTitleOverlayHandler(ipcMain);
 
@@ -155,6 +220,8 @@ app.on("before-quit", (event) => {
   cleanupTitleOverlayHandler?.();
   cleanupSourceHandlers?.();
   cleanupSourceHandlers = undefined;
+  cleanupVectorHandlers?.();
+  cleanupVectorHandlers = undefined;
   cleanupTitleOverlayHandler = undefined;
   appDatabase?.close();
   appDatabase = undefined;

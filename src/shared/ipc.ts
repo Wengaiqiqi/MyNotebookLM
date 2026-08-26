@@ -19,6 +19,7 @@ import type { AppSettingsDto, UpdateAppSettingsInput } from "./settings";
 import type { AppTheme } from "./settings";
 import type { SourceDto } from "./sources";
 import type { TaskDto } from "./tasks";
+import type { RetrievalSearchInput, SearchHitDto, VectorHealthDto, VectorProfileInput, VectorSpaceInput, VectorTaskIdInput, VectorTaskInput } from "./vector";
 
 export const SOURCE_CHANNELS = { chooseFiles: "sources:v1:choose-files", importFile: "sources:v1:import-file", importUrl: "sources:v1:import-url", list: "sources:v1:list", remove: "sources:v1:remove", retry: "sources:v1:retry", cancel: "tasks:v1:cancel", listTasks: "tasks:v1:list", subscribe: "tasks:v1:subscribe", update: "tasks:v1:update" } as const;
 
@@ -53,8 +54,12 @@ export const CREDENTIAL_CHANNELS = {
 export const TITLE_OVERLAY_CHANNELS = {
   setTheme: "window:v1:set-title-overlay"
 } as const;
+export const VECTOR_CHANNELS = { getHealth: "vector:v1:get-health", startMigration: "vector:v1:start-migration", rebuild: "vector:v1:rebuild", optimize: "vector:v1:optimize", cancelTask: "vector:v1:cancel-task", taskUpdate: "vector:v1:task-update" } as const;
+export const RETRIEVAL_CHANNELS = { search: "retrieval:v1:search" } as const;
 
 export interface DesktopApi {
+  vector: { getHealth(input: VectorTaskInput): Promise<Result<VectorHealthDto>>; startMigration(input: VectorProfileInput): Promise<Result<TaskDto>>; rebuild(input: VectorSpaceInput): Promise<Result<TaskDto>>; optimize(input: VectorSpaceInput): Promise<Result<TaskDto>>; cancelTask(input: VectorTaskIdInput): Promise<Result<TaskDto>>; subscribe(projectId: string, listener: (task: TaskDto) => void): () => void; };
+  retrieval: { search(input: RetrievalSearchInput): Promise<Result<SearchHitDto[]>> };
   sources?: { chooseFiles(input: { projectId: string }): Promise<string[] | null>; importFile(input: { projectId: string; dialogToken: string }): Promise<Result<SourceDto>>; importUrl(input: { projectId: string; url: string }): Promise<Result<SourceDto>>; list(input: { projectId: string }): Promise<SourceDto[]>; remove(input: { projectId: string; sourceId: string }): Promise<Result<void>>; retry(input: { projectId: string; sourceId: string }): Promise<Result<TaskDto>>; };
   tasks?: { list(input: { projectId: string }): Promise<TaskDto[]>; cancel(input: { projectId: string; taskId: string }): Promise<Result<TaskDto>>; subscribe(projectId: string, listener: (task: TaskDto) => void): () => void; };
   projects: {

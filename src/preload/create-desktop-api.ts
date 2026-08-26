@@ -11,6 +11,8 @@ import {
   PROJECT_CHANNELS,
   SETTINGS_CHANNELS,
   TITLE_OVERLAY_CHANNELS,
+  RETRIEVAL_CHANNELS,
+  VECTOR_CHANNELS,
   type DesktopApi
 } from "../shared/ipc";
 import { SOURCE_CHANNELS } from "../shared/ipc";
@@ -42,6 +44,7 @@ import {
   appThemeSchema,
   updateAppSettingsInputSchema
 } from "../shared/settings";
+import { retrievalSearchInputSchema, searchHitSchema, vectorHealthSchema, vectorProfileInputSchema, vectorSpaceInputSchema, vectorTaskIdInputSchema, vectorTaskInputSchema } from "../shared/vector";
 
 type IpcInvoker = {
   invoke(channel: string, payload?: unknown): Promise<unknown>;
@@ -83,6 +86,27 @@ async function invokeResult<I, O>(
 
 export function createDesktopApi(ipc: IpcInvoker): DesktopApi {
   return {
+    vector: {
+      getHealth: (input) => invokeResult(ipc, VECTOR_CHANNELS.getHealth, vectorTaskInputSchema, resultSchema(vectorHealthSchema), input),
+      startMigration: (input) => invokeResult(ipc, VECTOR_CHANNELS.startMigration, vectorProfileInputSchema, resultSchema(taskDtoSchema), input),
+      rebuild: (input) => invokeResult(ipc, VECTOR_CHANNELS.rebuild, vectorSpaceInputSchema, resultSchema(taskDtoSchema), input),
+      optimize: (input) => invokeResult(ipc, VECTOR_CHANNELS.optimize, vectorSpaceInputSchema, resultSchema(taskDtoSchema), input),
+      cancelTask: (input) => invokeResult(ipc, VECTOR_CHANNELS.cancelTask, vectorTaskIdInputSchema, resultSchema(taskDtoSchema), input),
+      subscribe: (projectId, listener) => {
+        const parsed = z.uuid().safeParse(projectId);
+        if (!parsed.success) return () => undefined;
+        const channel = SOURCE_CHANNELS.update + ":" + parsed.data;
+        const handler = (_event: unknown, raw: unknown) => {
+          const task = taskDtoSchema.safeParse(raw);
+          if (task.success) listener(task.data);
+        };
+        ipc.on?.(channel, handler);
+        return () => ipc.removeListener?.(channel, handler);
+      }
+    },
+    retrieval: {
+      search: (input) => invokeResult(ipc, RETRIEVAL_CHANNELS.search, retrievalSearchInputSchema, resultSchema(searchHitSchema.array()), input)
+    },
     sources: {
       chooseFiles: async (input) => { const parsed = z.object({ projectId: z.uuid() }).strict().safeParse(input); if (!parsed.success) return null; const raw = await ipc.invoke(SOURCE_CHANNELS.chooseFiles, parsed.data); return raw === null ? null : z.string().array().parse(raw); },
       importFile: (input) => invokeResult(ipc, SOURCE_CHANNELS.importFile, z.object({ projectId: z.uuid(), dialogToken: z.string().min(1) }).strict(), resultSchema(sourceDtoSchema), input),

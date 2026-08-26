@@ -4,6 +4,8 @@ import {
   MODEL_CHANNELS,
   PROJECT_CHANNELS,
   SETTINGS_CHANNELS,
+  RETRIEVAL_CHANNELS,
+  VECTOR_CHANNELS,
   type DesktopApi
 } from "../shared/ipc";
 import { createDesktopApi } from "./create-desktop-api";
@@ -54,7 +56,9 @@ describe("createDesktopApi", () => {
   it("preserves project commands while exposing only the named model settings groups", () => {
     const api = createDesktopApi({ invoke: vi.fn() });
 
-    expect(Object.keys(api)).toEqual(["sources", "tasks", "projects", "settings", "models", "credentials", "titleOverlay"]);
+    expect(Object.keys(api)).toEqual(["vector", "retrieval", "sources", "tasks", "projects", "settings", "models", "credentials", "titleOverlay"]);
+    expect(Object.keys(api.vector)).toEqual(["getHealth", "startMigration", "rebuild", "optimize", "cancelTask", "subscribe"]);
+    expect(Object.keys(api.retrieval)).toEqual(["search"]);
     expect(Object.keys(api.projects)).toEqual(["list", "create", "rename", "archive", "remove"]);
     expect(Object.keys(api.settings)).toEqual(["get", "update"]);
     expect(Object.keys(api.models)).toEqual([
@@ -68,6 +72,49 @@ describe("createDesktopApi", () => {
     ]);
     expect(Object.keys(api.credentials)).toEqual(["set", "remove"]);
     expect(Object.keys((api as unknown as { titleOverlay: object }).titleOverlay)).toEqual(["setTheme"]);
+  });
+
+  it("routes vector lifecycle and retrieval calls through validated channels", async () => {
+    const health = { spaceId: "11111111-1111-4111-8111-111111111111", healthy: true, indexedCount: 2 };
+    const task = { id: "22222222-2222-4222-8222-222222222222", projectId: project.id, sourceId: null, kind: "optimize" as const, state: "completed" as const, stage: "finalizing" as const, progress: 1000, attempt: 0, error: null, idempotencyKey: null, createdAt: "2026-08-26T00:00:00.000Z", updatedAt: "2026-08-26T00:00:00.000Z" };
+    const invoke = vi.fn()
+      .mockResolvedValueOnce(ok(health)).mockResolvedValueOnce(ok(task)).mockResolvedValueOnce(ok(task))
+      .mockResolvedValueOnce(ok(task)).mockResolvedValueOnce(ok(task)).mockResolvedValueOnce(ok([{ chunkId: task.id, score: 1, text: "hit", locator: {} }]));
+    const api = createDesktopApi({ invoke });
+    await api.vector.getHealth({ projectId: project.id });
+    await api.vector.startMigration({ projectId: project.id, profileId: profile.id });
+    await api.vector.rebuild({ projectId: project.id, spaceId: health.spaceId });
+    await api.vector.optimize({ projectId: project.id, spaceId: health.spaceId });
+    await api.vector.cancelTask({ projectId: project.id, taskId: task.id });
+    await api.retrieval.search({ projectId: project.id, query: "hello", limit: 12 });
+    expect(invoke).toHaveBeenNthCalledWith(1, VECTOR_CHANNELS.getHealth, { projectId: project.id });
+    expect(invoke).toHaveBeenNthCalledWith(2, VECTOR_CHANNELS.startMigration, { projectId: project.id, profileId: profile.id });
+    expect(invoke).toHaveBeenNthCalledWith(6, RETRIEVAL_CHANNELS.search, { projectId: project.id, query: "hello", limit: 12 });
+  });
+
+  it("rejects vector raw inputs and malformed results before/after IPC", async () => {
+    const invoke = vi.fn().mockResolvedValue({ ok: true, value: { nope: true } });
+    const api = createDesktopApi({ invoke });
+    await expect(api.vector.rebuild({ projectId: project.id, spaceId: "not-a-uuid" } as never)).resolves.toEqual(validationFailure);
+    await expect(api.retrieval.search({ projectId: project.id, query: "x", limit: 1, filter: "x" } as never)).resolves.toEqual(validationFailure);
+    await expect(api.vector.getHealth({ projectId: project.id })).resolves.toEqual(internalFailure);
+    expect(invoke).toHaveBeenCalledTimes(1);
+  });
+
+  it("validates and cleans up vector task progress subscriptions", () => {
+    const on = vi.fn();
+    const removeListener = vi.fn();
+    const api = createDesktopApi({ invoke: vi.fn(), on, removeListener });
+    const listener = vi.fn();
+    const cleanup = api.vector.subscribe(project.id, listener);
+    const registered = on.mock.calls[0]?.[1] as (_event: unknown, value: unknown) => void;
+    const task = { id: "22222222-2222-4222-8222-222222222222", projectId: project.id, sourceId: null, kind: "optimize" as const, state: "running" as const, stage: "indexing" as const, progress: 10, attempt: 0, error: null, idempotencyKey: null, createdAt: "2026-08-26T00:00:00.000Z", updatedAt: "2026-08-26T00:00:00.000Z" };
+    registered({}, task);
+    registered({}, { ...task, progress: -1 });
+    expect(listener).toHaveBeenCalledExactlyOnceWith(task);
+    cleanup();
+    expect(on).toHaveBeenCalledWith("tasks:v1:update:" + project.id, expect.any(Function));
+    expect(removeListener).toHaveBeenCalledWith("tasks:v1:update:" + project.id, registered);
   });
 
   it("validates and routes title-overlay theme updates through a versioned result boundary", async () => {

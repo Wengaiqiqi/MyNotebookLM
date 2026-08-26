@@ -161,6 +161,17 @@ function createApi(projects: ProjectDto[] = [], onboardingCompleted = true): Api
       },
       titleOverlay: {
         setTheme: setTitleOverlayTheme
+      },
+      vector: {
+        getHealth: vi.fn<DesktopApi["vector"]["getHealth"]>(),
+        startMigration: vi.fn<DesktopApi["vector"]["startMigration"]>(),
+        rebuild: vi.fn<DesktopApi["vector"]["rebuild"]>(),
+        optimize: vi.fn<DesktopApi["vector"]["optimize"]>(),
+        cancelTask: vi.fn<DesktopApi["vector"]["cancelTask"]>(),
+        subscribe: vi.fn<DesktopApi["vector"]["subscribe"]>(() => () => undefined)
+      },
+      retrieval: {
+        search: vi.fn<DesktopApi["retrieval"]["search"]>()
       }
     }
   };

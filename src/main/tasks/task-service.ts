@@ -34,6 +34,10 @@ export class TaskService {
     });
   }
 
+  getById(taskId: string): TaskDto | null {
+    return this.repository.findById(taskId);
+  }
+
   start(taskId: string, stage: TaskStage): TaskDto {
     const current = this.repository.findById(taskId);
     if (!current) throw new Error(`Task not found: ${taskId}`);
