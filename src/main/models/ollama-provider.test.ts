@@ -95,6 +95,21 @@ describe("Ollama provider", () => {
     expect(error.failure.error.code).toBe("PROVIDER");
   });
 
+  it("rejects a second done chunk without emitting a terminal event", async () => {
+    const fake = await server((_request, response) => {
+      response.writeHead(200, { "content-type": "application/x-ndjson" });
+      response.end('{"done":true,"done_reason":"stop"}\n{"done":true,"done_reason":"stop"}\n');
+    });
+    const events: unknown[] = [];
+    const error = await providerError(async () => {
+      for await (const event of new OllamaProvider({ baseUrl: origin(fake) }).generate({
+        model: "llama-test", messages: [{ role: "user", content: "Hello" }]
+      }, new AbortController().signal)) events.push(event);
+    });
+    expect(events).not.toContainEqual(expect.objectContaining({ type: "done" }));
+    expect(error.failure.error.code).toBe("PROVIDER");
+  });
+
   it("rejects a truncated stream without a done marker instead of faking done", async () => {
     const fake = await server((_request, response) => {
       response.writeHead(200, { "content-type": "application/x-ndjson" });

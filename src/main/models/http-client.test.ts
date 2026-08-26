@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { ProviderHttpClient, ProviderRequestError, joinUrl, type FetchLike } from "./http-client";
 
 function response(body: string, init: ResponseInit = {}): Response {
@@ -164,6 +164,94 @@ describe("ProviderHttpClient", () => {
 
     expect(result).toBeInstanceOf(ProviderRequestError);
     expect((result as ProviderRequestError).failure.error.code).toMatch(/RATE_LIMITED|PROVIDER/);
+  });
+
+  it.each([429, 503])("cancels a non-2xx hanging body without replacing HTTP error %i", async (status) => {
+    const cancel = vi.fn(() => Promise.reject(new Error("cancel failed")));
+    const client = new ProviderHttpClient(async () => new Response(new ReadableStream({
+      cancel
+    }), { status }));
+
+    const error = await requestError(() => client.json(
+      "https://models.example", "/models", { signal: new AbortController().signal }
+    ));
+    await Promise.resolve();
+
+    expect(cancel).toHaveBeenCalledOnce();
+    expect(error.failure.error.code).toMatch(/RATE_LIMITED|PROVIDER/);
+  });
+
+  it("cancels a response that becomes too large", async () => {
+    const cancel = vi.fn();
+    const client = new ProviderHttpClient(async () => new Response(new ReadableStream({
+      start(controller) {
+        controller.enqueue(new Uint8Array(9));
+      },
+      cancel
+    }), { headers: { "content-type": "application/x-ndjson" } }), { maxResponseBytes: 8 });
+
+    const error = await requestError(async () => {
+      for await (const _record of client.ndjson(
+        "https://models.example", "/stream", { signal: new AbortController().signal }
+      )) { /* consume */ }
+    });
+
+    expect(cancel).toHaveBeenCalledOnce();
+    expect(error.failure.error.code).toBe("PROVIDER");
+  });
+
+  it("cancels a response when parsing stops consumption early", async () => {
+    const cancel = vi.fn();
+    const client = new ProviderHttpClient(async () => new Response(new ReadableStream({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode("not-json\n"));
+      },
+      cancel
+    }), { headers: { "content-type": "application/x-ndjson" } }));
+
+    const error = await requestError(async () => {
+      for await (const _record of client.ndjson(
+        "https://models.example", "/stream", { signal: new AbortController().signal }
+      )) { /* parse error */ }
+    });
+
+    expect(cancel).toHaveBeenCalledOnce();
+    expect(error.failure.error.code).toBe("PROVIDER");
+  });
+
+  it("cancels a response when the consumer breaks early", async () => {
+    const cancel = vi.fn();
+    const client = new ProviderHttpClient(async () => new Response(new ReadableStream({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode('{"value":1}\n'));
+      },
+      cancel
+    }), { headers: { "content-type": "application/x-ndjson" } }));
+
+    for await (const _record of client.ndjson(
+      "https://models.example", "/stream", { signal: new AbortController().signal }
+    )) break;
+
+    expect(cancel).toHaveBeenCalledOnce();
+  });
+
+  it("does not cancel a response that is read to completion", async () => {
+    const cancel = vi.fn();
+    const client = new ProviderHttpClient(async () => new Response(new ReadableStream({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode('{"value":1}\n'));
+        controller.close();
+      },
+      cancel
+    }), { headers: { "content-type": "application/x-ndjson" } }));
+
+    const records: unknown[] = [];
+    for await (const record of client.ndjson(
+      "https://models.example", "/stream", { signal: new AbortController().signal }
+    )) records.push(record);
+
+    expect(records).toEqual([{ value: 1 }]);
+    expect(cancel).not.toHaveBeenCalled();
   });
 
   it("reads SSE and NDJSON records split across byte chunks", async () => {

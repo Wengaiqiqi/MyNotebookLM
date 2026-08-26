@@ -71,7 +71,8 @@ export class AnthropicProvider implements ModelProvider {
       ...(system ? { system } : {}),
       ...(request.temperature === undefined ? {} : { temperature: request.temperature })
     };
-    let emittedDone = false;
+    let stopReason: string | undefined;
+    let messageStopped = false;
     for await (const event of this.client.sse<unknown>(this.baseUrl, "/v1/messages", {
       method: "POST",
       headers: this.headers(true),
@@ -79,6 +80,9 @@ export class AnthropicProvider implements ModelProvider {
       signal
     })) {
       if (!isRecord(event) || typeof event.type !== "string") throw malformedResponse();
+      if (messageStopped || (stopReason !== undefined && event.type !== "message_stop")) {
+        throw malformedResponse();
+      }
       if (event.type === "error") {
         throw anthropicStreamError(event.error);
       } else if (event.type === "message_start") {
@@ -100,15 +104,15 @@ export class AnthropicProvider implements ModelProvider {
         }
         if (event.delta.stop_reason !== undefined && event.delta.stop_reason !== null) {
           if (typeof event.delta.stop_reason !== "string") throw malformedResponse();
-          emittedDone = true;
-          yield { type: "done", finishReason: event.delta.stop_reason };
+          if (stopReason !== undefined) throw malformedResponse();
+          stopReason = event.delta.stop_reason;
         }
-      } else if (event.type === "message_stop" && !emittedDone) {
-        emittedDone = true;
-        yield { type: "done" };
+      } else if (event.type === "message_stop") {
+        messageStopped = true;
       }
     }
-    if (!emittedDone) throw malformedResponse();
+    if (!messageStopped) throw malformedResponse();
+    yield stopReason === undefined ? { type: "done" } : { type: "done", finishReason: stopReason };
   }
 
   async embed(_request: EmbeddingRequest, _signal: AbortSignal): Promise<number[][]> {

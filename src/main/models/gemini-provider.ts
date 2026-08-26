@@ -77,13 +77,16 @@ export class GeminiProvider implements ModelProvider {
       ...(systemParts.length ? { systemInstruction: { parts: systemParts } } : {}),
       ...(Object.keys(generationConfig).length ? { generationConfig } : {})
     };
-    let emittedDone = false;
+    let finishReason: string | undefined;
     for await (const chunk of this.client.sse<unknown>(
       this.baseUrl,
       `/v1beta/${modelName(request.model)}:streamGenerateContent?alt=sse`,
       { method: "POST", headers: this.headers(true), body: JSON.stringify(body), signal }
     )) {
       if (!isRecord(chunk)) throw malformedResponse();
+      if (finishReason !== undefined && chunk.candidates !== undefined) {
+        if (!Array.isArray(chunk.candidates) || chunk.candidates.length > 0) throw malformedResponse();
+      }
       if (chunk.error !== undefined) {
         if (!isRecord(chunk.error) || typeof chunk.error.code !== "number" || !Number.isInteger(chunk.error.code)) {
           throw malformedResponse();
@@ -108,6 +111,9 @@ export class GeminiProvider implements ModelProvider {
           }
         }
       }
+      if (finishReasons.length > 1 || (finishReason !== undefined && finishReasons.length > 0)) {
+        throw malformedResponse();
+      }
       if (chunk.usageMetadata !== undefined) {
         if (!isRecord(chunk.usageMetadata)) throw malformedResponse();
         const inputTokens = optionalFiniteNumber(chunk.usageMetadata.promptTokenCount);
@@ -118,12 +124,10 @@ export class GeminiProvider implements ModelProvider {
           ...(outputTokens === undefined ? {} : { outputTokens })
         };
       }
-      for (const finishReason of finishReasons) {
-        emittedDone = true;
-        yield { type: "done", finishReason };
-      }
+      if (finishReasons.length) finishReason = finishReasons[0];
     }
-    if (!emittedDone) throw malformedResponse();
+    if (finishReason === undefined) throw malformedResponse();
+    yield { type: "done", finishReason };
   }
 
   async embed(request: EmbeddingRequest, signal: AbortSignal): Promise<number[][]> {

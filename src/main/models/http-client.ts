@@ -90,6 +90,7 @@ export class ProviderHttpClient {
     try {
       const response = await this.fetchImpl(joinUrl(baseUrl, endpoint), { ...options, signal });
       if (!response.ok) {
+        void response.body?.cancel().catch(() => undefined);
         throw new ProviderRequestError(classifyProviderError({ status: response.status, headers: response.headers }));
       }
       return { response, originalSignal: options.signal, signal };
@@ -113,6 +114,7 @@ export class ProviderHttpClient {
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
     let total = 0;
+    let completed = false;
     try {
       while (true) {
         const { done, value } = await reader.read();
@@ -122,6 +124,7 @@ export class ProviderHttpClient {
         const text = decoder.decode(value, { stream: true });
         if (text) yield text;
       }
+      completed = true;
       const tail = decoder.decode();
       if (tail) yield tail;
     } catch (reason) {
@@ -131,6 +134,7 @@ export class ProviderHttpClient {
       if (signal.aborted) throw new ProviderRequestError(classifyProviderError({ timeout: true }));
       throw new ProviderRequestError(classifyProviderError({ cause: reason }));
     } finally {
+      if (!completed) void reader.cancel().catch(() => undefined);
       reader.releaseLock();
     }
   }

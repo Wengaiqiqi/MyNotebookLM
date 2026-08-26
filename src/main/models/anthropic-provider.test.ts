@@ -54,7 +54,8 @@ describe("Anthropic provider", () => {
       response.write('data: {"type":"message_start","message":{"usage":{"input_tokens":4}}}\n\n');
       response.write('data: {"type":"content_block_delta","delta":{"type":"text_delta","text":"Hel"}}\n\n');
       response.write('data: {"type":"content_block_delta","delta":{"type":"text_delta","text":"lo"}}\n\n');
-      response.end('data: {"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":2}}\n\n');
+      response.write('data: {"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":2}}\n\n');
+      response.end('data: {"type":"message_stop"}\n\n');
     });
     const provider = new AnthropicProvider({ baseUrl: origin(fake), apiKey: secret });
     const events: GenerationEvent[] = [];
@@ -102,6 +103,36 @@ describe("Anthropic provider", () => {
     const fake = await server((_request, response) => {
       response.writeHead(200, { "content-type": "text/event-stream" });
       response.end('data: {"type":"message_start","message":{"usage":{"input_tokens":1.5}}}\n\n');
+    });
+    const events: unknown[] = [];
+    const error = await providerError(async () => {
+      for await (const event of new AnthropicProvider({ baseUrl: fake.baseUrl }).generate({
+        model: "claude-test", messages: [{ role: "user", content: "Hello" }]
+      }, new AbortController().signal)) events.push(event);
+    });
+    expect(events).not.toContainEqual(expect.objectContaining({ type: "done" }));
+    expect(error.failure.error.code).toBe("PROVIDER");
+  });
+
+  it("requires message_stop after stop_reason before emitting completion", async () => {
+    const fake = await server((_request, response) => {
+      response.writeHead(200, { "content-type": "text/event-stream" });
+      response.end('data: {"type":"message_delta","delta":{"stop_reason":"end_turn"}}\n\n');
+    });
+    const events: unknown[] = [];
+    const error = await providerError(async () => {
+      for await (const event of new AnthropicProvider({ baseUrl: fake.baseUrl }).generate({
+        model: "claude-test", messages: [{ role: "user", content: "Hello" }]
+      }, new AbortController().signal)) events.push(event);
+    });
+    expect(events).not.toContainEqual(expect.objectContaining({ type: "done" }));
+    expect(error.failure.error.code).toBe("PROVIDER");
+  });
+
+  it("rejects events after message_stop without emitting completion", async () => {
+    const fake = await server((_request, response) => {
+      response.writeHead(200, { "content-type": "text/event-stream" });
+      response.end('data: {"type":"message_stop"}\n\ndata: {"type":"content_block_delta","delta":{"type":"text_delta","text":"late"}}\n\n');
     });
     const events: unknown[] = [];
     const error = await providerError(async () => {

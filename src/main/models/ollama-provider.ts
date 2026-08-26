@@ -54,14 +54,15 @@ export class OllamaProvider implements ModelProvider {
       stream: true,
       ...(Object.keys(options).length ? { options } : {})
     };
-    let emittedDone = false;
+    let completion: { finishReason?: string } | undefined;
     for await (const chunk of this.client.ndjson<unknown>(this.baseUrl, "/api/chat", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify(body),
       signal
-    })) {
+      })) {
       if (!isRecord(chunk)) throw malformedResponse();
+      if (completion !== undefined) throw malformedResponse();
       if (chunk.error !== undefined) {
         if (typeof chunk.error !== "string") throw malformedResponse();
         throw new ProviderRequestError(classifyProviderError({ status: 500 }));
@@ -79,13 +80,13 @@ export class OllamaProvider implements ModelProvider {
           ...(outputTokens === undefined ? {} : { outputTokens })
         };
         if (chunk.done_reason !== undefined && typeof chunk.done_reason !== "string") throw malformedResponse();
-        emittedDone = true;
-        yield chunk.done_reason === undefined
-          ? { type: "done" }
-          : { type: "done", finishReason: chunk.done_reason };
+        completion = chunk.done_reason === undefined ? {} : { finishReason: chunk.done_reason };
       }
     }
-    if (!emittedDone) throw malformedResponse();
+    if (completion === undefined) throw malformedResponse();
+    yield completion.finishReason === undefined
+      ? { type: "done" }
+      : { type: "done", finishReason: completion.finishReason };
   }
 
   async embed(request: EmbeddingRequest, signal: AbortSignal): Promise<number[][]> {
