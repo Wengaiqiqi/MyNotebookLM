@@ -6,10 +6,18 @@ type Chunk = { id: string; ordinal: number; content_hash: string; text: string; 
 type Input = { taskId: string; revisionId: string; space: LanceSpace; batchSize?: number; signal?: AbortSignal; now?: string };
 type ProviderResolver = Pick<EmbeddingProvider, "embedBatch"> | ((revisionId: string, space: LanceSpace) => Promise<Pick<EmbeddingProvider, "embedBatch">>);
 type StoredLike = Omit<LanceRow, "locator"> & { locatorJson?: string; locator?: unknown };
+type SpaceBoundary = { project_id: string; source_id: string; space_id?: string; space_project_id?: string; space_dimension?: number; space_state?: string; active_space_id?: string };
 export class IndexingService {
   private recoverChunks?: (revisionId: string) => Promise<void>;
   constructor(private readonly db: Database.Database, private readonly provider: ProviderResolver, private readonly lance: Pick<LanceStore, "upsert" | "count" | "rows" | "vectorSearch" | "deleteRevision">) {}
   private async resolveProvider(revisionId: string, space: LanceSpace) { return typeof this.provider === "function" ? this.provider(revisionId, space) : this.provider; }
+  private validateSpace(revisionId: string, space: LanceSpace, operation: "index" | "rebuild"): { project_id: string; source_id: string } {
+    const row = this.db.prepare("SELECT sr.source_id, s.project_id, es.id AS space_id, es.project_id AS space_project_id, es.dimension AS space_dimension, es.state AS space_state, pes.space_id AS active_space_id FROM source_revisions sr JOIN sources s ON s.id = sr.source_id LEFT JOIN embedding_spaces es ON es.id = ? LEFT JOIN project_embedding_spaces pes ON pes.project_id = s.project_id WHERE sr.id = ?").get(space.id, revisionId) as SpaceBoundary | undefined;
+    if (!row) throw new Error("revision not found");
+    const stateValid = operation === "index" ? row.space_state === "active" && row.active_space_id === space.id : ["preparing", "building", "validating"].includes(row.space_state ?? "");
+    if (row.space_id !== space.id || row.space_project_id !== row.project_id || row.space_dimension !== space.dimension || !stateValid) throw Object.assign(new Error("Indexing space metadata mismatch"), { code: "INDEXING_SPACE_MISMATCH" });
+    return row;
+  }
   private validateRow(row: StoredLike | undefined, chunk: Chunk | undefined, source: { project_id: string; source_id: string }, revisionId: string, space: LanceSpace): boolean {
     if (!row || !chunk) return false;
     const locator = "locator" in row ? row.locator : (() => { try { return JSON.parse(row.locatorJson ?? ""); } catch { return undefined; } })();
@@ -22,6 +30,7 @@ export class IndexingService {
   }
   setChunkRecovery(recover: (revisionId: string) => Promise<void>): void { this.recoverChunks = recover; }
   async index(input: Input): Promise<void> {
+    const source = this.validateSpace(input.revisionId, input.space, "index");
     const provider = await this.resolveProvider(input.revisionId, input.space);
     const chunks = this.db.prepare("SELECT id, ordinal, content_hash, text, locator_json FROM source_chunks WHERE revision_id = ? ORDER BY ordinal").all(input.revisionId) as Chunk[];
     try {
@@ -30,14 +39,10 @@ export class IndexingService {
         const part = chunks.slice(i, i + size);
         const vectors = await provider.embedBatch(part.map(c => c.text), input.signal ?? new AbortController().signal, size);
         if (vectors.length !== part.length) throw new Error("Embedding response count mismatch");
-        const source = this.db.prepare("SELECT s.project_id, sr.source_id FROM source_revisions sr JOIN sources s ON s.id = sr.source_id WHERE sr.id = ?").get(input.revisionId) as { project_id: string; source_id: string };
         const rows: LanceRow[] = part.map((c, n) => ({ chunkId: c.id, projectId: source.project_id, sourceId: source.source_id, revisionId: input.revisionId, spaceId: input.space.id, ordinal: c.ordinal, contentHash: c.content_hash, text: c.text, vector: vectors[n]!, locator: JSON.parse(c.locator_json), createdAt: Date.now() }));
         await this.lance.upsert(input.space, rows);
       }
       const actual = (await this.lance.rows(input.space)).filter(r => r.revisionId === input.revisionId);
-      const source = this.db.prepare("SELECT s.project_id, sr.source_id FROM source_revisions sr JOIN sources s ON s.id = sr.source_id WHERE sr.id = ?").get(input.revisionId) as { project_id: string; source_id: string };
-      const expectedIds = new Set(chunks.map(c => c.id));
-      const actualIds = new Set(actual.map(r => r.chunkId));
       if (await this.lance.count(input.space, { revisionId: input.revisionId }) !== chunks.length) throw new Error("Lance row count mismatch");
       this.validateRows(actual, chunks, source, input.revisionId, input.space);
       if (chunks.length) { const vectors = await provider.embedBatch([chunks[0]!.text], input.signal ?? new AbortController().signal, 1); const probe = await this.lance.vectorSearch(input.space, vectors[0]!, 1, { revisionId: input.revisionId }); if (probe.length !== 1 || !this.validateRow(probe[0], chunks[0], source, input.revisionId, input.space)) throw new Error("Lance probe mismatch"); }
@@ -50,10 +55,9 @@ export class IndexingService {
     } catch (error) { await this.lance.deleteRevision(input.space, input.revisionId); throw error; }
   }
   async rebuild(input: { revisionId: string; space: LanceSpace; signal?: AbortSignal; batchSize?: number }): Promise<void> {
+    const source = this.validateSpace(input.revisionId, input.space, "rebuild");
     const provider = await this.resolveProvider(input.revisionId, input.space);
     let chunks = this.db.prepare("SELECT id, ordinal, content_hash, text, locator_json FROM source_chunks WHERE revision_id = ? ORDER BY ordinal").all(input.revisionId) as Chunk[];
-    const source = this.db.prepare("SELECT s.project_id, sr.source_id FROM source_revisions sr JOIN sources s ON s.id = sr.source_id WHERE sr.id = ?").get(input.revisionId) as { project_id: string; source_id: string } | undefined;
-    if (!source) throw new Error("revision not found");
     if (chunks.length === 0 && this.recoverChunks) { await this.recoverChunks(input.revisionId); }
     chunks = this.db.prepare("SELECT id, ordinal, content_hash, text, locator_json FROM source_chunks WHERE revision_id = ? ORDER BY ordinal").all(input.revisionId) as Chunk[];
     if (chunks.length === 0) throw Object.assign(new Error("No SQLite source_chunks available for rebuild and no recoverable managed original was supplied"), { code: "SPACE_REBUILD_SOURCE_UNRECOVERABLE", recoverable: false });
