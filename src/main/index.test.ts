@@ -9,6 +9,8 @@ const mocks = vi.hoisted(() => {
   const callbacks = new Map<string, Callback>();
   const connection = {};
   const ipcMain = {};
+  let databasePending: Promise<void> = Promise.resolve();
+  let databaseError: Error | undefined;
   const close = vi.fn(() => events.push("close"));
   const cleanupProject = vi.fn(() => events.push("project-cleanup"));
   const cleanupModel = vi.fn(() => events.push("model-cleanup"));
@@ -18,6 +20,8 @@ const mocks = vi.hoisted(() => {
     events,
     callbacks,
     connection,
+    setDatabasePending: (pending: Promise<void>) => { databasePending = pending; },
+    setDatabaseError: (error?: Error) => { databaseError = error; },
     ipcMain,
     close,
     cleanupProject,
@@ -47,8 +51,11 @@ const mocks = vi.hoisted(() => {
       models: "C:\\data\\MyNotebookLM\\models\\huggingface",
       logs: "C:\\data\\MyNotebookLM\\logs"
     })),
-    openAppDatabase: vi.fn(() => {
+    openAppDatabaseAsync: vi.fn(async () => {
       events.push("database");
+      await databasePending;
+      if (databaseError) throw databaseError;
+      events.push("database-ready");
       return { connection, close };
     }),
     ProjectRepository: vi.fn(function (this: Record<string, unknown>, db: unknown) {
@@ -106,7 +113,7 @@ vi.mock("electron", () => ({
 }));
 vi.mock("node:fs/promises", () => ({ mkdir: mocks.mkdir }));
 vi.mock("./platform/paths", () => ({ getAppPaths: mocks.getAppPaths }));
-vi.mock("./db/database", () => ({ openAppDatabase: mocks.openAppDatabase }));
+vi.mock("./db/database", () => ({ openAppDatabaseAsync: mocks.openAppDatabaseAsync }));
 vi.mock("./projects/project-repository", () => ({
   ProjectRepository: mocks.ProjectRepository
 }));
@@ -149,6 +156,8 @@ describe("main application composition", () => {
     vi.clearAllMocks();
     mocks.events.length = 0;
     mocks.callbacks.clear();
+    mocks.setDatabasePending(Promise.resolve());
+    mocks.setDatabaseError();
   });
 
   afterEach(() => {
@@ -182,6 +191,7 @@ describe("main application composition", () => {
 
     expect(mocks.events).toEqual([
       "database",
+      "database-ready",
       "repository",
       "service",
       "settings-repository",
@@ -205,7 +215,7 @@ describe("main application composition", () => {
     await import("./index");
     await vi.waitFor(() => expect(mocks.createMainWindow).toHaveBeenCalledOnce());
 
-    expect(mocks.openAppDatabase).toHaveBeenCalledWith(
+    expect(mocks.openAppDatabaseAsync).toHaveBeenCalledWith(
       "C:\\data\\MyNotebookLM\\db\\app.sqlite",
       path.resolve(__dirname, "../../src/main/db/migrations")
     );
@@ -297,6 +307,37 @@ describe("main application composition", () => {
     expect(mocks.SpaceService).toHaveBeenCalledWith(mocks.SpaceRepository.mock.instances[0], expect.any(Object), expect.any(Function));
     expect((mocks.SpaceService.mock.instances[0] as { recoverInterrupted: ReturnType<typeof vi.fn> }).recoverInterrupted).toHaveBeenCalledOnce();
     expect(mocks.events).toContain("space-recovery");
+  });
+
+  it("waits for async database migration before constructing startup dependencies", async () => {
+    let release!: () => void;
+    mocks.setDatabasePending(new Promise<void>((resolve) => { release = resolve; }));
+    await import("./index");
+    await vi.waitFor(() => expect(mocks.openAppDatabaseAsync).toHaveBeenCalledOnce());
+    expect(mocks.events).toEqual(["database"]);
+    expect(mocks.ProjectRepository).not.toHaveBeenCalled();
+    expect(mocks.SpaceService).not.toHaveBeenCalled();
+    expect(mocks.createMainWindow).not.toHaveBeenCalled();
+    release();
+    await vi.waitFor(() => expect(mocks.createMainWindow).toHaveBeenCalledOnce());
+    expect(mocks.events.indexOf("database-ready")).toBeLessThan(mocks.events.indexOf("repository"));
+  });
+
+  it("stops startup when database backup or migration fails", async () => {
+    mocks.setDatabaseError(new Error("migration failed"));
+    const unhandled = vi.fn();
+    process.on("unhandledRejection", unhandled);
+    try {
+      await import("./index");
+      await vi.waitFor(() => expect(mocks.openAppDatabaseAsync).toHaveBeenCalledOnce());
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      expect(mocks.ProjectRepository).not.toHaveBeenCalled();
+      expect(mocks.SpaceRepository).not.toHaveBeenCalled();
+      expect(mocks.SpaceService).not.toHaveBeenCalled();
+      expect(mocks.createMainWindow).not.toHaveBeenCalled();
+    } finally {
+      process.off("unhandledRejection", unhandled);
+    }
   });
   it("passes optimize cancellation through the production operation", async () => {
     await import("./index");

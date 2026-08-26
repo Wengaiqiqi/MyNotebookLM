@@ -2,7 +2,7 @@ import { app, BrowserWindow, ipcMain, Menu } from "electron";
 import { randomUUID } from "node:crypto";
 import { mkdir } from "node:fs/promises";
 import path from "node:path";
-import { type AppDatabase, openAppDatabase } from "./db/database";
+import { type AppDatabase, openAppDatabaseAsync } from "./db/database";
 import { CredentialStore } from "./credentials/credential-store";
 import { SafeStorageAdapter } from "./credentials/safe-storage-adapter";
 import { registerProjectHandlers } from "./ipc/register-project-handlers";
@@ -59,7 +59,7 @@ app.whenReady().then(async () => {
   const migrationsDir = app.isPackaged
     ? path.join(process.resourcesPath, "migrations")
     : path.resolve(__dirname, "../../src/main/db/migrations");
-  appDatabase = openAppDatabase(appPaths.database, migrationsDir);
+  appDatabase = await openAppDatabaseAsync(appPaths.database, migrationsDir);
   const projectRepository = new ProjectRepository(appDatabase.connection);
   const projectService = new ProjectService(projectRepository);
   const settingsRepository = new SettingsRepository(appDatabase.connection);
