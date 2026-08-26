@@ -78,6 +78,24 @@ describe("OpenAI-compatible provider", () => {
     });
   });
 
+  it("rejects a truncated stream without a completion marker instead of faking done", async () => {
+    const fake = await server((_request, response) => {
+      response.writeHead(200, { "content-type": "text/event-stream" });
+      response.write('data: {"choices":[{"delta":{"content":"Hel"},"finish_reason":null}]}\n\n');
+      response.end();
+    });
+    const provider = new OpenAiCompatibleProvider({ baseUrl: fake.baseUrl, apiKey: secret });
+    const events: unknown[] = [];
+
+    const error = await providerError(async () => {
+      for await (const event of provider.generate({
+        model: "gpt-test", messages: [{ role: "user", content: "Hello" }]
+      }, new AbortController().signal)) events.push(event);
+    });
+    expect(events).toEqual([{ type: "text-delta", text: "Hel" }]);
+    expect(error.failure).toMatchObject({ fallbackEligible: false, error: { code: "PROVIDER" } });
+  });
+
   it("sends a batch embedding request and restores result order by index", async () => {
     const fake = await server((_request, response) => sendJson(response, {
       data: [{ index: 1, embedding: [3, 4] }, { index: 0, embedding: [1, 2] }]
@@ -102,6 +120,24 @@ describe("OpenAI-compatible provider", () => {
     const provider = new OpenAiCompatibleProvider({ baseUrl: fake.baseUrl, apiKey: secret });
 
     const error = await providerError(() => provider.embed({ model: "embedding-test", inputs: vectors.map((_, index) => `input-${index}`) }, new AbortController().signal));
+    expect(error.failure).toMatchObject({ fallbackEligible: false, error: { code: "PROVIDER" } });
+  });
+
+  it("rejects a stream chunk with non-string delta content as malformed", async () => {
+    const fake = await server((_request, response) => {
+      response.writeHead(200, { "content-type": "text/event-stream" });
+      response.write('data: {"choices":[{"delta":{"content":42}}]}\n\n');
+      response.end();
+    });
+    const provider = new OpenAiCompatibleProvider({ baseUrl: fake.baseUrl, apiKey: secret });
+    const events: unknown[] = [];
+
+    const error = await providerError(async () => {
+      for await (const event of provider.generate({
+        model: "gpt-test", messages: [{ role: "user", content: "Hello" }]
+      }, new AbortController().signal)) events.push(event);
+    });
+    expect(events).toEqual([]);
     expect(error.failure).toMatchObject({ fallbackEligible: false, error: { code: "PROVIDER" } });
   });
 

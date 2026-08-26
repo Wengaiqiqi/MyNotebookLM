@@ -80,6 +80,23 @@ describe("Ollama provider", () => {
     });
   });
 
+  it("rejects a truncated stream without a done marker instead of faking done", async () => {
+    const fake = await server((_request, response) => {
+      response.writeHead(200, { "content-type": "application/x-ndjson" });
+      response.end('{"message":{"role":"assistant","content":"lo"},"done":false}\n');
+    });
+    const provider = new OllamaProvider({ baseUrl: origin(fake) });
+    const events: GenerationEvent[] = [];
+
+    const error = await providerError(async () => {
+      for await (const event of provider.generate({
+        model: "llama-test", messages: [{ role: "user", content: "Hello" }]
+      }, new AbortController().signal)) events.push(event);
+    });
+    expect(events).toEqual([{ type: "text-delta", text: "lo" }]);
+    expect(error.failure).toMatchObject({ fallbackEligible: false, error: { code: "PROVIDER" } });
+  });
+
   it("sends array embedding requests and returns array embeddings", async () => {
     const fake = await server((_request, response) => sendJson(response, { embeddings: [[1, 2], [3, 4]] }));
     const provider = new OllamaProvider({ baseUrl: origin(fake) });

@@ -14,6 +14,7 @@ export type ProviderFailureInput = Readonly<{
   configuration?: boolean;
   timeout?: boolean;
   malformedResponse?: boolean;
+  responseTooLarge?: boolean;
 }>;
 
 function error(code: AppErrorDto["code"], messageKey: string, recoverable: boolean, retryAfterMs?: number): AppErrorDto {
@@ -37,6 +38,7 @@ export function classifyProviderError(input: ProviderFailureInput): ProviderFail
   if (input.configuration) return { error: error("VALIDATION", "errors.configuration", false), fallbackEligible: false };
   if (input.timeout) return { error: error("TIMEOUT", "errors.timeout", true), fallbackEligible: true };
   if (input.malformedResponse) return { error: error("PROVIDER", "errors.provider", false), fallbackEligible: false };
+  if (input.responseTooLarge) return { error: error("PROVIDER", "errors.provider", false), fallbackEligible: false };
 
   switch (input.status) {
     case 401:

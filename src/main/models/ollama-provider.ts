@@ -1,5 +1,6 @@
 import { ProviderHttpClient, ProviderRequestError } from "./http-client";
 import { classifyProviderError } from "./provider-errors";
+import { isRecord, malformedResponse, optionalFiniteNumber } from "./provider-guards";
 import type {
   EmbeddingRequest,
   GenerateRequest,
@@ -11,22 +12,6 @@ import type {
 export const OLLAMA_BASE_URL = "http://127.0.0.1:11434";
 
 export type OllamaProviderOptions = Readonly<{ baseUrl?: string }>;
-
-type JsonRecord = Record<string, unknown>;
-
-function isRecord(value: unknown): value is JsonRecord {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-function malformedResponse(): ProviderRequestError {
-  return new ProviderRequestError(classifyProviderError({ malformedResponse: true }));
-}
-
-function optionalFiniteNumber(value: unknown): number | undefined {
-  if (value === undefined) return undefined;
-  if (typeof value !== "number" || !Number.isFinite(value)) throw malformedResponse();
-  return value;
-}
 
 function embeddings(value: unknown, expectedCount: number): number[][] {
   if (!Array.isArray(value) || value.length !== expectedCount) throw malformedResponse();
@@ -100,7 +85,7 @@ export class OllamaProvider implements ModelProvider {
           : { type: "done", finishReason: chunk.done_reason };
       }
     }
-    if (!emittedDone) yield { type: "done" };
+    if (!emittedDone) throw malformedResponse();
   }
 
   async embed(request: EmbeddingRequest, signal: AbortSignal): Promise<number[][]> {

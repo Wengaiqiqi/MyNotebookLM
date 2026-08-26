@@ -1,5 +1,6 @@
 import { ProviderHttpClient, ProviderRequestError } from "./http-client";
 import { classifyProviderError } from "./provider-errors";
+import { isRecord, malformedResponse, optionalFiniteNumber } from "./provider-guards";
 import type { ModelCapability } from "../../shared/models";
 import type {
   EmbeddingRequest,
@@ -15,22 +16,6 @@ export type GeminiProviderOptions = Readonly<{
   baseUrl?: string;
   apiKey?: string;
 }>;
-
-type JsonRecord = Record<string, unknown>;
-
-function isRecord(value: unknown): value is JsonRecord {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-function malformedResponse(): ProviderRequestError {
-  return new ProviderRequestError(classifyProviderError({ malformedResponse: true }));
-}
-
-function optionalFiniteNumber(value: unknown): number | undefined {
-  if (value === undefined) return undefined;
-  if (typeof value !== "number" || !Number.isFinite(value)) throw malformedResponse();
-  return value;
-}
 
 function modelName(model: string): string {
   return model.startsWith("models/") ? model : `models/${model}`;
@@ -138,7 +123,7 @@ export class GeminiProvider implements ModelProvider {
         yield { type: "done", finishReason };
       }
     }
-    if (!emittedDone) yield { type: "done" };
+    if (!emittedDone) throw malformedResponse();
   }
 
   async embed(request: EmbeddingRequest, signal: AbortSignal): Promise<number[][]> {

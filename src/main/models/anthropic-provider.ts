@@ -1,5 +1,6 @@
 import { ProviderHttpClient, ProviderRequestError } from "./http-client";
 import { classifyProviderError } from "./provider-errors";
+import { isRecord, malformedResponse, optionalFiniteNumber } from "./provider-guards";
 import type {
   EmbeddingRequest,
   GenerateRequest,
@@ -15,22 +16,6 @@ export type AnthropicProviderOptions = Readonly<{
   baseUrl?: string;
   apiKey?: string;
 }>;
-
-type JsonRecord = Record<string, unknown>;
-
-function isRecord(value: unknown): value is JsonRecord {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-function malformedResponse(): ProviderRequestError {
-  return new ProviderRequestError(classifyProviderError({ malformedResponse: true }));
-}
-
-function optionalFiniteNumber(value: unknown): number | undefined {
-  if (value === undefined) return undefined;
-  if (typeof value !== "number" || !Number.isFinite(value)) throw malformedResponse();
-  return value;
-}
 
 function anthropicStreamError(value: unknown): ProviderRequestError {
   if (!isRecord(value) || typeof value.type !== "string") return malformedResponse();
@@ -123,7 +108,7 @@ export class AnthropicProvider implements ModelProvider {
         yield { type: "done" };
       }
     }
-    if (!emittedDone) yield { type: "done" };
+    if (!emittedDone) throw malformedResponse();
   }
 
   async embed(_request: EmbeddingRequest, _signal: AbortSignal): Promise<number[][]> {

@@ -120,8 +120,35 @@ describe("ProviderHttpClient", () => {
       { signal: new AbortController().signal }
     ));
 
-    expect(error.failure).toMatchObject({ error: { code: "PROVIDER" } });
+    expect(error.failure).toMatchObject({ fallbackEligible: false, error: { code: "PROVIDER" } });
     expect(JSON.stringify(error)).not.toContain("oversized");
+  });
+
+  it("does not retry failed requests automatically and exposes caller-usable retry metadata", async () => {
+    let calls = 0;
+    const client = new ProviderHttpClient(async () => {
+      calls += 1;
+      return response("busy", { status: 429, headers: { "retry-after": "2" } });
+    });
+    const limited = await requestError(() => client.json(
+      "https://models.example", "/models", { signal: new AbortController().signal }
+    ));
+    expect(calls).toBe(1);
+    expect(limited.failure).toMatchObject({
+      fallbackEligible: true,
+      error: { code: "RATE_LIMITED", retryAfterMs: 2000 }
+    });
+
+    calls = 0;
+    const serverErrorClient = new ProviderHttpClient(async () => {
+      calls += 1;
+      return response("boom", { status: 503 });
+    });
+    const unavailable = await requestError(() => serverErrorClient.json(
+      "https://models.example", "/models", { signal: new AbortController().signal }
+    ));
+    expect(calls).toBe(1);
+    expect(unavailable.failure).toMatchObject({ fallbackEligible: true, error: { code: "PROVIDER" } });
   });
 
   it("reads SSE and NDJSON records split across byte chunks", async () => {

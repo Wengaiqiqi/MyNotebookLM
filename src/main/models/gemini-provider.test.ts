@@ -95,6 +95,24 @@ describe("Gemini provider", () => {
     });
   });
 
+  it("rejects a truncated stream without a finish reason instead of faking done", async () => {
+    const fake = await server((_request, response) => {
+      response.writeHead(200, { "content-type": "text/event-stream" });
+      response.write('data: {"candidates":[{"content":{"parts":[{"text":"Hel"}]}}]}\n\n');
+      response.end();
+    });
+    const provider = new GeminiProvider({ baseUrl: origin(fake), apiKey: secret });
+    const events: GenerationEvent[] = [];
+
+    const error = await providerError(async () => {
+      for await (const event of provider.generate({
+        model: "models/gemini-test", messages: [{ role: "user", content: "Hello" }]
+      }, new AbortController().signal)) events.push(event);
+    });
+    expect(events).toEqual([{ type: "text-delta", text: "Hel" }]);
+    expect(error.failure).toMatchObject({ fallbackEligible: false, error: { code: "PROVIDER" } });
+  });
+
   it("calls embedContent for every input and returns embedding arrays", async () => {
     const fake = await server((_request, response) => sendJson(response, {
       embedding: { values: fake.requests.length === 1 ? [1, 2] : [3, 4] }

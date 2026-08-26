@@ -135,7 +135,7 @@ export class ProviderHttpClient {
       if (tail) yield tail;
     } catch (reason) {
       if (reason instanceof ProviderRequestError) throw reason;
-      if (reason instanceof ResponseTooLargeError) throw new ProviderRequestError(classifyProviderError({ malformedResponse: true }));
+      if (reason instanceof ResponseTooLargeError) throw new ProviderRequestError(classifyProviderError({ responseTooLarge: true }));
       if (originalSignal.aborted) throw new ProviderRequestError(classifyProviderError({ cancelled: true }));
       if (signal.aborted) throw new ProviderRequestError(classifyProviderError({ timeout: true }));
       throw new ProviderRequestError(classifyProviderError({ cause: reason }));

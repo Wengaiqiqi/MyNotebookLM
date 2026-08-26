@@ -98,6 +98,24 @@ describe("Anthropic provider", () => {
     });
   });
 
+  it("rejects a truncated stream without a stop event instead of faking done", async () => {
+    const fake = await server((_request, response) => {
+      response.writeHead(200, { "content-type": "text/event-stream" });
+      response.write('data: {"type":"content_block_delta","delta":{"type":"text_delta","text":"Hel"}}\n\n');
+      response.end();
+    });
+    const provider = new AnthropicProvider({ baseUrl: origin(fake), apiKey: secret });
+    const events: GenerationEvent[] = [];
+
+    const error = await providerError(async () => {
+      for await (const event of provider.generate({
+        model: "claude-test", messages: [{ role: "user", content: "Hello" }]
+      }, new AbortController().signal)) events.push(event);
+    });
+    expect(events).toEqual([{ type: "text-delta", text: "Hel" }]);
+    expect(error.failure).toMatchObject({ fallbackEligible: false, error: { code: "PROVIDER" } });
+  });
+
   it("rejects embeddings as unsupported before network I/O", async () => {
     const fake = await server((_request, response) => sendJson(response, {}));
     const provider = new AnthropicProvider({ baseUrl: origin(fake), apiKey: secret });

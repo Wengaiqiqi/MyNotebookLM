@@ -61,4 +61,13 @@ describe("classifyProviderError", () => {
     });
     expect(JSON.stringify(failure)).not.toContain("secret-token");
   });
+
+  it("classifies oversized responses distinctly from malformed payloads", () => {
+    const oversized = classifyProviderError({ responseTooLarge: true });
+
+    expect(oversized).toMatchObject({
+      fallbackEligible: false,
+      error: { code: "PROVIDER", messageKey: "errors.provider" }
+    });
+  });
 });
