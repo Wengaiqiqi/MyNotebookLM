@@ -516,4 +516,19 @@ describe("openAppDatabase", () => {
       bundledDatabase.close();
     }
   });
+
+  it("enforces embedding space activation, immutable fingerprints, dimensions and progress", () => {
+    const db = openAppDatabase(path.join(temporaryRoot, "embedding-space.db"), path.resolve("src/main/db/migrations"));
+    try {
+      db.connection.prepare("INSERT INTO projects(id, name, archived) VALUES (?, ?, 0)").run("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "Vectors");
+      const insert = db.connection.prepare("INSERT INTO embedding_spaces (id, project_id, provider, model_id, model_revision, dimension, distance, pooling, preprocess_version, chunking_version, fingerprint, state, progress_1000, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
+      const base = ["aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "local", "model", "rev1", 384, "cosine", "mean", "v1", "blocks-900-150-v1"];
+      insert.run("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", ...base, "fp-old", "active", 1000, "2026-01-01", "2026-01-01");
+      expect(() => insert.run("cccccccc-cccc-4ccc-8ccc-cccccccccccc", ...base, "fp-new", "active", 1000, "2026-01-02", "2026-01-02")).toThrow(/unique/i);
+      expect(() => insert.run("dddddddd-dddd-4ddd-8ddd-dddddddddddd", ...base.slice(0, 4), 0, ...base.slice(5), "fp-zero", "building", 0, "2026-01-03", "2026-01-03")).toThrow(/check/i);
+      expect(() => db.connection.prepare("UPDATE embedding_spaces SET dimension = 768 WHERE id = ?").run("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb")).toThrow(/immutable|trigger/i);
+      db.connection.prepare("INSERT INTO model_artifacts(id, artifact_key, state, progress_1000, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)").run("eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee", "model", "downloading", 500, "2026-01-01", "2026-01-01");
+      expect(() => db.connection.prepare("UPDATE model_artifacts SET progress_1000 = 1001 WHERE artifact_key = 'model'").run()).toThrow(/check/i);
+    } finally { db.close(); }
+  });
 });

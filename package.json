@@ -15,6 +15,8 @@
     "postinstall": "electron-builder install-app-deps"
   },
   "dependencies": {
+    "@huggingface/transformers": "4.2.0",
+    "@lancedb/lancedb": "0.37.1",
     "@mozilla/readability": "0.6.0",
     "better-sqlite3": "13.0.3",
     "csv-parse": "7.0.2",
