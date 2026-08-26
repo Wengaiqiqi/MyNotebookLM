@@ -286,7 +286,7 @@ describe("main application composition", () => {
   it("recovers interrupted Spaces during startup and constructs the lifecycle service", async () => {
     await import("./index");
     await vi.waitFor(() => expect(mocks.createMainWindow).toHaveBeenCalledOnce());
-    expect(mocks.SpaceRepository).toHaveBeenCalledWith(mocks.connection);
+    expect(mocks.SpaceRepository).toHaveBeenCalledWith(mocks.connection, undefined, undefined, expect.any(Object));
     expect(mocks.SpaceService).toHaveBeenCalledWith(mocks.SpaceRepository.mock.instances[0], expect.any(Object), expect.any(Function));
     expect((mocks.SpaceService.mock.instances[0] as { recoverInterrupted: ReturnType<typeof vi.fn> }).recoverInterrupted).toHaveBeenCalledOnce();
     expect(mocks.events).toContain("space-recovery");

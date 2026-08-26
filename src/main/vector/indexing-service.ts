@@ -59,8 +59,10 @@ export class IndexingService {
     for (let i = 0; i < chunks.length; i += Math.max(1, input.batchSize ?? 32)) {
       if (input.signal?.aborted) throw Object.assign(new Error("Space build cancelled"), { code: "SPACE_BUILD_CANCELLED" });
       const part = chunks.slice(i, i + Math.max(1, input.batchSize ?? 32));
+      if (input.signal?.aborted) throw Object.assign(new Error("Space build cancelled"), { code: "SPACE_BUILD_CANCELLED" });
       const vectors = await provider.embedBatch(part.map(c => c.text), input.signal ?? new AbortController().signal, part.length);
       await this.lance.upsert(input.space, part.map((c,n) => ({ chunkId:c.id, projectId:source.project_id, sourceId:source.source_id, revisionId:input.revisionId, spaceId:input.space.id, ordinal:c.ordinal, contentHash:c.content_hash, text:c.text, vector:vectors[n]!, locator:JSON.parse(c.locator_json), createdAt:Date.now() })));
+      if (input.signal?.aborted) throw Object.assign(new Error("Space build cancelled"), { code: "SPACE_BUILD_CANCELLED" });
     }
     if (await this.lance.count(input.space, { revisionId: input.revisionId }) !== chunks.length) throw new Error("Lance row count mismatch");
     const rows = (await this.lance.rows(input.space)).filter(r => r.revisionId === input.revisionId);

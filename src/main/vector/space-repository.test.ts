@@ -18,12 +18,14 @@ describe("SpaceRepository", () => {
     expect(() => repo.activate("other", space.id)).toThrow(/project/);
     expect(() => repo.activate("p", space.id)).toThrow(/validating/);
   });
-  it("recovers interrupted states without changing the active space", () => {
+  it("recovers interrupted states by deleting each shadow before marking failed", async () => {
     const d = db(); const repo = new SpaceRepository(d as never, () => "now");
     const spec = { projectId: "p", provider: "openai", modelId: "m", modelRevision: "r", dimension: 3, distance: "cosine" as const, pooling: "mean" as const, preprocessVersion: "1", chunkingVersion: "1", fingerprint: "fp" };
     const active = repo.createOrReuse(spec); d.prepare("UPDATE embedding_spaces SET state='active' WHERE id=?").run(active.id); d.prepare("INSERT INTO project_embedding_spaces VALUES(?,?,?)").run("p", active.id, "now");
     const interrupted = repo.createOrReuse({ ...spec, fingerprint: "fp2" }); d.prepare("UPDATE embedding_spaces SET state='building' WHERE id=?").run(interrupted.id);
-    repo.recoverInterrupted(); expect(repo.get(interrupted.id)?.state).toBe("failed"); expect(repo.active("p")?.id).toBe(active.id);
+    const deleted: string[] = []; const recovering = new SpaceRepository(d as never, () => "now", undefined, { deleteSpace: async ({ id }: { id: string }) => { deleted.push(id); } });
+    await recovering.recoverInterrupted(); expect(recovering.get(interrupted.id)?.state).toBe("failed"); expect(recovering.active("p")?.id).toBe(active.id); expect(deleted).toEqual([interrupted.id]);
+    await recovering.recoverInterrupted(); expect(deleted).toEqual([interrupted.id]);
   });
   it("cleans Lance rows when cancelling a shadow space", async () => {
     const d = db(); const deleted: string[] = []; const repo = new SpaceRepository(d as never, () => "now", undefined, { deleteSpace: async (space: { id: string }) => { deleted.push(space.id); } } as never);

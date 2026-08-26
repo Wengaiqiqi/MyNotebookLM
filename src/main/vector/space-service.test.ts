@@ -13,7 +13,7 @@ describe("SpaceService", () => {
   });
   it("runs startup recovery, rebuilds from SQLite, and schedules optimize", async () => {
     const calls: string[] = []; const service = new SpaceService({ recoverInterrupted: () => { calls.push("recover"); }, createOrReuse: () => ({ id: "new", projectId: "p", state: "preparing" }), activate: () => {}, fail: () => {}, cancel: async () => {} } as never, { rebuild: async () => { calls.push("rebuild"); }, optimize: async () => { calls.push("optimize"); } });
-    service.recoverInterrupted(); await service.rebuild({ spec: { projectId: "p" } } as never); const task = service.optimize({} as never); expect(task).toBeInstanceOf(Promise); await task; expect(calls).toEqual(["recover", "rebuild", "optimize"]);
+    await service.recoverInterrupted(); await service.rebuild({ spec: { projectId: "p" } } as never); const task = service.optimize({} as never); expect(task).toBeInstanceOf(Promise); await task; expect(calls).toEqual(["recover", "rebuild", "optimize"]);
   });
   it("backs up before activating and surfaces backup failure", async () => {
     const calls: string[] = []; const service = new SpaceService({ createOrReuse: () => ({ id: "new", state: "preparing" }), activate: () => calls.push("active"), fail: () => calls.push("failed") } as never, undefined, async () => { calls.push("backup"); throw new Error("backup failed"); });

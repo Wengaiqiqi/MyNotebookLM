@@ -71,9 +71,9 @@ app.whenReady().then(async () => {
   workerPool = pool;
   let ingestionService!: IngestionService;
   const lance = await LanceStore.open(path.join(appPaths.root, "vectors"));
-  const spaces = new SpaceRepository(appDatabase.connection);
+  const spaces = new SpaceRepository(appDatabase.connection, undefined, undefined, lance);
   const spaceService = new SpaceService(spaces, { rebuild: async (raw: unknown) => { const input = raw as { space: { id: string; dimension: number }; spec: { projectId: string }; signal?: AbortSignal; revisionId?: string }; const revisions = input.revisionId ? [{ id: input.revisionId }] : appDatabase!.connection.prepare("SELECT current_revision_id AS id FROM sources WHERE project_id = ? AND status = 'active' AND current_revision_id IS NOT NULL").all(input.spec.projectId) as Array<{ id: string }>; for (const revision of revisions) await indexing.rebuild(input.signal ? { revisionId: revision.id, space: input.space, signal: input.signal } : { revisionId: revision.id, space: input.space }); }, optimize: async (raw: unknown) => { const value = raw as { taskId?: string; projectId?: string; space: { id: string; dimension: number } }; const taskId = value.taskId ?? (value.projectId ? taskService.createTask({ projectId: value.projectId, sourceId: null, kind: "optimize" }).id : undefined); if (!taskId) throw new Error("optimize requires taskId or projectId"); taskService.start(taskId, "indexing"); try { taskService.advance(taskId, "indexing", 500); await lance.optimize(value.space); taskService.complete(taskId); } catch (error) { taskService.fail(taskId, { code: "INTERNAL", messageKey: error instanceof Error ? error.message : "errors.internal", recoverable: false }); throw error; } } }, async () => backupDatabase(appDatabase!.connection, appPaths.database + ".space-backup-" + Date.now() + ".db"));
-  spaceService.recoverInterrupted();
+  await spaceService.recoverInterrupted();
   const localRuntime = createTransformersEmbeddingRuntime(appPaths.models, managedActiveDirectory(appPaths.models, LOCAL_MODEL_MANIFEST));
   const localManager = createLocalModelManager(appPaths.models, async (directory, signal) => localRuntime(directory, [], signal));
   const localEmbeddingProvider = new LocalEmbeddingProvider(localManager, localRuntime);
