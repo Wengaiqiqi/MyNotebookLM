@@ -13,6 +13,6 @@ export function malformedResponse(): ProviderRequestError {
 
 export function optionalFiniteNumber(value: unknown): number | undefined {
   if (value === undefined) return undefined;
-  if (typeof value !== "number" || !Number.isFinite(value)) throw malformedResponse();
+  if (typeof value !== "number" || !Number.isInteger(value) || value < 0) throw malformedResponse();
   return value;
 }

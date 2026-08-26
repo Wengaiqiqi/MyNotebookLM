@@ -47,7 +47,7 @@ import {
 import { OllamaProvider } from "./ollama-provider";
 import { OpenAiCompatibleProvider, OpenAiProvider } from "./openai-provider";
 import { ProviderRequestError } from "./http-client";
-import type { ModelProvider } from "./provider";
+import type { ModelDescriptor, ModelProvider } from "./provider";
 
 export type ModelProviderFactory = (
   provider: ProviderKind,
@@ -89,6 +89,13 @@ class ModelServiceError extends Error {
   constructor(readonly appError: AppErrorDto) {
     super(appError.messageKey);
   }
+}
+
+function parseDiscoveredModels(models: ModelDescriptor[]): ModelDescriptorDto[] {
+  return modelDescriptorSchema.array().parse(models.map((model) => ({
+    ...model,
+    capabilityEvidence: model.capabilityEvidence ?? "probe-required"
+  })));
 }
 
 function resultFromError<T>(reason: unknown): Result<T> {
@@ -259,12 +266,7 @@ export class ModelService {
       return builtInError();
     }
     return this.withProvider(parsed, async (provider) => {
-      const discovered = modelDescriptorSchema.array().parse(
-        (await provider.discover(new AbortController().signal)).map((model) => ({
-          ...model,
-          capabilityEvidence: model.capabilityEvidence ?? "probe-required"
-        }))
-      );
+      const discovered = parseDiscoveredModels(await provider.discover(new AbortController().signal));
       return discovered.filter((model) =>
         model.capabilityEvidence === "probe-required"
         || model.capabilities.includes(parsed.capability)
@@ -388,7 +390,7 @@ export class ModelService {
       const signal = new AbortController().signal;
       let discovered: ModelDescriptorDto[] = [];
       try {
-        discovered = modelDescriptorSchema.array().parse(await provider.discover(signal));
+        discovered = parseDiscoveredModels(await provider.discover(signal));
       } catch {
         // Some compatible endpoints cannot list models; the capability probe is authoritative.
       }

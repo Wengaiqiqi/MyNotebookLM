@@ -53,7 +53,7 @@ export class OpenAiProvider implements ModelProvider {
       ...(request.temperature === undefined ? {} : { temperature: request.temperature }),
       ...(request.maxTokens === undefined ? {} : { max_tokens: request.maxTokens })
     };
-    let emittedDone = false;
+    let finishReason: string | undefined;
     for await (const chunk of this.client.sse<unknown>(this.baseUrl, "/chat/completions", {
       method: "POST",
       headers: this.headers(true),
@@ -65,6 +65,7 @@ export class OpenAiProvider implements ModelProvider {
       const finishReasons: string[] = [];
       if (choices !== undefined) {
         if (!Array.isArray(choices)) throw malformedResponse();
+        if (finishReason !== undefined && choices.length > 0) throw malformedResponse();
         for (const choice of choices) {
           if (!isRecord(choice)) throw malformedResponse();
           if (choice.delta !== undefined) {
@@ -79,6 +80,9 @@ export class OpenAiProvider implements ModelProvider {
           }
         }
       }
+      if (finishReasons.length > 1 || (finishReason !== undefined && finishReasons.length > 0)) {
+        throw malformedResponse();
+      }
       if (chunk.usage !== undefined) {
         if (!isRecord(chunk.usage)) throw malformedResponse();
         const inputTokens = optionalFiniteNumber(chunk.usage.prompt_tokens);
@@ -91,12 +95,10 @@ export class OpenAiProvider implements ModelProvider {
           };
         }
       }
-      for (const finishReason of finishReasons) {
-        emittedDone = true;
-        yield { type: "done", finishReason };
-      }
+      if (finishReasons.length) finishReason = finishReasons[0];
     }
-    if (!emittedDone) throw malformedResponse();
+    if (finishReason === undefined) throw malformedResponse();
+    yield { type: "done", finishReason };
   }
 
   async embed(request: EmbeddingRequest, signal: AbortSignal): Promise<number[][]> {

@@ -38,8 +38,8 @@ describe("Ollama provider", () => {
     const provider = new OllamaProvider({ baseUrl: origin(fake) });
 
     await expect(provider.discover(new AbortController().signal)).resolves.toEqual([
-      { id: "llama-test:latest", displayName: "llama-test:latest", capabilities: [] },
-      { id: "embed-test:latest", displayName: "embed-test:latest", capabilities: [] }
+      { id: "llama-test:latest", displayName: "llama-test:latest", capabilities: [], capabilityEvidence: "probe-required" },
+      { id: "embed-test:latest", displayName: "embed-test:latest", capabilities: [], capabilityEvidence: "probe-required" }
     ]);
     expect(fake.requests).toEqual([expect.objectContaining({ method: "GET", path: "/api/tags" })]);
     expect(fake.requests[0]?.headers.authorization).toBeUndefined();
@@ -78,6 +78,21 @@ describe("Ollama provider", () => {
         options: { temperature: 0.2, num_predict: 50 }
       })
     });
+  });
+
+  it("rejects malformed usage without emitting completion", async () => {
+    const fake = await server((_request, response) => {
+      response.writeHead(200, { "content-type": "application/x-ndjson" });
+      response.end('{"done":true,"prompt_eval_count":1.5}\n');
+    });
+    const events: unknown[] = [];
+    const error = await providerError(async () => {
+      for await (const event of new OllamaProvider({ baseUrl: origin(fake) }).generate({
+        model: "llama-test", messages: [{ role: "user", content: "Hello" }]
+      }, new AbortController().signal)) events.push(event);
+    });
+    expect(events).not.toContainEqual(expect.objectContaining({ type: "done" }));
+    expect(error.failure.error.code).toBe("PROVIDER");
   });
 
   it("rejects a truncated stream without a done marker instead of faking done", async () => {

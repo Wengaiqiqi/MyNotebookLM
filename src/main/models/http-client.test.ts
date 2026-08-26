@@ -151,6 +151,21 @@ describe("ProviderHttpClient", () => {
     expect(unavailable.failure).toMatchObject({ fallbackEligible: true, error: { code: "PROVIDER" } });
   });
 
+  it.each([429, 503])("returns HTTP %i without waiting for a hanging error body", async (status) => {
+    const client = new ProviderHttpClient(async () => new Response(new ReadableStream({
+      start() {
+        // Deliberately never close or enqueue: HTTP classification must not read this body.
+      }
+    }), { status, headers: { "retry-after": "1" } }));
+    const result = await Promise.race([
+      client.json("https://models.example", "/models", { signal: new AbortController().signal }).catch((error: unknown) => error),
+      new Promise<symbol>((resolve) => setTimeout(() => resolve(Symbol("timed out")), 50))
+    ]);
+
+    expect(result).toBeInstanceOf(ProviderRequestError);
+    expect((result as ProviderRequestError).failure.error.code).toMatch(/RATE_LIMITED|PROVIDER/);
+  });
+
   it("reads SSE and NDJSON records split across byte chunks", async () => {
     const client = new ProviderHttpClient(async (_url) => chunkedResponse(
       ['data: {"text":"hel', 'lo"}\n\ndata: [DONE]\n\n'],

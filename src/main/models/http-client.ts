@@ -90,7 +90,6 @@ export class ProviderHttpClient {
     try {
       const response = await this.fetchImpl(joinUrl(baseUrl, endpoint), { ...options, signal });
       if (!response.ok) {
-        await this.discardResponse({ response, originalSignal: options.signal, signal });
         throw new ProviderRequestError(classifyProviderError({ status: response.status, headers: response.headers }));
       }
       return { response, originalSignal: options.signal, signal };
@@ -99,14 +98,6 @@ export class ProviderHttpClient {
       if (options.signal.aborted) throw new ProviderRequestError(classifyProviderError({ cancelled: true }));
       if (timeout.aborted) throw new ProviderRequestError(classifyProviderError({ timeout: true }));
       throw new ProviderRequestError(classifyProviderError({ cause: reason }));
-    }
-  }
-
-  private async discardResponse(requested: RequestedResponse): Promise<void> {
-    try {
-      await this.readText(requested);
-    } catch {
-      // Error bodies are intentionally ignored and never placed in DTOs or errors.
     }
   }
 

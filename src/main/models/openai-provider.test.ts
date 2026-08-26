@@ -78,6 +78,58 @@ describe("OpenAI-compatible provider", () => {
     });
   });
 
+  it("rejects malformed usage without emitting completion", async () => {
+    const fake = await server((_request, response) => {
+      response.writeHead(200, { "content-type": "text/event-stream" });
+      response.end('data: {"choices":[{"finish_reason":"stop"}],"usage":{"prompt_tokens":-1}}\n\n');
+    });
+    const events: unknown[] = [];
+    const error = await providerError(async () => {
+      for await (const event of new OpenAiProvider({ baseUrl: fake.baseUrl }).generate({
+        model: "gpt-test", messages: [{ role: "user", content: "Hello" }]
+      }, new AbortController().signal)) events.push(event);
+    });
+    expect(events).not.toContainEqual({ type: "done", finishReason: "stop" });
+    expect(error.failure.error.code).toBe("PROVIDER");
+  });
+
+  it("emits usage-only tail usage before the single final completion", async () => {
+    const fake = await server((_request, response) => {
+      response.writeHead(200, { "content-type": "text/event-stream" });
+      response.write('data: {"choices":[{"finish_reason":"stop"}]}\n\n');
+      response.write('data: {"choices":[],"usage":{"prompt_tokens":3,"completion_tokens":2}}\n\n');
+      response.end("data: [DONE]\n\n");
+    });
+    const events: unknown[] = [];
+    for await (const event of new OpenAiProvider({ baseUrl: fake.baseUrl }).generate({
+      model: "gpt-test", messages: [{ role: "user", content: "Hello" }]
+    }, new AbortController().signal)) events.push(event);
+
+    expect(events).toEqual([
+      { type: "usage", inputTokens: 3, outputTokens: 2 },
+      { type: "done", finishReason: "stop" }
+    ]);
+  });
+
+  it.each([
+    ["text", '{"choices":[{"delta":{"content":"late"}}]}'],
+    ["second completion", '{"choices":[{"finish_reason":"length"}]}']
+  ])("rejects %s after completion", async (_label, lateChunk) => {
+    const fake = await server((_request, response) => {
+      response.writeHead(200, { "content-type": "text/event-stream" });
+      response.write('data: {"choices":[{"finish_reason":"stop"}]}\n\n');
+      response.end(`data: ${lateChunk}\n\n`);
+    });
+    const events: unknown[] = [];
+    const error = await providerError(async () => {
+      for await (const event of new OpenAiProvider({ baseUrl: fake.baseUrl }).generate({
+        model: "gpt-test", messages: [{ role: "user", content: "Hello" }]
+      }, new AbortController().signal)) events.push(event);
+    });
+    expect(events).not.toContainEqual(expect.objectContaining({ type: "done" }));
+    expect(error.failure.error.code).toBe("PROVIDER");
+  });
+
   it("rejects a truncated stream without a completion marker instead of faking done", async () => {
     const fake = await server((_request, response) => {
       response.writeHead(200, { "content-type": "text/event-stream" });

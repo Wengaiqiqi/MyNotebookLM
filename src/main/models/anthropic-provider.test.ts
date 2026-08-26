@@ -98,6 +98,21 @@ describe("Anthropic provider", () => {
     });
   });
 
+  it("rejects malformed usage without emitting completion", async () => {
+    const fake = await server((_request, response) => {
+      response.writeHead(200, { "content-type": "text/event-stream" });
+      response.end('data: {"type":"message_start","message":{"usage":{"input_tokens":1.5}}}\n\n');
+    });
+    const events: unknown[] = [];
+    const error = await providerError(async () => {
+      for await (const event of new AnthropicProvider({ baseUrl: fake.baseUrl }).generate({
+        model: "claude-test", messages: [{ role: "user", content: "Hello" }]
+      }, new AbortController().signal)) events.push(event);
+    });
+    expect(events).not.toContainEqual(expect.objectContaining({ type: "done" }));
+    expect(error.failure.error.code).toBe("PROVIDER");
+  });
+
   it("rejects a truncated stream without a stop event instead of faking done", async () => {
     const fake = await server((_request, response) => {
       response.writeHead(200, { "content-type": "text/event-stream" });
