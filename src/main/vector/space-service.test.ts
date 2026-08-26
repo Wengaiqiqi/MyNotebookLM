@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { SpaceService } from "./space-service";
 describe("SpaceService", () => {
   it("rolls back a failed, cancelled, or crashed build and retains the old space", async () => {
@@ -52,5 +52,12 @@ describe("SpaceService", () => {
     });
     await service.optimize({ taskId: "task-1" });
     expect(calls).toEqual(["task-1"]);
+  });
+  it("cancels an in-flight optimize through its task signal", async () => {
+    let resolve!: () => void; let signal!: AbortSignal;
+    const service = new SpaceService({} as never, { rebuild: async () => {}, optimize: async (input: unknown) => { signal = (input as { signal: AbortSignal }).signal; await new Promise<void>(r => { resolve = r; }); } });
+    const running = service.optimize({ taskId: "task-1" });
+    await vi.waitFor(() => expect(signal).toBeInstanceOf(AbortSignal));
+    expect(service.cancel("task-1")).toBe(true); expect(signal.aborted).toBe(true); resolve(); await expect(running).rejects.toMatchObject({ code: "TASK_CANCELLED" });
   });
 });

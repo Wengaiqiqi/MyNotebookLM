@@ -69,6 +69,7 @@ export class TaskService {
   }
 
   fail(taskId: string, error: TaskErrorSummaryDto): TaskDto {
+    if ((error as { code: string }).code === "TASK_CANCELLED") return this.cancel(taskId);
     const current = this.repository.findById(taskId);
     if (!current) throw new Error(`Task not found: ${taskId}`);
     const retryable = isRetryableCode(error.code);
