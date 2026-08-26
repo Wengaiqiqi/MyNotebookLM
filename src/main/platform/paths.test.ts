@@ -7,6 +7,7 @@ describe("getAppPaths", () => {
       root: "C:\\Users\\Ada\\AppData\\Roaming\\MyNotebookLM",
       database: "C:\\Users\\Ada\\AppData\\Roaming\\MyNotebookLM\\data\\app.db",
       files: "C:\\Users\\Ada\\AppData\\Roaming\\MyNotebookLM\\files",
+      models: "C:\\Users\\Ada\\AppData\\Roaming\\MyNotebookLM\\models\\huggingface",
       logs: "C:\\Users\\Ada\\AppData\\Roaming\\MyNotebookLM\\logs"
     });
   });

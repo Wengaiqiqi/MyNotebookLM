@@ -23,6 +23,7 @@ const mocks = vi.hoisted(() => {
     cleanupProject,
     cleanupModel,
     cleanupTitleOverlay,
+    IndexingService: vi.fn(function (this: Record<string, unknown>, _db: unknown, provider: unknown) { this.provider = provider; }),
     app: {
       isPackaged: false,
       whenReady: vi.fn(() => Promise.resolve()),
@@ -41,6 +42,7 @@ const mocks = vi.hoisted(() => {
       root: "C:\\data\\MyNotebookLM",
       database: "C:\\data\\MyNotebookLM\\db\\app.sqlite",
       files: "C:\\data\\MyNotebookLM\\files",
+      models: "C:\\data\\MyNotebookLM\\models\\huggingface",
       logs: "C:\\data\\MyNotebookLM\\logs"
     })),
     openAppDatabase: vi.fn(() => {
@@ -126,6 +128,12 @@ vi.mock("./window", () => ({
   registerTitleOverlayHandler: mocks.registerTitleOverlayHandler
 }));
 vi.mock("./vector/lance-store", () => ({ LanceStore: { open: vi.fn(async () => ({ upsert: vi.fn(), count: vi.fn(), rows: vi.fn(async () => []), vectorSearch: vi.fn(), deleteRevision: vi.fn() })), closeAll: vi.fn(async () => undefined) } }));
+vi.mock("./vector/indexing-service", () => ({ IndexingService: mocks.IndexingService }));
+vi.mock("./vector/local-model-manager", () => ({ createLocalModelManager: vi.fn(() => ({ ensureReady: vi.fn() })) }));
+vi.mock("./vector/local-embedding-provider", () => ({
+  createTransformersEmbeddingRuntime: vi.fn(() => vi.fn()),
+  LocalEmbeddingProvider: vi.fn(function (this: Record<string, unknown>, manager: unknown, runtime: unknown) { this.manager = manager; this.runtime = runtime; this.embedBatch = vi.fn(); })
+}));
 
 describe("main application composition", () => {
   beforeEach(() => {
@@ -234,6 +242,17 @@ describe("main application composition", () => {
 
     mocks.callbacks.get("window-all-closed")?.();
     expect(mocks.app.quit).toHaveBeenCalledTimes(2);
+  });
+
+  it("constructs the production local embedding chain under the app model path", async () => {
+    await import("./index");
+    await vi.waitFor(() => expect(mocks.createMainWindow).toHaveBeenCalledOnce());
+    const { createLocalModelManager } = await import("./vector/local-model-manager");
+    const { createTransformersEmbeddingRuntime, LocalEmbeddingProvider } = await import("./vector/local-embedding-provider");
+    expect(createTransformersEmbeddingRuntime).toHaveBeenCalledWith("C:\\data\\MyNotebookLM\\models\\huggingface");
+    expect(createLocalModelManager).toHaveBeenCalledWith("C:\\data\\MyNotebookLM\\models\\huggingface", expect.any(Function));
+    expect(LocalEmbeddingProvider).toHaveBeenCalledOnce();
+    expect(mocks.IndexingService).toHaveBeenCalledWith(mocks.connection, expect.objectContaining({ embedBatch: expect.any(Function) }), expect.anything());
   });
 
   it("fans out task updates only to live windows subscribed to the project", async () => {

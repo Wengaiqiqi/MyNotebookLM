@@ -4,10 +4,13 @@ import { LOCAL_MODEL_ID, LOCAL_MODEL_REVISION } from "./local-model-manifest";
 export type EmbeddingRuntime = (model: unknown, inputs: string[], signal: AbortSignal) => Promise<number[][]>;
 export class LocalEmbeddingProvider {
   constructor(private readonly manager: LocalModelManager, private readonly embed: EmbeddingRuntime, private readonly batchSize = 16) {}
-  async embedTexts(inputs: string[], kind: "query" | "document", signal = new AbortController().signal, onProgress = (_: number) => {}): Promise<number[][]> {
+  embedBatch(inputs: string[], signal: AbortSignal, batchSize = this.batchSize): Promise<number[][]> {
+    return this.embedTexts(inputs, "document", signal, () => {}, batchSize);
+  }
+  async embedTexts(inputs: string[], kind: "query" | "document", signal = new AbortController().signal, onProgress = (_: number) => {}, batchSize = this.batchSize): Promise<number[][]> {
     const model = await this.manager.ensureReady(false, onProgress, signal);
     const out: number[][] = [];
-    for (let i = 0; i < inputs.length; i += this.batchSize) { if (signal.aborted) throw signal.reason ?? new DOMException("Aborted", "AbortError"); const prefix = kind === "query" ? "query: " : "passage: "; const vectors = await this.embed(model, inputs.slice(i, i + this.batchSize).map(x => prefix + x), signal); if (vectors.length !== Math.min(this.batchSize, inputs.length - i)) throw new Error("embedding response count mismatch"); if (vectors.some(v => v.length !== 384 || v.some(x => !Number.isFinite(x)))) throw new Error("embedding dimension or finite-value mismatch"); out.push(...vectors.map(normalize)); onProgress(Math.min(1, (i + this.batchSize) / inputs.length)); } return out;
+    for (let i = 0; i < inputs.length; i += batchSize) { if (signal.aborted) throw signal.reason ?? new DOMException("Aborted", "AbortError"); const prefix = kind === "query" ? "query: " : "passage: "; const vectors = await this.embed(model, inputs.slice(i, i + batchSize).map(x => prefix + x), signal); if (vectors.length !== Math.min(batchSize, inputs.length - i)) throw new Error("embedding response count mismatch"); if (vectors.some(v => v.length !== 384 || v.some(x => !Number.isFinite(x)))) throw new Error("embedding dimension or finite-value mismatch"); out.push(...vectors.map(normalize)); onProgress(Math.min(1, (i + batchSize) / inputs.length)); } return out;
   }
 }
 let singleton: Promise<any> | undefined;
