@@ -32,10 +32,10 @@
 
 **Tables:** `conversations`, `messages`, `message_citations`; message states `streaming|completed|cancelled|failed`.
 
-- [ ] Write failing migration/repository tests for project ownership, ordered messages, one assistant reply lineage, regeneration supersession, citation uniqueness and cascade/soft-delete behavior.
-- [ ] Pin Marked and DOMPurify. Define Zod DTOs for conversations, messages, citation labels/locators and stream events.
-- [ ] Implement repository transactions; store provider/profile/model, usage, error code, completion reason and timestamps.
-- [ ] Run focused tests and typecheck; review and commit `feat: add conversation persistence`.
+- [x] Write failing migration/repository tests for project ownership, ordered messages, one assistant reply lineage, regeneration supersession, citation uniqueness and cascade/soft-delete behavior.
+- [x] Pin Marked and DOMPurify. Define Zod DTOs for conversations, messages, citation labels/locators and stream events.
+- [x] Implement repository transactions; store provider/profile/model, usage, error code, completion reason and timestamps.
+- [x] Run focused tests and typecheck; review and commit `feat: add conversation persistence`.
 
 ## Task 2: Build Citation-Aware Context Assembly
 
