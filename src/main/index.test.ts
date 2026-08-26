@@ -133,7 +133,10 @@ vi.mock("./vector/lance-store", () => ({ LanceStore: { open: vi.fn(async () => (
 vi.mock("./vector/indexing-service", () => ({ IndexingService: mocks.IndexingService }));
 vi.mock("./vector/space-repository", () => ({ SpaceRepository: mocks.SpaceRepository }));
 vi.mock("./vector/space-service", () => ({ SpaceService: mocks.SpaceService }));
-vi.mock("./vector/local-model-manager", () => ({ createLocalModelManager: vi.fn(() => ({ ensureReady: vi.fn() })) }));
+vi.mock("./vector/local-model-manager", () => ({
+  createLocalModelManager: vi.fn(() => ({ ensureReady: vi.fn() })),
+  managedActiveDirectory: vi.fn((root: string, manifest: { modelId: string; revision: string }) => root + "/" + manifest.modelId.replaceAll("/", "__") + "-" + manifest.revision)
+}));
 vi.mock("./vector/local-embedding-provider", () => ({
   createTransformersEmbeddingRuntime: vi.fn(() => vi.fn()),
   LocalEmbeddingProvider: vi.fn(function (this: Record<string, unknown>, manager: unknown, runtime: unknown) { this.manager = manager; this.runtime = runtime; this.embedBatch = vi.fn(); })
@@ -256,7 +259,10 @@ describe("main application composition", () => {
     await vi.waitFor(() => expect(mocks.createMainWindow).toHaveBeenCalledOnce());
     const { createLocalModelManager } = await import("./vector/local-model-manager");
     const { createTransformersEmbeddingRuntime, LocalEmbeddingProvider } = await import("./vector/local-embedding-provider");
-    expect(createTransformersEmbeddingRuntime).toHaveBeenCalledWith("C:\\data\\MyNotebookLM\\models\\huggingface");
+    expect(createTransformersEmbeddingRuntime).toHaveBeenCalledWith(
+      "C:\\data\\MyNotebookLM\\models\\huggingface",
+      "C:\\data\\MyNotebookLM\\models\\huggingface/Xenova__multilingual-e5-small-761b726dd34fb83930e26aab4e9ac3899aa1fa78"
+    );
     expect(createLocalModelManager).toHaveBeenCalledWith("C:\\data\\MyNotebookLM\\models\\huggingface", expect.any(Function));
     expect(LocalEmbeddingProvider).toHaveBeenCalledOnce();
     expect(mocks.IndexingService).toHaveBeenCalledWith(mocks.connection, expect.any(Function), expect.anything());
