@@ -15,4 +15,8 @@ describe("SpaceService", () => {
     const calls: string[] = []; const service = new SpaceService({ recoverInterrupted: () => { calls.push("recover"); } } as never, { rebuild: async () => { calls.push("rebuild"); }, optimize: async () => { calls.push("optimize"); } });
     service.recoverInterrupted(); await service.rebuild({} as never); const task = service.optimize({} as never); expect(task).toBeInstanceOf(Promise); await task; expect(calls).toEqual(["recover", "rebuild", "optimize"]);
   });
+  it("backs up before activating and surfaces backup failure", async () => {
+    const calls: string[] = []; const service = new SpaceService({ createOrReuse: () => ({ id: "new", state: "preparing" }), activate: () => calls.push("active"), fail: () => calls.push("failed") } as never, undefined, async () => { calls.push("backup"); throw new Error("backup failed"); });
+    await expect(service.build({} as never, async () => {})).rejects.toThrow("backup failed"); expect(calls).toEqual(["backup", "failed"]);
+  });
 });

@@ -32,6 +32,11 @@ describe("LanceStore", () => {
     } finally { await store.close(); await rm(dir, { recursive: true, force: true }); }
   }, 30_000);
 
+  it("counts only the requested revision with a safe metadata filter", async () => {
+    const dir = await mkdtemp(path.join(os.tmpdir(), "lance-count-filter-")); const store = await LanceStore.open(dir);
+    try { await store.createSpace(space); await store.upsert(space, [row("r1-a", [1, 0, 0], "a"), row("r2-a", [0, 1, 0], "b", { revisionId: "revision-2" })]); expect(await store.count(space)).toBe(2); expect(await store.count(space, { revisionId: "revision-1" })).toBe(1); expect(await store.count(space, { revisionId: "revision-2" })).toBe(1); await expect(store.count(space, { unknown: "x" } as never)).rejects.toThrow(/filter field/); } finally { await store.close(); await rm(dir, { recursive: true, force: true }); }
+  }, 30_000);
+
   it("rejects dimensions and serializes locators canonically", async () => {
     const dir = await mkdtemp(path.join(os.tmpdir(), "lance-store-"));
     const store = await LanceStore.open(dir);
@@ -60,6 +65,11 @@ describe("LanceStore", () => {
       await store.upsert(space, [row("after-lock", [1, 0, 0], "x")]);
       expect(await store.count(space)).toBe(1);
     } finally { await store.close(); await rm(dir, { recursive: true, force: true }); }
+  });
+
+  it("optimizes explicitly while reads remain available", async () => {
+    const dir = await mkdtemp(path.join(os.tmpdir(), "lance-optimize-")); const store = await LanceStore.open(dir);
+    try { await store.createSpace(space); await store.upsert(space, [row("read", [1, 0, 0], "read")]); const started = Date.now(); await Promise.all([store.optimize(space), store.count(space)]); expect(Date.now() - started).toBeLessThan(5000); expect(await store.count(space)).toBe(1); } finally { await store.close(); await rm(dir, { recursive: true, force: true }); }
   });
 
   it("rejects non-UUID spaces and rows with invalid columns or vectors", async () => {
