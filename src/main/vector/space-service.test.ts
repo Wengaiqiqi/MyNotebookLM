@@ -19,6 +19,21 @@ describe("SpaceService", () => {
     const calls: string[] = []; const service = new SpaceService({ createOrReuse: () => ({ id: "new", state: "preparing" }), activate: () => calls.push("active"), fail: () => calls.push("failed") } as never, undefined, async () => { calls.push("backup"); throw new Error("backup failed"); });
     await expect(service.build({} as never, async () => {})).rejects.toThrow("backup failed"); expect(calls).toEqual(["backup", "failed"]);
   });
+
+  it("cleans a failed build shadow after work, backup, or activation errors", async () => {
+    for (const stage of ["work", "backup", "activate"]) {
+      const calls: string[] = [];
+      const service = new SpaceService({ createOrReuse: () => ({ id: "new", state: "preparing" }), activate: () => { calls.push("active"); if (stage === "activate") throw new Error("activate failed"); }, fail: async () => { calls.push("failed"); }, } as never, undefined, stage === "backup" ? async () => { throw new Error("backup failed"); } : undefined);
+      await expect(service.build({} as never, async () => { if (stage === "work") throw new Error("work failed"); })).rejects.toThrow(stage + " failed");
+      expect(calls).toEqual([...(stage === "activate" ? ["active"] : []), "failed"]);
+    }
+  });
+
+  it("keeps the original rebuild error when shadow cleanup also fails", async () => {
+    const service = new SpaceService({ createOrReuse: () => ({ id: "new", projectId: "p", state: "preparing" }), fail: async () => { throw new Error("cleanup failed"); } } as never, { rebuild: async () => { throw new Error("build failed"); }, optimize: async () => {} });
+    await expect(service.rebuild({ spec: { projectId: "p" } })).rejects.toMatchObject({ name: "AggregateError" });
+    await expect(service.rebuild({ spec: { projectId: "p" } })).rejects.toThrow(/build failed|cleanup failed/);
+  });
   it("rebuilds a shadow space from SQLite callback, validates it, then activates", async () => {
     const calls: string[] = []; const service = new SpaceService({ createOrReuse: () => ({ id: "new", projectId: "p", state: "preparing" }), activate: () => calls.push("active"), fail: () => calls.push("failed") } as never, { rebuild: async (input: unknown) => { expect(input).toMatchObject({ authoritative: "sqlite" }); calls.push("rebuild"); }, optimize: async () => {} }, async () => calls.push("backup"));
     await service.rebuild({ spec: { projectId: "p" }, authoritative: "sqlite", verify: async () => { calls.push("verify"); } });
