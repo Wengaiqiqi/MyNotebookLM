@@ -223,7 +223,7 @@ describe("main application composition", () => {
     expect(mocks.ProjectRepository).toHaveBeenCalledOnce();
     expect(mocks.ProjectService).toHaveBeenCalledOnce();
 
-    mocks.callbacks.get("before-quit")?.();
+    await mocks.callbacks.get("before-quit")?.();
     expect(mocks.events.slice(-4)).toEqual([
       "project-cleanup",
       "model-cleanup",
@@ -232,7 +232,7 @@ describe("main application composition", () => {
     ]);
 
     mocks.callbacks.get("window-all-closed")?.();
-    expect(mocks.app.quit).toHaveBeenCalledOnce();
+    expect(mocks.app.quit).toHaveBeenCalledTimes(2);
   });
 
   it("fans out task updates only to live windows subscribed to the project", async () => {

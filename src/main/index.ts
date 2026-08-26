@@ -84,8 +84,12 @@ app.whenReady().then(async () => {
   });
 });
 
-app.on("before-quit", () => {
-  void workerPool?.close();
+let quitting = false;
+app.on("before-quit", (event) => {
+  if (quitting) return;
+  event?.preventDefault();
+  quitting = true;
+  return Promise.resolve(workerPool?.close()).finally(() => {
   workerPool = undefined;
   taskRevisions.clear();
   taskFanout?.close();
@@ -100,6 +104,8 @@ app.on("before-quit", () => {
   cleanupTitleOverlayHandler = undefined;
   appDatabase?.close();
   appDatabase = undefined;
+    app.quit();
+  });
 });
 
 app.on("window-all-closed", () => {
