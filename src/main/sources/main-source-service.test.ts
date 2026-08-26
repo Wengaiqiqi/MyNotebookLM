@@ -2,6 +2,19 @@ import { describe, expect, it, vi } from "vitest";
 import { MainSourceService } from "./main-source-service";
 
 describe("main source import orchestration", () => {
+  it("stores URL payload and passes its bound revision to ingestion", async () => {
+    const db = { prepare: vi.fn((sql: string) => ({ run: vi.fn(), get: vi.fn(() => ({ id: "task-1", project_id: "project-1", kind: "url", display_name: "example.com", status: "active", current_revision_id: null, created_at: "now", updated_at: "now", deleted_at: null })), all: vi.fn(() => []) })), transaction: (fn: () => unknown) => () => fn() } as any;
+    const tasks = { createTask: vi.fn(() => ({ id: "task-1" })) } as any;
+    const ingestion = { run: vi.fn(() => Promise.resolve()) } as any;
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("payload", { status: 200 })));
+    const service = new MainSourceService(db, tasks, ingestion, "D:/managed-files");
+    await service.importUrl({ projectId: "project-1", url: "https://example.com/article" });
+    expect(ingestion.run).toHaveBeenCalledWith(expect.objectContaining({ taskId: "task-1", revisionId: expect.any(String) }));
+    const revisionInsert = db.prepare.mock.calls.find(([sql]: [string]) => String(sql).includes("source_revisions"));
+    expect(revisionInsert).toBeTruthy();
+    expect(String(revisionInsert![0])).toContain("stored_path");
+    expect(revisionInsert![0]).not.toContain("https://example.com/article");
+  });
   it("rolls back source and revision when durable task creation fails", async () => {
     const db = {
       transaction: vi.fn((fn: () => void) => () => { throw new Error("task create failed"); }),

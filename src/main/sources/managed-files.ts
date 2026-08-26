@@ -32,6 +32,7 @@ function mkdirSafe(root: string, dir: string): void {
   }
 }
 export function stageFile(input: { root: string; sourceId: string; revisionId: string; bytes: Buffer }): { path: string; hash: string } {
+  try { mkdirSync(path.resolve(input.root), { recursive: true }); } catch (error) { if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error; }
   const dir = safe(input.root, path.join(input.root, input.sourceId, input.revisionId)); mkdirSafe(input.root, dir);
   const finalPath = safe(dir, path.join(dir, "content"));
   const hash = createHash("sha256").update(input.bytes).digest("hex");
