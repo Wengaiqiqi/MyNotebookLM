@@ -389,6 +389,19 @@ describe("main application composition", () => {
     await expect(options.optimize({ taskId: "task-1", space: { id: "s", dimension: 2 }, signal: controller.signal })).rejects.toBeDefined();
   });
 
+  it("persists only the stable internal error key for optimize failures", async () => {
+    const secret = "provider-secret-should-not-persist";
+    const optimize = vi.fn(async () => { throw new Error(secret); });
+    const lance = (await import("./vector/lance-store")).LanceStore as any;
+    lance.open.mockResolvedValueOnce({ optimize });
+    await import("./index");
+    await vi.waitFor(() => expect(mocks.SpaceService).toHaveBeenCalled());
+    const options = mocks.SpaceService.mock.calls[0]?.[1] as { optimize: (input: unknown) => Promise<void> };
+    await expect(options.optimize({ taskId: "task-1", space: { id: "s", dimension: 2 } })).rejects.toThrow(secret);
+    expect((mocks.TaskService.mock.instances[0] as any).fail).toHaveBeenCalledWith("task-1", { code: "INTERNAL", messageKey: "errors.internal", recoverable: false });
+    expect(JSON.stringify((mocks.TaskService.mock.instances[0] as any).fail.mock.calls)).not.toContain(secret);
+  });
+
   it("builds migration spec from the target provider probe", async () => {
     const profile = { id: "profile-1", provider: "openai", capability: "embedding", enabled: true, modelId: "text-embedding-3-small", baseUrl: "https://api.example.test" };
     mocks.connection.prepare.mockImplementation((sql: string) => ({

@@ -1,10 +1,13 @@
 import { LocalModelManager } from "./local-model-manager";
 import { pipeline, env } from "@huggingface/transformers";
-import { LOCAL_MODEL_REVISION } from "./local-model-manifest";
+import { BUILT_IN_LOCAL_EMBEDDING_PROFILE } from "../models/local-embedding-profile";
+import { LOCAL_MODEL_MANIFEST, LOCAL_MODEL_REVISION } from "./local-model-manifest";
 import path from "node:path";
+import type { EmbeddingFingerprint } from "../../shared/vector";
 export type EmbeddingRuntime = (model: unknown, inputs: string[], signal: AbortSignal) => Promise<number[][]>;
 export class LocalEmbeddingProvider {
   constructor(private readonly manager: LocalModelManager, private readonly embed: EmbeddingRuntime, private readonly batchSize = 16) {}
+  describe(): EmbeddingFingerprint { return { provider: BUILT_IN_LOCAL_EMBEDDING_PROFILE.provider, modelId: LOCAL_MODEL_MANIFEST.modelId, modelRevision: LOCAL_MODEL_MANIFEST.revision, dimension: LOCAL_MODEL_MANIFEST.dimension, distance: BUILT_IN_LOCAL_EMBEDDING_PROFILE.distance, pooling: BUILT_IN_LOCAL_EMBEDDING_PROFILE.pooling, preprocessVersion: BUILT_IN_LOCAL_EMBEDDING_PROFILE.metadata.preprocessingVersion, chunkingVersion: "persisted" }; }
   embedBatch(inputs: string[], signal: AbortSignal, batchSize = this.batchSize): Promise<number[][]> {
     return this.embedTexts(inputs, "document", signal, () => {}, batchSize);
   }
