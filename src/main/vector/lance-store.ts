@@ -16,6 +16,36 @@ function canonical(value: unknown): string { if (value === null || typeof value 
 function tableName(space: LanceSpace): string { return "space_" + space.id.replace(/[^a-zA-Z0-9_]/g, "_"); }
 function ignoreExistingIndex(error: unknown): void { if (!/already exists|duplicate|exists/i.test(error instanceof Error ? error.message : String(error))) throw error; }
 function filterSql(filter?: Record<string, string>): string | undefined { if (!filter) return undefined; if (Object.keys(filter).some(key => !FILTER_FIELDS.has(key))) throw new Error("unknown filter field"); return Object.entries(filter).map(([key, value]) => key + " = '" + value.replaceAll("'", "''") + "'").join(" AND "); }
+const EXPECTED_SCHEMA = { chunkId: "Utf8", projectId: "Utf8", sourceId: "Utf8", revisionId: "Utf8", spaceId: "Utf8", ordinal: "Float64", contentHash: "Utf8", text: "Utf8", locatorJson: "Utf8", createdAt: "Float64" } as const;
+async function validateExistingTable(table: lancedb.Table, space: LanceSpace): Promise<void> {
+  const fields = new Map((await table.schema()).fields.map(field => [field.name, field]));
+  for (const [name, type] of Object.entries(EXPECTED_SCHEMA)) {
+    const field = fields.get(name);
+    if (!field) throw new Error(`Lance table schema mismatch: missing column ${name}`);
+    if (field.type.toString() !== type) throw new Error(`Lance table schema mismatch: ${name} has type ${field.type.toString()}`);
+  }
+  const vector = fields.get("vector");
+  if (!vector || vector.type.toString() !== `FixedSizeList[${space.dimension}]<Float32>`) throw new Error(`Lance table schema mismatch: vector must be FixedSizeList[${space.dimension}]<Float32>`);
+  const rows = await table.query().select(["spaceId"]).toArray() as Array<{ spaceId?: unknown }>;
+  if (rows.some(row => row.spaceId !== space.id)) throw new Error("Lance table space identity mismatch");
+}
+type SearchRow = StoredRow & { _distance?: number; _score?: number };
+type SearchQuery = { limit(value: number): SearchQuery; toArray(): Promise<unknown[]> };
+async function stableSearch(query: SearchQuery, limit: number, scoreColumn: "_distance" | "_score", ascending: boolean): Promise<StoredRow[]> {
+  if (limit === 0) return [];
+  let candidateLimit = Math.max(limit + 1, 1);
+  while (true) {
+    const rows = await query.limit(candidateLimit).toArray() as SearchRow[];
+    rows.sort((left, right) => {
+      const leftScore = typeof left[scoreColumn] === "number" ? left[scoreColumn]! : ascending ? Number.POSITIVE_INFINITY : Number.NEGATIVE_INFINITY;
+      const rightScore = typeof right[scoreColumn] === "number" ? right[scoreColumn]! : ascending ? Number.POSITIVE_INFINITY : Number.NEGATIVE_INFINITY;
+      if (leftScore !== rightScore) return ascending ? leftScore - rightScore : rightScore - leftScore;
+      return left.chunkId < right.chunkId ? -1 : left.chunkId > right.chunkId ? 1 : 0;
+    });
+    if (rows.length < candidateLimit || rows.length <= limit || rows[limit - 1]![scoreColumn] !== rows[rows.length - 1]![scoreColumn]) return rows.slice(0, limit) as StoredRow[];
+    candidateLimit *= 2;
+  }
+}
 async function locked<T>(key: string, fn: () => Promise<T>): Promise<T> { const prior = locks.get(key) ?? Promise.resolve(); let release!: () => void; const current = new Promise<void>(r => { release = r; }); const queued = prior.then(() => current); locks.set(key, queued); await prior; try { return await fn(); } finally { release(); if (locks.get(key) === queued) locks.delete(key); } }
 
 export class LanceStore {
@@ -29,12 +59,12 @@ export class LanceStore {
   private enter(): () => void { if (this.closing) throw new Error("LanceStore is closed or closing"); this.active++; return () => { this.active--; if (!this.active) this.releaseDrain?.(); }; }
   async close(): Promise<void> { if (this.closing) return this.drained; this.closing = true; if (this.active) { this.drained = new Promise<void>(resolve => { this.releaseDrain = resolve; }); await this.drained; } this.db.close(); openStores.delete(this); }
   private async table(space: LanceSpace) { return this.db.openTable(tableName(space)); }
-  async createSpace(space: LanceSpace): Promise<void> { validateSpace(space); const leave=this.enter(); try { await locked(tableName(space), async () => { if ((await this.db.tableNames()).includes(tableName(space))) return; const t = await this.db.createTable(tableName(space), [{ chunkId: "__schema__", projectId: "", sourceId: "", revisionId: "", spaceId: space.id, ordinal: -1, contentHash: "", text: "", vector: Array.from({ length: space.dimension }, () => 0), locatorJson: "{}", createdAt: 0 }]); await t.delete('chunkId = "__schema__"'); }); } finally { leave(); } }
+  async createSpace(space: LanceSpace): Promise<void> { validateSpace(space); const leave=this.enter(); try { await locked(tableName(space), async () => { if ((await this.db.tableNames()).includes(tableName(space))) { await validateExistingTable(await this.table(space), space); return; } const t = await this.db.createTable(tableName(space), [{ chunkId: "__schema__", projectId: "", sourceId: "", revisionId: "", spaceId: space.id, ordinal: -1, contentHash: "", text: "", vector: Array.from({ length: space.dimension }, () => 0), locatorJson: "{}", createdAt: 0 }]); await t.delete('chunkId = "__schema__"'); }); } finally { leave(); } }
   async upsert(space: LanceSpace, rows: LanceRow[]): Promise<void> { validateSpace(space); rows.forEach(row => validateRow(space, row)); const leave=this.enter(); try { await locked(tableName(space), async () => { const t = await this.table(space); const data: StoredRow[] = rows.map(({ locator, ...r }) => ({ ...r, locatorJson: canonical(locator) })); if (data.length) await t.mergeInsert("chunkId").whenMatchedUpdateAll().whenNotMatchedInsertAll().execute(data); for (const column of ["projectId", "sourceId", "revisionId", "spaceId"]) { try { await t.createIndex(column, { config: lancedb.Index.btree(), replace: false, name: `${column}_idx` }); } catch (error) { ignoreExistingIndex(error); } } if (await t.countRows() >= ANN_THRESHOLD) { try { await t.createIndex("vector", { config: lancedb.Index.ivfFlat({ numPartitions: 16 }), replace: false, name: "vector_ann_idx" }); } catch (error) { ignoreExistingIndex(error); } } }); } finally { leave(); } }
   async count(space: LanceSpace, filter?: Record<string, string>): Promise<number> { validateSpace(space); const leave=this.enter(); try { return await locked(tableName(space), async () => { const table = await this.table(space); const where = filterSql(filter); if (!where) return table.countRows(); return (await table.query().where(where).toArray()).length; }); } finally { leave(); } }
   async rows(space: LanceSpace): Promise<StoredRow[]> { validateSpace(space); const leave=this.enter(); try { return await locked(tableName(space), async () => await (await this.table(space)).query().toArray() as unknown as StoredRow[]); } finally { leave(); } }
-  async vectorSearch(space: LanceSpace, vector: number[], limit: number, filter?: Record<string, string>): Promise<StoredRow[]> { validateSpace(space); if (vector.length !== space.dimension || vector.some(value => !Number.isFinite(value))) throw new Error("vector must have the space dimension and finite values"); const leave=this.enter(); try { return await locked(tableName(space), async () => { let q = (await this.table(space)).vectorSearch(vector).limit(limit); const where=filterSql(filter); if (where) q = q.where(where); return await q.toArray() as unknown as StoredRow[]; }); } finally { leave(); } }
-  async textSearch(space: LanceSpace, query: string, limit: number): Promise<StoredRow[]> { validateSpace(space); const leave=this.enter(); try { return await locked(tableName(space), async () => { const t = await this.table(space); try { await t.createIndex("text", { config: lancedb.Index.fts(), replace: false }); } catch {} return await t.query().fullTextSearch(query).limit(limit).toArray() as unknown as StoredRow[]; }); } finally { leave(); } }
+  async vectorSearch(space: LanceSpace, vector: number[], limit: number, filter?: Record<string, string>): Promise<StoredRow[]> { validateSpace(space); if (vector.length !== space.dimension || vector.some(value => !Number.isFinite(value))) throw new Error("vector must have the space dimension and finite values"); const leave=this.enter(); try { return await locked(tableName(space), async () => { let q = (await this.table(space)).vectorSearch(vector); const where=filterSql(filter); if (where) q = q.where(where); return await stableSearch(q, limit, "_distance", true); }); } finally { leave(); } }
+  async textSearch(space: LanceSpace, query: string, limit: number): Promise<StoredRow[]> { validateSpace(space); const leave=this.enter(); try { return await locked(tableName(space), async () => { const t = await this.table(space); try { await t.createIndex("text", { config: lancedb.Index.fts(), replace: false }); } catch {} return await stableSearch(t.query().fullTextSearch(query), limit, "_score", false); }); } finally { leave(); } }
   async deleteRevision(space: LanceSpace, revisionId: string): Promise<void> { validateSpace(space); const leave=this.enter(); try { await locked(tableName(space), async () => { await (await this.table(space)).delete("revisionId = '" + revisionId.replaceAll("'", "''") + "'"); }); } finally { leave(); } }
   async deleteProject(space: LanceSpace, projectId: string): Promise<void> { validateSpace(space); const leave=this.enter(); try { await locked(tableName(space), async () => { await (await this.table(space)).delete("projectId = '" + projectId.replaceAll("'", "''") + "'"); }); } finally { leave(); } }
   async deleteSpace(space: LanceSpace): Promise<void> { validateSpace(space); const leave=this.enter(); try { await locked(tableName(space), async () => { if ((await this.db.tableNames()).includes(tableName(space))) await this.db.dropTable(tableName(space)); }); } finally { leave(); } }

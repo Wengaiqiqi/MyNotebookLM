@@ -1,11 +1,20 @@
 import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import * as lancedb from "@lancedb/lancedb";
 import { describe, expect, it } from "vitest";
 import { LanceStore } from "./lance-store";
 
 const space = { id: "00000000-0000-4000-8000-000000000001", dimension: 3 } as const;
 const row = (id: string, vector: number[], text: string, extra = {}) => ({ chunkId: id, projectId: "project-1", sourceId: "source-1", revisionId: "revision-1", spaceId: space.id, ordinal: 0, contentHash: id, text, vector, locator: { b: 2, a: 1 }, createdAt: 1, ...extra });
+const tableName = "space_00000000_0000_4000_8000_000000000001";
+
+async function createRawTable(dir: string, data: Record<string, unknown>[]): Promise<void> {
+  const db = await lancedb.connect(dir);
+  await db.createTable(tableName, lancedb.makeArrowTable(data));
+  db.close();
+}
+const rawRow = (value: ReturnType<typeof row>): Record<string, unknown> => { const { locator: _locator, ...stored } = value; return { locatorJson: "{}", ...stored }; };
 
 describe("LanceStore", () => {
   it("creates/opens, upserts, counts, searches, filters and deletes real data", async () => {
@@ -114,5 +123,67 @@ describe("LanceStore", () => {
       expect((await store.vectorSearch(space, [0, 1, 0], 1))[0]?.chunkId).toBe("target");
       await expect(store.upsert(space, [row("target", [0, 1, 0], "target")])).resolves.toBeUndefined();
     } finally { await store.close(); await rm(dir, { recursive: true, force: true }); }
+  }, 30_000);
+
+  it("rejects an existing table whose persisted schema or space identity is incompatible", async () => {
+    const cases = [
+      ["wrong vector dimension", rawRow(row("bad-dimension", [1, 0], "bad")), /schema|dimension/i],
+      ["missing required column", (() => { const value = rawRow(row("missing-text", [1, 0, 0], "bad")); const { text: _text, ...withoutText } = value; return withoutText; })(), /schema|column/i],
+      ["wrong column type", rawRow(row("bad-type", [1, 0, 0], "bad", { locatorJson: 1 })), /schema|type/i],
+      ["wrong space identity", rawRow(row("bad-space", [1, 0, 0], "bad", { spaceId: "00000000-0000-4000-8000-000000000002" })), /schema|identity|space/i]
+    ] as const;
+    for (const [name, rawRow, error] of cases) {
+      const dir = await mkdtemp(path.join(os.tmpdir(), `lance-schema-${name.replaceAll(" ", "-")}-`));
+      try {
+        await createRawTable(dir, [rawRow]);
+        const store = await LanceStore.open(dir);
+        try { await expect(store.createSpace(space)).rejects.toThrow(error); }
+        finally { await store.close(); }
+      } finally { await rm(dir, { recursive: true, force: true }); }
+    }
+  }, 30_000);
+
+  it("reuses a compatible table after close and reopen", async () => {
+    const dir = await mkdtemp(path.join(os.tmpdir(), "lance-schema-reopen-"));
+    try {
+      const first = await LanceStore.open(dir);
+      await first.createSpace(space);
+      await first.close();
+      const reopened = await LanceStore.open(dir);
+      try { await expect(reopened.createSpace(space)).resolves.toBeUndefined(); }
+      finally { await reopened.close(); }
+    } finally { await rm(dir, { recursive: true, force: true }); }
+  });
+
+  it("uses chunkId as a deterministic vector-search tie-break before applying the limit", async () => {
+    const dir = await mkdtemp(path.join(os.tmpdir(), "lance-vector-ties-"));
+    const store = await LanceStore.open(dir);
+    try {
+      await store.createSpace(space);
+      await store.upsert(space, [row("c3", [1, 0, 0], "same"), row("c1", [1, 0, 0], "same"), row("c2", [1, 0, 0], "same")]);
+      expect((await store.vectorSearch(space, [1, 0, 0], 2)).map(item => item.chunkId)).toEqual(["c1", "c2"]);
+      await store.optimize(space);
+      expect((await store.vectorSearch(space, [1, 0, 0], 2)).map(item => item.chunkId)).toEqual(["c1", "c2"]);
+      await store.close();
+      const reopened = await LanceStore.open(dir);
+      try { expect((await reopened.vectorSearch(space, [1, 0, 0], 2)).map(item => item.chunkId)).toEqual(["c1", "c2"]); }
+      finally { await reopened.close(); }
+    } finally { await rm(dir, { recursive: true, force: true }); }
+  }, 30_000);
+
+  it("uses chunkId as a deterministic text-search tie-break before applying the limit", async () => {
+    const dir = await mkdtemp(path.join(os.tmpdir(), "lance-text-ties-"));
+    const store = await LanceStore.open(dir);
+    try {
+      await store.createSpace(space);
+      await store.upsert(space, [row("c3", [1, 0, 0], "needle phrase"), row("c1", [1, 0, 0], "needle phrase"), row("c2", [1, 0, 0], "needle phrase")]);
+      expect((await store.textSearch(space, "needle", 2)).map(item => item.chunkId)).toEqual(["c1", "c2"]);
+      await store.optimize(space);
+      expect((await store.textSearch(space, "needle", 2)).map(item => item.chunkId)).toEqual(["c1", "c2"]);
+      await store.close();
+      const reopened = await LanceStore.open(dir);
+      try { expect((await reopened.textSearch(space, "needle", 2)).map(item => item.chunkId)).toEqual(["c1", "c2"]); }
+      finally { await reopened.close(); }
+    } finally { await rm(dir, { recursive: true, force: true }); }
   }, 30_000);
 });
