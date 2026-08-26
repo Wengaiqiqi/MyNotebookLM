@@ -47,11 +47,11 @@
 
 **Context format:** stable IDs `S1..S12`, each block contains source display name, locator summary and delimited authoritative text. User/source text is data, never system instructions.
 
-- [ ] Write failing tests for deterministic citation IDs, bilingual prompts, prompt-injection text escaping, maximum budget, oversized chunk truncation, empty retrieval and previous-turn trimming.
-- [ ] Budget with provider profile context size when known; otherwise use configured default 16,000 estimated tokens. Reserve 20% for output, at least 1,024 output tokens and 10% overhead.
-- [ ] Include recent conversation turns newest-first until budget, then restore chronological order. Never truncate system safety/citation instructions.
-- [ ] Prompt requires grounded answer, explicit `[S#]` markers for factual claims and an honest no-evidence response when context is insufficient.
-- [ ] Run focused tests; review and commit `feat: assemble bounded cited rag context`.
+- [x] Write failing tests for deterministic citation IDs, bilingual prompts, prompt-injection text escaping, maximum budget, oversized chunk truncation, empty retrieval and previous-turn trimming.
+- [x] Budget with provider profile context size when known; otherwise use configured default 16,000 estimated tokens. Reserve 20% for output, at least 1,024 output tokens and 10% overhead.
+- [x] Include recent conversation turns newest-first until budget, then restore chronological order. Never truncate system safety/citation instructions.
+- [x] Prompt requires grounded answer, explicit `[S#]` markers for factual claims and an honest no-evidence response when context is insufficient.
+- [x] Run focused tests; review and commit `feat: assemble bounded cited rag context`.
 
 ## Task 3: Parse and Validate Model Citations
 
