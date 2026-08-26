@@ -65,9 +65,9 @@ No `Error`, raw response, stack, filesystem root, secret or arbitrary provider p
 
 ## Cross-Plan Quality Gates
 
-- [ ] **Gate A — after Plan 1:** run `npm test -- --run src/main/models src/main/settings src/main/credentials src/preload src/renderer`, `npm run typecheck`, `npm run build`, and approved onboarding/settings Electron E2E.
-- [ ] **Gate B — after Plan 2:** run all parser fixtures, task crash/recovery/cancel tests, URL security tests, full unit suite, typecheck and build.
-- [ ] **Gate C — after Plan 3:** run real temporary LanceDB integration tests, local fake embedding contracts, Space migration/rollback/rebuild tests, full unit suite, typecheck and build.
+- [x] **Gate A — after Plan 1:** run `npm test -- --run src/main/models src/main/settings src/main/credentials src/preload src/renderer`, `npm run typecheck`, `npm run build`, and approved onboarding/settings Electron E2E.
+- [x] **Gate B — after Plan 2:** run all parser fixtures, task crash/recovery/cancel tests, URL security tests, full unit suite, typecheck and build.
+- [x] **Gate C — after Plan 3:** run real temporary LanceDB integration tests, local fake embedding contracts, Space migration/rollback/rebuild tests, full unit suite, typecheck and build.
 - [ ] **Gate D — after Plan 4:** run streaming/cancel/citation persistence tests and an Electron RAG flow using fake providers and deterministic embeddings.
 - [ ] **Gate E — after Plan 5:** run notes/transformation/idempotency/routing/fallback tests and complete product unit suite.
 - [ ] **Gate F — before packaging:** every new visual has written approval and a recorded Electron screenshot in both languages and themes where state differs.

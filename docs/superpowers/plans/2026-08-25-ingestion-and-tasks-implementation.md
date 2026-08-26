@@ -31,10 +31,10 @@
 
 **Tables:** `sources`, `source_revisions`, `source_chunks`, `tasks`; indexes on project/state, source/current revision, task/state/created and chunk revision/ordinal/hash.
 
-- [ ] Write failing migration tests for foreign keys, state checks, one active revision, source soft-delete fields and task progress range.
-- [ ] Pin the parser dependencies listed above. Run `npm install` with only process-scoped proxy variables if the registry needs proxy `127.0.0.1:7890`.
-- [ ] Add Zod DTOs for source type/status, normalized locator, task kind/state/stage/progress and safe error summaries.
-- [ ] Run migration tests and `npm run typecheck`; review and commit `feat: add ingestion schema and parsers`.
+- [x] Write failing migration tests for foreign keys, state checks, one active revision, source soft-delete fields and task progress range.
+- [x] Pin the parser dependencies listed above. Run `npm install` with only process-scoped proxy variables if the registry needs proxy `127.0.0.1:7890`.
+- [x] Add Zod DTOs for source type/status, normalized locator, task kind/state/stage/progress and safe error summaries.
+- [x] Run migration tests and `npm run typecheck`; review and commit `feat: add ingestion schema and parsers`.
 
 ## Task 2: Implement Durable Task State Machine
 
@@ -48,10 +48,10 @@
 
 **State transitions:** `queued -> running -> completed|failed|cancelled`; on startup, stale `running` tasks become `queued` with `attempt + 1` if retryable, otherwise `failed` with `INTERRUPTED`.
 
-- [ ] Write failing tests for legal/illegal transitions, monotonic progress, cancellation request, retry classification, exponential delays `1s, 2s, 4s, 8s, 16s` plus bounded jitter, five-attempt cap and idempotency keys.
-- [ ] Implement repository compare-and-swap transitions inside transactions and a service clock/random injection for deterministic tests.
-- [ ] Authentication, validation, unsafe input, unsupported format and cancellation are never auto-retried.
-- [ ] Run focused tests and a real temporary SQLite restart test; review and commit `feat: add durable task state machine`.
+- [x] Write failing tests for legal/illegal transitions, monotonic progress, cancellation request, retry classification, exponential delays `1s, 2s, 4s, 8s, 16s` plus bounded jitter, five-attempt cap and idempotency keys.
+- [x] Implement repository compare-and-swap transitions inside transactions and a service clock/random injection for deterministic tests.
+- [x] Authentication, validation, unsafe input, unsupported format and cancellation are never auto-retried.
+- [x] Run focused tests and a real temporary SQLite restart test; review and commit `feat: add durable task state machine`.
 
 ## Task 3: Secure Local File Preflight and Managed Storage
 
@@ -66,10 +66,10 @@
 
 **Signature rules:** PDF `%PDF-`; OOXML ZIP containing `[Content_Types].xml` plus required `word/`, `ppt/` or `xl/` parts; UTF-8 text/Markdown/CSV must contain no NUL and decode without replacement; extension must match selected parser.
 
-- [ ] Write failing tests for allowed extensions, upper-case names, traversal names, symlinks/reparse points, size limit, mismatched signatures, legacy Office, macro-enabled files and atomic cleanup after copy failure.
-- [ ] Generate safe unique storage names from IDs, never user basenames. Resolve and verify every destination remains under the exact revision directory before create/move/delete.
-- [ ] Hash bytes with SHA-256 during copy; fsync temporary file, atomic rename, then create revision/task transactionally.
-- [ ] Run focused security/storage/repository tests; review and commit `feat: securely stage imported files`.
+- [x] Write failing tests for allowed extensions, upper-case names, traversal names, symlinks/reparse points, size limit, mismatched signatures, legacy Office, macro-enabled files and atomic cleanup after copy failure.
+- [x] Generate safe unique storage names from IDs, never user basenames. Resolve and verify every destination remains under the exact revision directory before create/move/delete.
+- [x] Hash bytes with SHA-256 during copy; fsync temporary file, atomic rename, then create revision/task transactionally.
+- [x] Run focused security/storage/repository tests; review and commit `feat: securely stage imported files`.
 
 ## Task 4: Secure URL Fetch and Article Extraction
 
@@ -82,10 +82,10 @@
 
 **Interfaces:** `DnsResolver`, `SafeHttpClient`, `FetchedArticle { finalUrl, title, byline?, text, sections, contentHash }`.
 
-- [ ] Write failing tests for schemes, userinfo, invalid ports, DNS returning any forbidden address, decimal/hex IP tricks, IPv4-mapped IPv6, redirect to forbidden target, redirect limit, content type, decompressed size and timeout.
-- [ ] Resolve host before each request, connect only through the validated address while preserving TLS hostname/Host semantics, and revalidate redirects. Do not trust proxy-bypassed DNS implicitly.
-- [ ] Parse HTML with linkedom and Readability; remove scripts/styles/forms/iframes/remote resources and return section locators with final URL and heading path.
-- [ ] Run focused tests using only controlled local fake transports/resolvers; review and commit `feat: securely import web articles`.
+- [x] Write failing tests for schemes, userinfo, invalid ports, DNS returning any forbidden address, decimal/hex IP tricks, IPv4-mapped IPv6, redirect to forbidden target, redirect limit, content type, decompressed size and timeout.
+- [x] Resolve host before each request, connect only through the validated address while preserving TLS hostname/Host semantics, and revalidate redirects. Do not trust proxy-bypassed DNS implicitly.
+- [x] Parse HTML with linkedom and Readability; remove scripts/styles/forms/iframes/remote resources and return section locators with final URL and heading path.
+- [x] Run focused tests using only controlled local fake transports/resolvers; review and commit `feat: securely import web articles`.
 
 ## Task 5: Define Normalized Document Blocks and Chunker
 
@@ -112,9 +112,9 @@ interface PreparedChunk {
 }
 ```
 
-- [ ] Write failing bilingual tests for deterministic order, heading context, table boundaries, 900-token target, 150-token overlap, no empty chunk, stable SHA-256 and locator range merging.
-- [ ] Implement deterministic token estimate (`CJK code points + ceil(non-CJK UTF-8 words * 1.3)`) and sentence/paragraph-aware splits. Record `chunkingVersion = 'blocks-900-150-v1'`.
-- [ ] Run focused tests twice and assert byte-identical snapshots; review and commit `feat: add deterministic source chunking`.
+- [x] Write failing bilingual tests for deterministic order, heading context, table boundaries, 900-token target, 150-token overlap, no empty chunk, stable SHA-256 and locator range merging.
+- [x] Implement deterministic token estimate (`CJK code points + ceil(non-CJK UTF-8 words * 1.3)`) and sentence/paragraph-aware splits. Record `chunkingVersion = 'blocks-900-150-v1'`.
+- [x] Run focused tests twice and assert byte-identical snapshots; review and commit `feat: add deterministic source chunking`.
 
 ## Task 6: Implement TXT, Markdown and CSV Parsers
 
@@ -127,9 +127,9 @@ interface PreparedChunk {
 - Create: `src/workers/ingestion/parsers/csv-parser.test.ts`
 - Add fixtures: `src/test/fixtures/documents/*.{txt,md,csv}`
 
-- [ ] Write golden tests for CRLF/LF, BOM, blank paragraphs, Markdown heading ancestry/list/code/table text and CSV quoted cells/newlines/delimiter detection/row ranges.
-- [ ] Parse UTF-8 only; produce paragraph, heading and row locators. CSV output includes header names and row numbers.
-- [ ] Run all three parser tests and snapshot normalized blocks; review and commit `feat: parse text markdown and csv sources`.
+- [x] Write golden tests for CRLF/LF, BOM, blank paragraphs, Markdown heading ancestry/list/code/table text and CSV quoted cells/newlines/delimiter detection/row ranges.
+- [x] Parse UTF-8 only; produce paragraph, heading and row locators. CSV output includes header names and row numbers.
+- [x] Run all three parser tests and snapshot normalized blocks; review and commit `feat: parse text markdown and csv sources`.
 
 ## Task 7: Implement PDF and DOCX Parsers
 
@@ -141,10 +141,10 @@ interface PreparedChunk {
 - Add fixtures: `src/test/fixtures/documents/sample.pdf`
 - Add fixtures: `src/test/fixtures/documents/sample.docx`
 
-- [ ] Write golden tests for PDF page order/page locators/empty pages and DOCX headings/paragraphs/lists/tables with heading-path and table-cell locators.
-- [ ] Use PDF.js text content per page; normalize whitespace without merging pages.
-- [ ] Use JSZip + fast-xml-parser on OOXML relationships, styles and document XML. Ignore macros, external relationships, comments and embedded objects.
-- [ ] Run parser tests and validate fixture hashes; review and commit `feat: parse pdf and docx sources`.
+- [x] Write golden tests for PDF page order/page locators/empty pages and DOCX headings/paragraphs/lists/tables with heading-path and table-cell locators.
+- [x] Use PDF.js text content per page; normalize whitespace without merging pages.
+- [x] Use JSZip + fast-xml-parser on OOXML relationships, styles and document XML. Ignore macros, external relationships, comments and embedded objects.
+- [x] Run parser tests and validate fixture hashes; review and commit `feat: parse pdf and docx sources`.
 
 ## Task 8: Implement PPTX and XLSX Parsers
 
@@ -156,10 +156,10 @@ interface PreparedChunk {
 - Add fixtures: `src/test/fixtures/documents/sample.pptx`
 - Add fixtures: `src/test/fixtures/documents/sample.xlsx`
 
-- [ ] Write golden tests for slide order, titles, speaker notes, text boxes and slide locators; write XLSX tests for visible sheets, cells, formulas using cached values only, dates and exact sheet/cell ranges.
-- [ ] Parse PPTX OOXML with JSZip + fast-xml-parser; ignore external media/links and active content.
-- [ ] Parse XLSX in non-calculating mode with ExcelJS; never evaluate a formula. Emit bounded row blocks with sheet and A1 range locators.
-- [ ] Run parser tests and snapshots; review and commit `feat: parse powerpoint and excel sources`.
+- [x] Write golden tests for slide order, titles, speaker notes, text boxes and slide locators; write XLSX tests for visible sheets, cells, formulas using cached values only, dates and exact sheet/cell ranges.
+- [x] Parse PPTX OOXML with JSZip + fast-xml-parser; ignore external media/links and active content.
+- [x] Parse XLSX in non-calculating mode with ExcelJS; never evaluate a formula. Emit bounded row blocks with sheet and A1 range locators.
+- [x] Run parser tests and snapshots; review and commit `feat: parse powerpoint and excel sources`.
 
 ## Task 9: Run Parsers in Worker Threads
 
@@ -173,10 +173,10 @@ interface PreparedChunk {
 
 **Worker messages:** versioned `start`, `progress`, `result`, `error`, `cancel`; all validated before use. Concurrency defaults to `max(1, min(2, availableParallelism() - 1))`.
 
-- [ ] Write failing tests for serializable messages, progress throttled to at most 10 events/second/task, cooperative cancel, hard termination after 5 seconds, worker crash replacement and restart recovery.
-- [ ] Bundle a worker entry. Worker parses and chunks; main writes chunks/revision state in one transaction only after a successful complete result.
-- [ ] Leave successful parsing task at stage `awaiting_embedding`, still `running`; Plan 3 completes it after vectors are verified. If no embedding profile is configured, use the built-in local profile and expose its download state in Plan 3.
-- [ ] Run worker and ingestion integration tests with temporary userData; review and commit `feat: process sources in durable workers`.
+- [x] Write failing tests for serializable messages, progress throttled to at most 10 events/second/task, cooperative cancel, hard termination after 5 seconds, worker crash replacement and restart recovery.
+- [x] Bundle a worker entry. Worker parses and chunks; main writes chunks/revision state in one transaction only after a successful complete result.
+- [x] Leave successful parsing task at stage `awaiting_embedding`, still `running`; Plan 3 completes it after vectors are verified. If no embedding profile is configured, use the built-in local profile and expose its download state in Plan 3.
+- [x] Run worker and ingestion integration tests with temporary userData; review and commit `feat: process sources in durable workers`.
 
 ## Task 10: Expose Source and Task API
 
@@ -191,11 +191,11 @@ interface PreparedChunk {
 
 **Desktop API additions:** choose files via main-process dialog, import files/URL, list sources/tasks, cancel/retry/remove source, subscribe to task updates. Renderer may submit only opaque dialog tokens/URLs, never arbitrary filesystem destinations.
 
-- [ ] Write failing IPC/preload tests for schemas, dialog cancellation, project ownership checks, invalid retries, event unsubscribe and safe errors.
-- [ ] Implement handler/service composition and task update fan-out with listener cleanup on destroyed webContents.
-- [ ] On source removal, mark deleting and schedule managed-file/chunk cleanup; do not perform broad synchronous recursive deletion from renderer input.
-- [ ] Run focused tests, full unit suite, typecheck and build; run Gate B from the master plan.
-- [ ] Review and commit `feat: expose complete ingestion api`.
+- [x] Write failing IPC/preload tests for schemas, dialog cancellation, project ownership checks, invalid retries, event unsubscribe and safe errors.
+- [x] Implement handler/service composition and task update fan-out with listener cleanup on destroyed webContents.
+- [x] On source removal, mark deleting and schedule managed-file/chunk cleanup; do not perform broad synchronous recursive deletion from renderer input.
+- [x] Run focused tests, full unit suite, typecheck and build; run Gate B from the master plan.
+- [x] Review and commit `feat: expose complete ingestion api`.
 
 ## Completion Gate
 

@@ -30,10 +30,10 @@
 
 **Tables:** `embedding_spaces`, `project_embedding_spaces`, `model_artifacts`; states `preparing|building|validating|active|failed|retired`.
 
-- [ ] Write failing migration tests for one active Space/project, immutable fingerprint fields, dimension > 0, build progress, old-active preservation and artifact download states.
-- [ ] Pin both dependencies and install; verify LanceDB native Windows x64 binary resolves under Electron's Node ABI.
-- [ ] Define `EmbeddingSpaceDto`, `EmbeddingFingerprint`, `VectorHealthDto`, `SearchHitDto` Zod schemas.
-- [ ] Run migration tests and typecheck; review and commit `feat: add embedding space persistence`.
+- [x] Write failing migration tests for one active Space/project, immutable fingerprint fields, dimension > 0, build progress, old-active preservation and artifact download states.
+- [x] Pin both dependencies and install; verify LanceDB native Windows x64 binary resolves under Electron's Node ABI.
+- [x] Define `EmbeddingSpaceDto`, `EmbeddingFingerprint`, `VectorHealthDto`, `SearchHitDto` Zod schemas.
+- [x] Run migration tests and typecheck; review and commit `feat: add embedding space persistence`.
 
 ## Task 2: Implement Cloud and Ollama Embedding Adapters
 
@@ -46,10 +46,10 @@
 
 **Interfaces:** `EmbeddingProvider.embedBatch(texts, signal)`, `describe(): EmbeddingFingerprint`; default batch sizes OpenAI-compatible 64, Gemini 32, Ollama 32, overridable downward by provider limits.
 
-- [ ] Write failing tests for stable order, empty input rejection, batch splitting, dimension consistency, finite/normalized vector validation, cancellation and provider-specific response shapes.
-- [ ] Wrap the Plan 1 adapters without duplicating authentication or HTTP code. Capture actual dimension on the first successful probe and freeze it in the Space fingerprint.
-- [ ] Do not show a special cloud-data warning beyond ordinary provider configuration, matching the user's decision.
-- [ ] Run focused tests; review and commit `feat: provide cloud embedding batches`.
+- [x] Write failing tests for stable order, empty input rejection, batch splitting, dimension consistency, finite/normalized vector validation, cancellation and provider-specific response shapes.
+- [x] Wrap the Plan 1 adapters without duplicating authentication or HTTP code. Capture actual dimension on the first successful probe and freeze it in the Space fingerprint.
+- [x] Do not show a special cloud-data warning beyond ordinary provider configuration, matching the user's decision.
+- [x] Run focused tests; review and commit `feat: provide cloud embedding batches`.
 
 ## Task 3: Implement Managed Built-In Local Embedding
 
@@ -62,11 +62,11 @@
 
 **Model:** `Xenova/multilingual-e5-small`, revision pinned to a tested commit, 384 dimensions, mean pooling, normalized output, query prefix `query: ` and document prefix `passage: `.
 
-- [ ] Before implementation, resolve the exact Hugging Face revision and required ONNX/tokenizer file SHA-256 values; store the fixed allowlist in `local-model-manifest.ts` and cover it with a snapshot test.
-- [ ] Write failing tests with a fake downloader/runtime for resume, hash mismatch deletion, atomic artifact activation, offline missing-model error, progress, single-flight model load and cancellation between batches.
-- [ ] Configure Transformers.js cache/local paths under userData and disable arbitrary remote model names. Load one singleton pipeline in main/utility execution, never renderer.
-- [ ] Write deterministic semantic smoke assertions using a tiny checked-in fixture or mocked runtime; do not download the real model in ordinary unit tests.
-- [ ] Run focused tests; review and commit `feat: add managed local embeddings`.
+- [x] Before implementation, resolve the exact Hugging Face revision and required ONNX/tokenizer file SHA-256 values; store the fixed allowlist in `local-model-manifest.ts` and cover it with a snapshot test.
+- [x] Write failing tests with a fake downloader/runtime for resume, hash mismatch deletion, atomic artifact activation, offline missing-model error, progress, single-flight model load and cancellation between batches.
+- [x] Configure Transformers.js cache/local paths under userData and disable arbitrary remote model names. Load one singleton pipeline in main/utility execution, never renderer.
+- [x] Write deterministic semantic smoke assertions using a tiny checked-in fixture or mocked runtime; do not download the real model in ordinary unit tests.
+- [x] Run focused tests; review and commit `feat: add managed local embeddings`.
 
 ## Task 4: Implement LanceDB Space Tables and Indexes
 
@@ -77,11 +77,11 @@
 
 **Table columns:** `chunk_id`, `project_id`, `source_id`, `revision_id`, `space_id`, `ordinal`, `content_hash`, `text`, `vector: FixedSizeList<Float32>`, `locator_json`, `created_at`.
 
-- [ ] Write real temporary-directory integration tests for create/open, add/upsert by `chunk_id`, delete revision/project/Space, count, vector search, full-text BM25 search and metadata filtering.
-- [ ] Create an FTS index on `text`, scalar indexes on project/source/revision/space IDs and an ANN index after enough rows; small tables must still work by exhaustive vector search.
-- [ ] Validate all write rows against the Space dimension before LanceDB receives them. Serialize locators canonically.
-- [ ] Add a single-process write mutex per Space and close connections during shutdown.
-- [ ] Run focused tests twice against clean temporary stores; review and commit `feat: add embedded lancedb store`.
+- [x] Write real temporary-directory integration tests for create/open, add/upsert by `chunk_id`, delete revision/project/Space, count, vector search, full-text BM25 search and metadata filtering.
+- [x] Create an FTS index on `text`, scalar indexes on project/source/revision/space IDs and an ANN index after enough rows; small tables must still work by exhaustive vector search.
+- [x] Validate all write rows against the Space dimension before LanceDB receives them. Serialize locators canonically.
+- [x] Add a single-process write mutex per Space and close connections during shutdown.
+- [x] Run focused tests twice against clean temporary stores; review and commit `feat: add embedded lancedb store`.
 
 ## Task 5: Complete Ingestion with Embedding and Verified Indexing
 
@@ -93,11 +93,11 @@
 
 **Pipeline stages:** `validating -> copying/fetching -> parsing -> chunking -> downloading_model? -> embedding -> indexing -> validating_index -> completed`.
 
-- [ ] Write failing integration tests for batches, progress weighting, cancellation, retry resume by content hash, provider failure, Lance write failure, count mismatch and atomic revision activation.
-- [ ] Embed chunks from SQLite, write Lance rows, verify row count/content hashes and execute one probe query. Only then set the source revision active and task completed in one SQLite transaction.
-- [ ] On failure, retain managed original, chunks and task evidence; delete incomplete Lance rows by revision before retry.
-- [ ] Resume Plan 2 `awaiting_embedding` tasks on startup.
-- [ ] Run ingestion/vector integration tests; review and commit `feat: finish verified source indexing`.
+- [x] Write failing integration tests for batches, progress weighting, cancellation, retry resume by content hash, provider failure, Lance write failure, count mismatch and atomic revision activation.
+- [x] Embed chunks from SQLite, write Lance rows, verify row count/content hashes and execute one probe query. Only then set the source revision active and task completed in one SQLite transaction.
+- [x] On failure, retain managed original, chunks and task evidence; delete incomplete Lance rows by revision before retry.
+- [x] Resume Plan 2 `awaiting_embedding` tasks on startup.
+- [x] Run ingestion/vector integration tests; review and commit `feat: finish verified source indexing`.
 
 ## Task 6: Implement Space Lifecycle, Migration and Rebuild
 
@@ -110,11 +110,11 @@
 
 **Operations:** inspect, create/build, activate, retry, cancel, optimize, rebuild current, migrate to new fingerprint, retire.
 
-- [ ] Write failing tests for fingerprint reuse, shadow build, successful atomic activation, failed validation rollback, cancel rollback, crash recovery, old-Space retention and deletion only after confirmed new activation.
-- [ ] Before schema migrations/Space activation, use SQLite Backup API and keep exactly the newest three verified backups.
-- [ ] A full rebuild reads current SQLite chunks and managed originals only when chunks are missing; it never trusts old Lance rows.
-- [ ] Optimization is an explicit task and must not block reads longer than the underlying table commit.
-- [ ] Run Space lifecycle tests including simulated process restart at every state boundary; review and commit `feat: manage embedding space lifecycle`.
+- [x] Write failing tests for fingerprint reuse, shadow build, successful atomic activation, failed validation rollback, cancel rollback, crash recovery, old-Space retention and deletion only after confirmed new activation.
+- [x] Before schema migrations/Space activation, use SQLite Backup API and keep exactly the newest three verified backups.
+- [x] A full rebuild reads current SQLite chunks and managed originals only when chunks are missing; it never trusts old Lance rows.
+- [x] Optimization is an explicit task and must not block reads longer than the underlying table commit.
+- [x] Run Space lifecycle tests including simulated process restart at every state boundary; review and commit `feat: manage embedding space lifecycle`.
 
 ## Task 7: Implement ANN + BM25 + RRF Retrieval
 
@@ -126,11 +126,11 @@
 
 **Defaults:** retrieve ANN 40 and BM25 40, `RRF(k=60)`, dedupe content hash within source revision, diversify to max 4 adjacent chunks/source before final top 12.
 
-- [ ] Write failing pure RRF tests for missing ranks, deterministic ties, duplicate hashes and source diversity.
-- [ ] Write integration tests proving only selected project/current revision/current active Space survive; deleted/archived source records are excluded after SQLite revalidation.
-- [ ] Embed the query with query preprocessing, run vector and FTS in parallel, fuse, then hydrate authoritative text/locator from SQLite.
-- [ ] Return a typed `INDEX_UNAVAILABLE` repair action for missing/unhealthy Space rather than empty success.
-- [ ] Run focused retrieval tests; review and commit `feat: add hybrid retrieval with rrf`.
+- [x] Write failing pure RRF tests for missing ranks, deterministic ties, duplicate hashes and source diversity.
+- [x] Write integration tests proving only selected project/current revision/current active Space survive; deleted/archived source records are excluded after SQLite revalidation.
+- [x] Embed the query with query preprocessing, run vector and FTS in parallel, fuse, then hydrate authoritative text/locator from SQLite.
+- [x] Return a typed `INDEX_UNAVAILABLE` repair action for missing/unhealthy Space rather than empty success.
+- [x] Run focused retrieval tests; review and commit `feat: add hybrid retrieval with rrf`.
 
 ## Task 8: Expose Vector Health and Retrieval APIs
 
@@ -145,10 +145,10 @@
 
 **Desktop API additions:** `vector.getHealth`, `vector.startMigration`, `vector.rebuild`, `vector.optimize`, `vector.cancelTask`, `retrieval.search`, plus validated task progress subscription.
 
-- [ ] Write failing IPC tests for project ownership, profile capability, active task conflicts, cancellation and Zod rejection of forged Space IDs/filters.
-- [ ] Implement narrow handlers; no raw Lance filter/SQL/vector is accepted from renderer.
-- [ ] Run focused tests, all LanceDB tests, full unit suite, typecheck and build; run Gate C from the master plan.
-- [ ] Review and commit `feat: expose vector lifecycle api`.
+- [x] Write failing IPC tests for project ownership, profile capability, active task conflicts, cancellation and Zod rejection of forged Space IDs/filters.
+- [x] Implement narrow handlers; no raw Lance filter/SQL/vector is accepted from renderer.
+- [x] Run focused tests, all LanceDB tests, full unit suite, typecheck and build; run Gate C from the master plan.
+- [x] Review and commit `feat: expose vector lifecycle api`.
 
 ## Completion Gate
 
