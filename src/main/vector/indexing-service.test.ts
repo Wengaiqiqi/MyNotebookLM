@@ -60,6 +60,14 @@ describe("IndexingService", () => {
     expect(createSpace).toHaveBeenCalledWith({ id: "space", dimension: 2 });
     expect(createSpace.mock.invocationCallOrder[0]).toBeLessThan(lance.upsert.mock.invocationCallOrder[0] ?? Number.POSITIVE_INFINITY);
   });
+  it("rejects a provider capability mismatch before embedding or Lance writes", async () => {
+    const db = { prepare: vi.fn(() => ({ all: () => [chunk("c0")], get: () => ({ project_id: "p1", source_id: "s1", ...persistedSpace, provider: "local", model_id: "expected-model", model_revision: "expected-revision", distance: "cosine", pooling: "mean", preprocess_version: "v1", chunking_version: "v1" }), run: vi.fn(() => ({ changes: 1 })) })), transaction: (fn: () => unknown) => () => fn() } as any;
+    const provider = { describe: () => ({ provider: "local", modelId: "actual-model", modelRevision: "actual-revision", dimension: 2, distance: "cosine" as const, pooling: "mean" as const, preprocessVersion: "v1", chunkingVersion: "v1" }), embedBatch: vi.fn(async () => [[1, 0]]) };
+    const lance = { upsert: vi.fn(), count: vi.fn(async () => 1), rows: vi.fn(async () => [stored("c0", "c0")]), vectorSearch: vi.fn(async () => [stored("c0", "c0")]), deleteRevision: vi.fn() };
+    await expect(new IndexingService(db, provider, lance as never).index({ taskId: "t1", revisionId: "r1", space: { id: "space", dimension: 2 } })).rejects.toMatchObject({ code: "EMBEDDING_CAPABILITY_MISMATCH" });
+    expect(provider.embedBatch).not.toHaveBeenCalled();
+    expect(lance.upsert).not.toHaveBeenCalled();
+  });
   it("creates the Lance Space before the first rebuild write", async () => {
     const db = { prepare: vi.fn(() => ({ all: () => [chunk("c0")], get: () => ({ project_id: "p1", source_id: "s1", ...persistedSpace, space_state: "building" }) })) } as any;
     const createSpace = vi.fn(async () => undefined);

@@ -91,10 +91,10 @@ app.whenReady().then(async () => {
     if (!profile || (row.provider === "local" && !isBuiltInLocalEmbeddingProfile(profile))) throw Object.assign(new Error("Embedding profile is missing or mismatched"), { code: "EMBEDDING_PROFILE_MISMATCH", recoverable: false });
     if (profile.provider === "local") return localEmbeddingProvider;
     return {
-      describe: () => ({ provider: profile.provider, modelId: profile.modelId, modelRevision: profile.modelId, dimension: space.dimension, distance: "cosine", pooling: "mean", preprocessVersion: "persisted", chunkingVersion: "persisted" }),
+      describe: (): import("../shared/vector").EmbeddingFingerprint => ({ provider: profile.provider, modelId: profile.modelId, modelRevision: profile.modelId, dimension: space.dimension, distance: "cosine", pooling: "mean", preprocessVersion: "persisted", chunkingVersion: "persisted" }),
       embedBatch: async (texts: string[], signal: AbortSignal, batchSize?: number) => credentialStore.withSecret(profile.id, { provider: profile.provider, baseUrl: profile.baseUrl }, async (apiKey) => {
         const model = createModelProvider(profile.provider, profile.baseUrl, apiKey);
-        const provider = createEmbeddingProvider({ provider: profile.provider, model: profile.modelId, adapter: { embed: model.embed.bind(model), describe: () => ({ provider: profile.provider, modelId: profile.modelId, modelRevision: profile.modelId, dimension: space.dimension, distance: "cosine", pooling: "mean", preprocessVersion: "persisted", chunkingVersion: "persisted" }) } });
+        const provider = createEmbeddingProvider({ provider: profile.provider, model: profile.modelId, adapter: { embed: model.embed.bind(model), describe: (): import("../shared/vector").EmbeddingFingerprint => ({ provider: profile.provider, modelId: profile.modelId, modelRevision: profile.modelId, dimension: space.dimension, distance: "cosine", pooling: "mean", preprocessVersion: "persisted", chunkingVersion: "persisted" }) } });
         return provider.embedBatch(texts, signal, batchSize);
       })
     };
