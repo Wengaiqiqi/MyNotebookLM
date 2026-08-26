@@ -29,7 +29,7 @@ describe("ingestion progress", () => {
       run: () => ({ changes: 1 }),
       get: () => sql.includes("project_embedding_spaces") ? { id: "space-1", dimension: 2 } : { project_id: "project-1" }
     }) } as never;
-    const service = new IngestionService({ start: async () => ({ version: 1, type: "result", taskId: "task", chunks: [] }), cancel: () => undefined }, db, undefined, undefined, { index: async (value: { revisionId: string; space: unknown }) => { indexed.push(value); } } as never);
+    const service = new IngestionService({ start: async () => ({ version: 1, type: "result", taskId: "task", chunks: [] }), cancel: () => undefined }, db, undefined, undefined, { index: async (value: { revisionId: string; space: unknown }) => { indexed.push(value); } } as unknown as import("../vector/indexing-service").IndexingService);
     await service.run({ taskId: "task", revisionId: "revision", kind: "text", data: new Uint8Array(), updatedAt: "now" });
     expect(indexed[0]).toMatchObject({ revisionId: "revision", space: { id: "space-1" } });
   });
