@@ -24,6 +24,9 @@ const credentialBindingMigration = readFileSync(
   new URL("./migrations/003_credential_binding.sql", import.meta.url),
   "utf8"
 );
+const sourcesTasksMigration = readFileSync(new URL("./migrations/004_sources_tasks.sql", import.meta.url), "utf8");
+const spacesMigration = readFileSync(new URL("./migrations/005_embedding_spaces.sql", import.meta.url), "utf8");
+const spaceTasksMigration = readFileSync(new URL("./migrations/006_space_tasks.sql", import.meta.url), "utf8");
 
 describe("openAppDatabase", () => {
   let temporaryRoot: string;
@@ -92,6 +95,43 @@ describe("openAppDatabase", () => {
       reopened.connection.prepare("SELECT version FROM schema_migrations").all()
     ).toHaveLength(1);
     reopened.close();
+  });
+
+  it("migrates a real 005 database while preserving task data, foreign keys, indexes, and constraints", () => {
+    writeFileSync(path.join(migrationsDir, "002_settings_models.sql"), settingsModelsMigration);
+    writeFileSync(path.join(migrationsDir, "003_credential_binding.sql"), credentialBindingMigration);
+    writeFileSync(path.join(migrationsDir, "004_sources_tasks.sql"), sourcesTasksMigration);
+    writeFileSync(path.join(migrationsDir, "005_embedding_spaces.sql"), spacesMigration);
+    const before = openAppDatabase(databaseFile, migrationsDir);
+    before.connection.exec("INSERT INTO projects(id, name) VALUES ('p1', 'Project'); INSERT INTO sources(id, project_id, kind, display_name) VALUES ('s1', 'p1', 'text', 'Source'); INSERT INTO tasks(id, project_id, source_id, kind, stage, idempotency_key) VALUES ('t1', 'p1', 's1', 'ingest', 'parsing', 'key1');");
+    before.close();
+    writeFileSync(path.join(migrationsDir, "006_space_tasks.sql"), spaceTasksMigration);
+    const migrated = openAppDatabase(databaseFile, migrationsDir);
+    expect(migrated.connection.prepare("SELECT * FROM tasks").get()).toMatchObject({ id: "t1", project_id: "p1", source_id: "s1", kind: "ingest", stage: "parsing", idempotency_key: "key1" });
+    expect(migrated.connection.prepare("SELECT name FROM sqlite_master WHERE type='index' AND name LIKE 'idx_tasks_%' ORDER BY name").pluck().all()).toEqual(["idx_tasks_project_state_created", "idx_tasks_source_created"]);
+    expect(migrated.connection.pragma("foreign_key_check")).toEqual([]);
+    expect(() => migrated.connection.prepare("INSERT INTO tasks(id, project_id, source_id, kind, stage) VALUES ('bad', 'missing', NULL, 'ingest', 'parsing')").run()).toThrow();
+    migrated.close();
+    const reopened = openAppDatabase(databaseFile, migrationsDir);
+    expect(reopened.connection.prepare("SELECT version FROM schema_migrations ORDER BY version").pluck().all()).toEqual([1, 2, 3, 4, 5, 6]);
+    reopened.close();
+  });
+
+  it("rolls back a failed 006 migration without leaving a half-migrated tasks table", () => {
+    writeFileSync(path.join(migrationsDir, "002_settings_models.sql"), settingsModelsMigration);
+    writeFileSync(path.join(migrationsDir, "003_credential_binding.sql"), credentialBindingMigration);
+    writeFileSync(path.join(migrationsDir, "004_sources_tasks.sql"), sourcesTasksMigration);
+    writeFileSync(path.join(migrationsDir, "005_embedding_spaces.sql"), spacesMigration);
+    const before = openAppDatabase(databaseFile, migrationsDir);
+    before.connection.exec("INSERT INTO projects(id, name) VALUES ('p1', 'Project'); INSERT INTO tasks(id, project_id, kind, stage) VALUES ('t1', 'p1', 'ingest', 'parsing');");
+    before.close();
+    writeFileSync(path.join(migrationsDir, "006_space_tasks.sql"), spaceTasksMigration + "\nCREATE TABLE broken (");
+    expect(() => openAppDatabase(databaseFile, migrationsDir)).toThrow();
+    const connection = new Database(databaseFile);
+    expect(connection.prepare("SELECT id, kind, stage FROM tasks").all()).toEqual([{ id: "t1", kind: "ingest", stage: "parsing" }]);
+    expect(connection.prepare("SELECT name FROM sqlite_master WHERE name LIKE 'tasks_before_%'").all()).toEqual([]);
+    expect(connection.prepare("SELECT version FROM schema_migrations ORDER BY version").pluck().all()).toEqual([1, 2, 3, 4, 5]);
+    connection.close();
   });
 
   it("upgrades a legacy applied history without changing its recorded version", () => {
