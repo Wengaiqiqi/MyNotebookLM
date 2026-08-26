@@ -12,6 +12,12 @@ describe("IndexingService", () => {
     await expect(new IndexingService(db, describedProvider, lance as never).index({ taskId: "t1", revisionId: "r1", space: { id: "space", dimension: 2 } })).rejects.toMatchObject({ code: "INDEXING_SPACE_MISMATCH" });
     expect(lance.createSpace).not.toHaveBeenCalled();
   });
+  it("rejects a forged rebuild fingerprint before any Lance operation", async () => {
+    const db = { prepare: vi.fn(() => ({ all: () => [chunk("c0")], get: () => ({ project_id: "p1", source_id: "s1", ...persistedSpace, space_state: "building", fingerprint: "forged" }) })) } as never;
+    const lance = { createSpace: vi.fn(), upsert: vi.fn(), count: vi.fn(), rows: vi.fn(), vectorSearch: vi.fn(), deleteRevision: vi.fn() };
+    await expect(new IndexingService(db, describedProvider, lance as never).rebuild({ revisionId: "r1", space: { id: "space", dimension: 2 } })).rejects.toMatchObject({ code: "INDEXING_SPACE_MISMATCH" });
+    expect(lance.createSpace).not.toHaveBeenCalled();
+  });
   it.each([
     ["forged id", { space_id: undefined, space_project_id: undefined, space_dimension: undefined, space_state: undefined, active_space_id: undefined }, { id: "forged", dimension: 2 }],
     ["project", { space_project_id: "p2" }, { id: "space", dimension: 2 }],

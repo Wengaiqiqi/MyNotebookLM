@@ -19,12 +19,12 @@ export class IndexingService {
     if (!row) throw new Error("revision not found");
     const stateValid = operation === "index" ? row.space_state === "active" && row.active_space_id === space.id : ["preparing", "building", "validating"].includes(row.space_state ?? "");
     const expectedFingerprint = row.provider && row.model_id && row.model_revision && row.space_dimension && row.distance && row.pooling && row.preprocess_version && row.chunking_version ? canonicalEmbeddingFingerprint({ provider: row.provider, modelId: row.model_id, modelRevision: row.model_revision, dimension: row.space_dimension, distance: row.distance, pooling: row.pooling, preprocessVersion: row.preprocess_version, chunkingVersion: row.chunking_version }) : undefined;
-    if (row.space_id !== space.id || row.space_project_id !== row.project_id || row.space_dimension !== space.dimension || !stateValid || (operation === "index" && (!expectedFingerprint || row.fingerprint !== expectedFingerprint))) throw Object.assign(new Error("Indexing space metadata mismatch"), { code: "INDEXING_SPACE_MISMATCH" });
+    if (row.space_id !== space.id || row.space_project_id !== row.project_id || row.space_dimension !== space.dimension || !stateValid || !expectedFingerprint || row.fingerprint !== expectedFingerprint) throw Object.assign(new Error("Indexing space metadata mismatch"), { code: "INDEXING_SPACE_MISMATCH" });
     return row;
   }
   private validateProvider(provider: ResolvedProvider, persisted: SpaceBoundary): void {
     const description = typeof provider.describe === "function" ? provider.describe() : undefined;
-    if (!description || !persisted.provider || description.provider !== persisted.provider || description.modelId !== persisted.model_id || description.modelRevision !== persisted.model_revision || description.dimension !== persisted.space_dimension || description.distance !== persisted.distance || description.pooling !== persisted.pooling || description.preprocessVersion !== persisted.preprocess_version || description.chunkingVersion !== persisted.chunking_version || (/^[0-9a-f]{64}$/i.test(persisted.fingerprint ?? "") && canonicalEmbeddingFingerprint(description) !== persisted.fingerprint)) {
+    if (!description || !persisted.provider || description.provider !== persisted.provider || description.modelId !== persisted.model_id || description.modelRevision !== persisted.model_revision || description.dimension !== persisted.space_dimension || description.distance !== persisted.distance || description.pooling !== persisted.pooling || description.preprocessVersion !== persisted.preprocess_version || description.chunkingVersion !== persisted.chunking_version || canonicalEmbeddingFingerprint(description) !== persisted.fingerprint) {
       throw Object.assign(new Error("Embedding provider capability mismatch"), { code: "EMBEDDING_CAPABILITY_MISMATCH", recoverable: false });
     }
   }

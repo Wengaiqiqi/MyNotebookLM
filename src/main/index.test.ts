@@ -160,7 +160,7 @@ vi.mock("./window", () => ({
 }));
 vi.mock("./ipc/register-vector-handlers", () => ({ registerVectorHandlers: mocks.registerVectorHandlers }));
 vi.mock("./vector/lance-store", () => ({ LanceStore: { open: vi.fn(async () => ({ upsert: vi.fn(), count: vi.fn(), rows: vi.fn(async () => []), vectorSearch: vi.fn(), deleteRevision: vi.fn() })), closeAll: vi.fn(async () => undefined) } }));
-vi.mock("./vector/indexing-service", () => ({ IndexingService: mocks.IndexingService }));
+vi.mock("./vector/indexing-service", () => ({ IndexingService: mocks.IndexingService, canonicalEmbeddingFingerprint: vi.fn(() => "canonical") }));
 vi.mock("./vector/space-repository", () => ({ SpaceRepository: mocks.SpaceRepository }));
 vi.mock("./vector/space-service", () => ({ SpaceService: mocks.SpaceService }));
 vi.mock("./vector/local-model-manager", () => ({
@@ -170,7 +170,12 @@ vi.mock("./vector/local-model-manager", () => ({
 }));
 vi.mock("./vector/local-embedding-provider", () => ({
   createTransformersEmbeddingRuntime: vi.fn(() => vi.fn()),
-  LocalEmbeddingProvider: vi.fn(function (this: Record<string, unknown>, manager: unknown, runtime: unknown) { this.manager = manager; this.runtime = runtime; this.embedBatch = vi.fn(); })
+  isAuthoritativeLocalCapability: vi.fn((value: unknown, expected: unknown) => JSON.stringify(value) === JSON.stringify(expected)),
+  LocalEmbeddingProvider: vi.fn(function (this: Record<string, unknown>, manager: unknown, runtime: unknown) {
+    this.manager = manager; this.runtime = runtime;
+    this.describe = vi.fn(() => ({ provider: "local", modelId: "Xenova/multilingual-e5-small", modelRevision: "761b726dd34fb83930e26aab4e9ac3899aa1fa78", dimension: 384, distance: "cosine", pooling: "mean", preprocessVersion: "e5-query-passage-v1", chunkingVersion: "persisted" }));
+    this.embedBatch = vi.fn(async () => [Array(384).fill(1)]);
+  })
 }));
 
 describe("main application composition", () => {
@@ -389,6 +394,32 @@ describe("main application composition", () => {
     await expect(options.optimize({ taskId: "task-1", space: { id: "s", dimension: 2 }, signal: controller.signal })).rejects.toBeDefined();
   });
 
+  it("cancels a production optimize task exactly once and leaves it cancelled", async () => {
+    const optimize = vi.fn((_space: unknown, signal: AbortSignal) => new Promise<void>((_resolve, reject) => signal.addEventListener("abort", () => reject(Object.assign(new Error("cancelled"), { code: "TASK_CANCELLED" })), { once: true })));
+    const lance = (await import("./vector/lance-store")).LanceStore as any;
+    lance.open.mockResolvedValueOnce({ optimize });
+    await import("./index");
+    await vi.waitFor(() => expect(mocks.SpaceService).toHaveBeenCalled());
+    const spaceService = mocks.SpaceService.mock.instances[0] as any;
+    let controller: AbortController | undefined;
+    spaceService.optimize = vi.fn(async (input: Record<string, unknown>) => { controller = new AbortController(); return spaceService.options.optimize({ ...input, signal: controller.signal }); });
+    spaceService.cancel = vi.fn(() => { controller?.abort(); return Boolean(controller); });
+    const tasks = mocks.TaskService.mock.instances[0] as any;
+    let state = "queued";
+    const dto = () => ({ id: "task-1", projectId: "project-1", sourceId: null, kind: "optimize", state, stage: "indexing", progress: 0, attempt: 0, error: null, idempotencyKey: null, createdAt: "2026-08-26T00:00:00.000Z", updatedAt: "2026-08-26T00:00:00.000Z" });
+    tasks.createTask.mockImplementation(() => dto());
+    tasks.getById = vi.fn(() => dto());
+    tasks.start.mockImplementation(() => { state = "running"; return dto(); });
+    tasks.cancel.mockImplementation(() => { if (state === "cancelled") throw new Error("stale state"); state = "cancelled"; return dto(); });
+    const service = mocks.getVectorService() as { optimize(input: unknown): Promise<any>; cancelTask(input: unknown): Promise<any> };
+    await expect(service.optimize({ projectId: "project-1", spaceId: "old" })).resolves.toMatchObject({ ok: true });
+    await vi.waitFor(() => expect(optimize).toHaveBeenCalledOnce());
+    await expect(service.cancelTask({ projectId: "project-1", taskId: "task-1" })).resolves.toMatchObject({ ok: true });
+    await vi.waitFor(() => expect(state).toBe("cancelled"));
+    expect(tasks.cancel).toHaveBeenCalledOnce();
+    expect(tasks.fail).not.toHaveBeenCalled();
+  });
+
   it("persists only the stable internal error key for optimize failures", async () => {
     const secret = "provider-secret-should-not-persist";
     const optimize = vi.fn(async () => { throw new Error(secret); });
@@ -402,8 +433,8 @@ describe("main application composition", () => {
     expect(JSON.stringify((mocks.TaskService.mock.instances[0] as any).fail.mock.calls)).not.toContain(secret);
   });
 
-  it("fails closed instead of inventing a cloud provider revision", async () => {
-    const profile = { id: "profile-1", provider: "openai", capability: "embedding", enabled: true, modelId: "text-embedding-3-small", baseUrl: "https://api.example.test" };
+  it.each(["openai", "openai-compatible", "gemini", "ollama"])("starts %s migration using modelId as the frozen revision and probed dimension", async (provider) => {
+    const profile = { id: "profile-1", provider, capability: "embedding", enabled: true, modelId: "embedding-model", baseUrl: "https://api.example.test" };
     mocks.connection.prepare.mockImplementation((sql: string) => ({
       get: vi.fn(() => sql.includes("model_profiles") ? profile : sql.includes("embedding_spaces") ? { id: "old", projectId: "project-1", dimension: 2 } : undefined),
       all: vi.fn(() => []),
@@ -422,12 +453,13 @@ describe("main application composition", () => {
     await import("./index");
     await vi.waitFor(() => expect(mocks.createMainWindow).toHaveBeenCalledOnce());
     const service = mocks.getVectorService() as { startMigration: (input: unknown) => Promise<any> };
-    await expect(service.startMigration({ projectId: "project-1", profileId: "profile-1" })).resolves.toMatchObject({ ok: false, error: { code: "VALIDATION" } });
-    expect((mocks.SpaceService.mock.instances[0] as any).options.rebuild).not.toHaveBeenCalled();
+    await expect(service.startMigration({ projectId: "project-1", profileId: "profile-1" })).resolves.toMatchObject({ ok: true });
+    const rebuild = (mocks.SpaceService.mock.instances[0] as any).rebuild;
+    expect(rebuild).toHaveBeenCalledWith(expect.objectContaining({ spec: expect.objectContaining({ provider, modelId: profile.modelId, modelRevision: profile.modelId, dimension: 4 }) }));
   });
 
-  it("fails closed when a cloud migration has no trusted provider revision", async () => {
-    const profile = { id: "profile-1", provider: "openai", capability: "embedding", enabled: true, modelId: "text-embedding-3-small", baseUrl: "https://api.example.test" };
+  it("fails closed when a cloud migration profile has an invalid modelId", async () => {
+    const profile = { id: "profile-1", provider: "openai", capability: "embedding", enabled: true, modelId: " ", baseUrl: "https://api.example.test" };
     mocks.connection.prepare.mockImplementation((sql: string) => ({
       get: vi.fn(() => sql.includes("model_profiles") ? profile : sql.includes("embedding_spaces") ? { id: "old", projectId: "project-1", dimension: 2 } : undefined),
       all: vi.fn(() => []),
@@ -439,6 +471,17 @@ describe("main application composition", () => {
     const service = mocks.getVectorService() as { startMigration: (input: unknown) => Promise<any> };
     await expect(service.startMigration({ projectId: "project-1", profileId: "profile-1" })).resolves.toMatchObject({ ok: false, error: { code: "VALIDATION" } });
     expect((mocks.SpaceService.mock.instances[0] as any).options.rebuild).not.toHaveBeenCalled();
+  });
+
+  it("rejects a local resolver row with missing persisted fingerprint before returning the provider", async () => {
+    mocks.connection.prepare.mockImplementation(() => ({
+      get: vi.fn(() => ({ provider: "local", model_id: "Xenova/multilingual-e5-small", model_revision: "761b726dd34fb83930e26aab4e9ac3899aa1fa78", dimension: 384, distance: "cosine", pooling: "mean", preprocess_version: "e5-query-passage-v1", chunking_version: "persisted", project_id: "project-1" })),
+      all: vi.fn(() => []), run: vi.fn(() => ({ changes: 1 }))
+    }));
+    await import("./index");
+    await vi.waitFor(() => expect(mocks.IndexingService).toHaveBeenCalled());
+    const resolve = mocks.IndexingService.mock.calls[0]?.[1] as (revisionId: string, space: { id: string; dimension: number }) => Promise<unknown>;
+    await expect(resolve("revision-1", { id: "space-1", dimension: 384 })).rejects.toMatchObject({ code: "EMBEDDING_PROFILE_MISMATCH" });
   });
 
   it("rejects retrieval before embedding when the persisted cloud capability mismatches", async () => {
