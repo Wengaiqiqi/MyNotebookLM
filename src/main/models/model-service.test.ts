@@ -25,6 +25,7 @@ import { AnthropicProvider } from "./anthropic-provider";
 import { GeminiProvider } from "./gemini-provider";
 import { OllamaProvider } from "./ollama-provider";
 import { OpenAiCompatibleProvider, OpenAiProvider } from "./openai-provider";
+import { ProviderRequestError } from "./http-client";
 import type { ModelDescriptor, ModelProvider } from "./provider";
 
 const PROFILE_ID = "11111111-1111-4111-8111-111111111111";
@@ -210,6 +211,36 @@ describe("createModelProvider", () => {
 });
 
 describe("ModelService", () => {
+  it.each([
+    ["AUTH", "errors.authentication", false, undefined],
+    ["RATE_LIMITED", "errors.rateLimited", true, 1500],
+    ["TIMEOUT", "errors.timeout", true, undefined],
+    ["NETWORK", "errors.network", true, undefined],
+    ["PROVIDER", "errors.provider", true, undefined]
+  ] as const)("preserves provider %s errors from stored credentials", async (code, messageKey, recoverable, retryAfterMs) => {
+    const modelProvider = provider();
+    const { service, repository, credentials } = setup(modelProvider);
+    repository.profiles.set(PROFILE_ID, dto(profile));
+    credentials.secrets.set(PROFILE_ID, "stored-secret");
+    const failure = {
+      error: {
+        code,
+        messageKey,
+        recoverable,
+        ...(retryAfterMs === undefined ? {} : { retryAfterMs })
+      },
+      fallbackEligible: recoverable
+    } as const;
+    vi.mocked(modelProvider.generate).mockImplementation(async function* () {
+      throw new ProviderRequestError(failure);
+    });
+
+    await expect(service.test({ profile })).resolves.toEqual({
+      ok: false,
+      error: failure.error
+    });
+  });
+
   it("atomically sets generation and built-in embedding default routes", async () => {
     const { service, repository, factory } = setup();
     repository.profiles.set(PROFILE_ID, dto(profile));

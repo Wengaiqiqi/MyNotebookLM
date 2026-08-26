@@ -51,6 +51,8 @@ class CountingProtector extends DeterministicProtector {
   }
 }
 
+class SafeCallbackError extends Error {}
+
 describe("CredentialStore", () => {
   let temporaryRoot: string;
   let appDatabase: AppDatabase;
@@ -170,6 +172,34 @@ describe("CredentialStore", () => {
     const error = await store.set(PROFILE_ID, apiKey).catch((reason: unknown) => reason);
 
     expect(error).toBeInstanceOf(Error);
+    expect((error as Error).message).not.toContain(apiKey);
+  });
+
+  it("rethrows safe callback errors without changing their type or identity", async () => {
+    const store = new CredentialStore(appDatabase.connection, new DeterministicProtector());
+    await store.set(PROFILE_ID, "ApiKey-42");
+    const error = new SafeCallbackError("provider failed safely");
+
+    await expect(store.withSecret(
+      PROFILE_ID,
+      { provider: "openai", baseUrl: "https://api.openai.com/v1" },
+      async () => { throw error; }
+    )).rejects.toBe(error);
+  });
+
+  it("replaces callback errors whose message contains the api key", async () => {
+    const store = new CredentialStore(appDatabase.connection, new DeterministicProtector());
+    const apiKey = "ApiKey-42";
+    await store.set(PROFILE_ID, apiKey);
+
+    const error = await store.withSecret(
+      PROFILE_ID,
+      { provider: "openai", baseUrl: "https://api.openai.com/v1" },
+      async () => { throw new Error(`request failed with ${apiKey}`); }
+    ).catch((reason: unknown) => reason);
+
+    expect(error).toBeInstanceOf(Error);
+    expect((error as Error).message).toBe("Credential could not be used");
     expect((error as Error).message).not.toContain(apiKey);
   });
 });

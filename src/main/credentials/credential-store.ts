@@ -160,8 +160,9 @@ export class CredentialStore implements CredentialStore {
 
     try {
       return await use(apiKey);
-    } catch {
-      throw new Error("Credential could not be used");
+    } catch (reason) {
+      if (String(reason).includes(apiKey)) throw new Error("Credential could not be used");
+      throw reason;
     }
   }
 
