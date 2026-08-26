@@ -17,8 +17,11 @@ describe("LanceStore", () => {
       expect(await store.count(space)).toBe(2);
       expect((await store.vectorSearch(space, [1, 0, 0], 1))[0]?.chunkId).toBe("c1");
       expect((await store.textSearch(space, "alpha", 10))[0]?.chunkId).toBe("c1");
-      expect((await store.vectorSearch(space, [1, 0, 0], 10, { projectId: "project-1" })).length).toBe(2);
+      for (const [key, value] of [["projectId", "project-1"], ["sourceId", "source-1"], ["revisionId", "revision-1"], ["spaceId", space.id]] as const) {
+        expect((await store.vectorSearch(space, [1, 0, 0], 10, { [key]: value })).length).toBe(2);
+      }
       expect((await store.vectorSearch(space, [1, 0, 0], 10, { projectId: "other" })).length).toBe(0);
+      await expect(store.vectorSearch(space, [1, 0, 0], 10, { unknown: "value" })).rejects.toThrow(/filter field/);
       const reopened = await LanceStore.open(dir);
       expect(await reopened.count(space)).toBe(2);
       await reopened.close();
@@ -57,7 +60,7 @@ describe("LanceStore", () => {
     } finally { await store.close(); await rm(dir, { recursive: true, force: true }); }
   });
 
-  it("builds an ANN index only after the threshold and keeps small-table search exhaustive", async () => {
+  it("builds ANN only at a reliable size and verifies recall on distinct vectors", async () => {
     const dir = await mkdtemp(path.join(os.tmpdir(), "lance-ann-"));
     const store = await LanceStore.open(dir);
     try {
@@ -65,9 +68,16 @@ describe("LanceStore", () => {
       await store.upsert(space, [row("small", [1, 0, 0], "x")]);
       const smallIndexes = await (await (store as any).db.openTable("space_00000000_0000_4000_8000_000000000001")).listIndices();
       expect(smallIndexes).not.toEqual(expect.arrayContaining([expect.objectContaining({ name: "vector_ann_idx" })]));
-      await store.upsert(space, Array.from({ length: 255 }, (_, i) => row(`large-${i}`, [1, 0, 0], "x")));
+      await store.upsert(space, Array.from({ length: 4094 }, (_, i) => {
+        const angle = (i / 4095) * Math.PI * 2;
+        return row(`large-${i}`, [Math.cos(angle), Math.sin(angle), (i % 17) / 17], "x");
+      }));
+      const beforeThreshold = await (await (store as any).db.openTable("space_00000000_0000_4000_8000_000000000001")).listIndices();
+      expect(beforeThreshold).not.toEqual(expect.arrayContaining([expect.objectContaining({ name: "vector_ann_idx" })]));
+      await store.upsert(space, [row("target", [0, 1, 0], "target")]);
       const indexes = await (store as any).db.openTable("space_00000000_0000_4000_8000_000000000001").then((t: any) => t.listIndices());
       expect(indexes).toEqual(expect.arrayContaining([expect.objectContaining({ name: "vector_ann_idx" })]));
+      expect((await store.vectorSearch(space, [0, 1, 0], 1))[0]?.chunkId).toBe("target");
     } finally { await store.close(); await rm(dir, { recursive: true, force: true }); }
   }, 30_000);
 });
