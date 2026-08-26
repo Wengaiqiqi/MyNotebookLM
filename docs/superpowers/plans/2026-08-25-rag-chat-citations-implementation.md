@@ -92,10 +92,10 @@
 
 **Operations:** list/create/rename/archive/delete conversation, send/stop/regenerate/copy-ready DTO, open citation.
 
-- [ ] Write failing tests for regenerate lineage, no duplicate user message, archived conversation behavior, source deleted after answer and locator opening by source type.
-- [ ] For local sources open the managed original using Electron shell only after repository lookup. PDF/page, PPTX/slide and Office cell locators are shown in an in-app citation detail panel; use OS opening as the document launch, without claiming Office deep-link support that Windows cannot guarantee.
-- [ ] For URL citations open only the authoritative stored final HTTP/HTTPS URL after revalidation; reject model text as a destination.
-- [ ] Run focused tests; review and commit `feat: manage conversations and open citations`.
+- [x] Write failing tests for regenerate lineage, no duplicate user message, archived conversation behavior, source deleted after answer and locator opening by source type.
+- [x] For local sources open the managed original using Electron shell only after repository lookup. PDF/page, PPTX/slide and Office cell locators are shown in an in-app citation detail panel; use OS opening as the document launch, without claiming Office deep-link support that Windows cannot guarantee.
+- [x] For URL citations open only the authoritative stored final HTTP/HTTPS URL after revalidation; reject model text as a destination.
+- [x] Run focused tests; review and commit `feat: manage conversations and open citations`.
 
 ## Task 6: Expose Versioned Streaming IPC
 
