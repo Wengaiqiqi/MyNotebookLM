@@ -22,6 +22,13 @@ describe("LocalModelManager", () => {
     const [a, b] = await Promise.all([manager.ensureReady(), manager.ensureReady()]); expect(a).toEqual(b); expect(calls).toBe(2);
     await expect(readFile(path.join(root, "fake__model-rev1.partial"))).rejects.toThrow(); await rm(root, { recursive: true, force: true });
   });
+  it("passes the verified active directory to runtime", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "model-")); const seen: string[] = [];
+    const manager = new LocalModelManager(root, async file => new TextEncoder().encode(file.includes("tokenizer") ? "new" : "new"), async dir => { seen.push(dir); return dir; }, manifest);
+    await manager.ensureReady();
+    expect(seen.at(-1)).toBe(path.join(root, "fake__model-rev1"));
+    await rm(root, { recursive: true, force: true });
+  });
   it("fails offline when the model is absent", async () => { const root = await mkdtemp(path.join(os.tmpdir(), "model-")); const m = new LocalModelManager(root, async () => new Uint8Array(), async () => ({}), manifest); await expect(m.ensureReady(true)).rejects.toThrow("离线"); await rm(root, { recursive: true, force: true }); });
   it("preserves the active model if activation fails", async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), "model-")); const active = path.join(root, "fake__model-rev1");
