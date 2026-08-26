@@ -5,6 +5,7 @@ import { LOCAL_MODEL_MANIFEST, LOCAL_MODEL_REVISION } from "./local-model-manife
 import path from "node:path";
 import type { EmbeddingFingerprint } from "../../shared/vector";
 export type EmbeddingRuntime = (model: unknown, inputs: string[], signal: AbortSignal) => Promise<number[][]>;
+export function isAuthoritativeLocalCapability(value: EmbeddingFingerprint, expected: EmbeddingFingerprint): boolean { return value.provider === expected.provider && value.modelId === expected.modelId && value.modelRevision === expected.modelRevision && value.dimension === expected.dimension && value.distance === expected.distance && value.pooling === expected.pooling && value.preprocessVersion === expected.preprocessVersion && value.chunkingVersion === expected.chunkingVersion; }
 export class LocalEmbeddingProvider {
   constructor(private readonly manager: LocalModelManager, private readonly embed: EmbeddingRuntime, private readonly batchSize = 16) {}
   describe(): EmbeddingFingerprint { return { provider: BUILT_IN_LOCAL_EMBEDDING_PROFILE.provider, modelId: LOCAL_MODEL_MANIFEST.modelId, modelRevision: LOCAL_MODEL_MANIFEST.revision, dimension: LOCAL_MODEL_MANIFEST.dimension, distance: BUILT_IN_LOCAL_EMBEDDING_PROFILE.distance, pooling: BUILT_IN_LOCAL_EMBEDDING_PROFILE.pooling, preprocessVersion: BUILT_IN_LOCAL_EMBEDDING_PROFILE.metadata.preprocessingVersion, chunkingVersion: "persisted" }; }

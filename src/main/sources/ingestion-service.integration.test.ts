@@ -36,7 +36,7 @@ describe("real ingestion worker integration", () => {
       await ingestion.run({ taskId, revisionId, kind: "text", data: new TextEncoder().encode("真实 worker fixture"), updatedAt: "2026-08-26T00:00:00.000Z" });
       expect(db.prepare("SELECT text FROM source_chunks WHERE revision_id = ? ORDER BY ordinal").all(revisionId)).toEqual([{ text: "真实 worker fixture" }]);
       expect(db.prepare("SELECT state FROM source_revisions WHERE id = ?").get(revisionId)).toEqual({ state: "awaiting_embedding" });
-      expect(db.prepare("SELECT stage, state, progress_1000 FROM tasks WHERE id = ?").get(taskId)).toEqual({ stage: "embedding", state: "running", progress_1000: 1000 });
+      expect(db.prepare("SELECT stage, state, progress_1000 FROM tasks WHERE id = ?").get(taskId)).toEqual({ stage: "embedding", state: "running", progress_1000: 600 });
     } finally {
       await pool.close();
       appDb.close();

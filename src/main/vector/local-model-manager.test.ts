@@ -10,12 +10,23 @@ import { createTransformersEmbeddingRuntime } from "./local-embedding-provider";
 const manifest = { modelId: "fake/model", revision: "rev1", dimension: 2, files: { "tokenizer.json": "UNRESOLVED", "onnx/model.onnx": "UNRESOLVED" } } as const;
 describe("LocalModelManager", () => {
   it("uses a fully resolved immutable Hugging Face manifest", () => {
-    expect(LOCAL_MODEL_MANIFEST.revision).toBe("761b726dd34fb83930e26aab4e9ac3899aa1fa78");
-    expect(LOCAL_MODEL_MANIFEST.files).toEqual({
-      "onnx/model_quantized.onnx": "f80102d3f2a1229f387d3c81909990d8945513e347b0eab049f7de3c6f98c193",
-      "tokenizer.json": "0b44a9d7b51c3c62626640cda0e2c2f70fdacdc25bbbd68038369d14ebdf4c39",
-      "tokenizer_config.json": "a1d6bc8734a6f635dc158508bef000f8e2e5a759c7d92f984b2c86e5ff53425b"
-    });
+    expect(LOCAL_MODEL_MANIFEST).toMatchInlineSnapshot(`
+      {
+        "dimension": 384,
+        "files": {
+          "onnx/model_quantized.onnx": "f80102d3f2a1229f387d3c81909990d8945513e347b0eab049f7de3c6f98c193",
+          "tokenizer.json": "0b44a9d7b51c3c62626640cda0e2c2f70fdacdc25bbbd68038369d14ebdf4c39",
+          "tokenizer_config.json": "a1d6bc8734a6f635dc158508bef000f8e2e5a759c7d92f984b2c86e5ff53425b",
+        },
+        "modelId": "Xenova/multilingual-e5-small",
+        "revision": "761b726dd34fb83930e26aab4e9ac3899aa1fa78",
+      }
+    `);
+  });
+  it("rejects model identifiers and revisions that can escape the managed root", () => {
+    expect(() => managedActiveDirectory("C:/models", { modelId: "../../outside", revision: "rev" })).toThrow();
+    expect(() => managedActiveDirectory("C:/models", { modelId: "safe/model", revision: "..\\outside" })).toThrow();
+    expect(() => managedStagingDirectory("C:/models", { modelId: "safe/model", revision: "rev/../../outside" })).toThrow();
   });
   it("downloads atomically, resumes partial files, and single-flights", async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), "model-")); let calls = 0;

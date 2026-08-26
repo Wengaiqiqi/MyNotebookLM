@@ -24,7 +24,7 @@ function toTaskDto(row: TaskRow): TaskDto {
   const error = errorCode
     ? {
         code: errorCode,
-        messageKey: row.error_message ?? "errors.internal",
+        messageKey: new Set(["errors.interrupted", "errors.internal", "errors.validation", "errors.notFound", "errors.conflict", "errors.cancelled", "errors.auth", "errors.rateLimited", "errors.timeout", "errors.network", "errors.provider", "errors.unsupportedFormat", "errors.unsafeInput", "errors.indexUnavailable"]).has(row.error_message ?? "") ? row.error_message! : ({ UNSAFE_INPUT: "errors.unsafeInput", UNSUPPORTED_FORMAT: "errors.unsupportedFormat", RATE_LIMITED: "errors.rateLimited", INTERNAL: "errors.internal" } as Record<string, string>)[errorCode] ?? `errors.${errorCode.toLowerCase()}`,
         recoverable: isRetryableCode(errorCode)
       }
     : null;
@@ -60,7 +60,7 @@ export class StaleTaskStateError extends Error {
 
 export type TaskTransition = {
   id: string;
-  expectedState: "queued" | "running";
+  expectedState: "queued" | "running" | "failed";
   nextState: "queued" | "running" | "completed" | "failed" | "cancelled";
   stage: TaskStage;
   progress?: number;
@@ -70,7 +70,7 @@ export type TaskTransition = {
 };
 
 export type TaskRepositoryHooks = {
-  beforeTransitionWrite?: (id: string, expectedState: "queued" | "running") => void;
+  beforeTransitionWrite?: (id: string, expectedState: "queued" | "running" | "failed") => void;
   onTransition?: (task: TaskDto) => void;
 };
 

@@ -51,6 +51,12 @@ export class TaskService {
     });
   }
 
+  retry(taskId: string, stage: TaskStage): TaskDto {
+    const current = this.repository.findById(taskId);
+    if (!current) throw new Error(`Task not found: ${taskId}`);
+    return this.repository.transition({ id: taskId, expectedState: "failed", nextState: "queued", stage, attempt: current.attempt, updatedAt: this.deps.now() });
+  }
+
   advance(taskId: string, stage: TaskStage, progress: number): TaskDto {
     return this.repository.transition({
       id: taskId,

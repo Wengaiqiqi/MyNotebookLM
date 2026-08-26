@@ -50,8 +50,7 @@ describe("main source import orchestration", () => {
     await service.importFile({ projectId: "00000000-0000-4000-8000-000000000001", path: "src/test/fixtures/text/bilingual-sample.txt" });
     await vi.waitFor(() => expect(fail).toHaveBeenCalledOnce());
     expect(fail).toHaveBeenCalledWith("00000000-0000-4000-8000-000000000003", expect.objectContaining({ code: "PROVIDER", recoverable: false }));
-    expect(fail.mock.calls[0]![1].messageKey).toContain("provider failed");
-    expect(fail.mock.calls[0]![1].messageKey).not.toContain("SECRET");
+    expect(fail.mock.calls[0]![1].messageKey).toBe("errors.provider");
   });
 
   it("returns persisted failure evidence when listing tasks", () => {
@@ -75,8 +74,14 @@ describe("main source import orchestration", () => {
 
     expect(service.listTasks(taskRow.project_id)[0]?.error).toEqual({
       code: "PROVIDER",
-      messageKey: "errors.provider_failed",
+      messageKey: "errors.provider",
       recoverable: true
     });
+  });
+
+  it("never exposes arbitrary persisted error text in task DTOs", () => {
+    const row = { id: "task", project_id: "project", source_id: null, kind: "ingest", state: "failed", stage: "parsing", progress_1000: 0, attempt: 0, error_code: "PROVIDER", error_message: "provider failed: api_key=SECRET", idempotency_key: null, created_at: "now", updated_at: "now" };
+    const service = new MainSourceService({ prepare: vi.fn(() => ({ all: () => [row] })) } as any, {} as any, {} as any);
+    expect(service.listTasks("project")[0]?.error).toEqual({ code: "PROVIDER", messageKey: "errors.provider", recoverable: true });
   });
 });

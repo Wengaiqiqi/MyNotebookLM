@@ -16,16 +16,14 @@ const ERROR_CODES = new Set<TaskErrorSummaryDto["code"]>([
   "RATE_LIMITED", "TIMEOUT", "NETWORK", "PROVIDER",
   "UNSUPPORTED_FORMAT", "UNSAFE_INPUT", "INDEX_UNAVAILABLE", "INTERNAL"
 ]);
+const MESSAGE_KEYS = new Set(["errors.interrupted", "errors.internal", "errors.validation", "errors.notFound", "errors.conflict", "errors.cancelled", "errors.auth", "errors.rateLimited", "errors.timeout", "errors.network", "errors.provider", "errors.unsupportedFormat", "errors.unsafeInput", "errors.indexUnavailable", "errors.modelCapability", "errors.embeddingProfileUnavailable", "errors.taskConflict"]);
 function taskError(error: unknown): TaskErrorSummaryDto {
   const candidate = error as { code?: unknown; message?: unknown };
   const code = typeof candidate.code === "string" && ERROR_CODES.has(candidate.code as TaskErrorSummaryDto["code"])
     ? candidate.code as TaskErrorSummaryDto["code"]
     : "INTERNAL";
-  const raw = typeof candidate.message === "string" && candidate.message.trim() ? candidate.message : "errors.internal";
-  const messageKey = raw
-    .replace(/((?:api[_-]?key|token|secret|password|authorization)\s*[:=]\s*)[^\s,;]+/gi, "$1[REDACTED]")
-    .replace(/(bearer\s+)[^\s,;]+/gi, "$1[REDACTED]")
-    .slice(0, 500);
+  const supplied = typeof candidate.message === "string" ? candidate.message : "";
+  const messageKey = MESSAGE_KEYS.has(supplied) ? supplied : ({ UNSAFE_INPUT: "errors.unsafeInput", UNSUPPORTED_FORMAT: "errors.unsupportedFormat", RATE_LIMITED: "errors.rateLimited", INDEX_UNAVAILABLE: "errors.indexUnavailable", INTERNAL: "errors.internal" } as Record<string, string>)[code] ?? `errors.${code.toLowerCase()}`;
   return { code, messageKey, recoverable: false };
 }
 export class MainSourceService {
@@ -37,7 +35,7 @@ export class MainSourceService {
   async importFile(input: { projectId: string; path: string }): Promise<SourceDto> { return this.createImport(input.projectId, input.path, await readFile(input.path), this.kind(input.path)); }
   async importUrl(input: { projectId: string; url: string }): Promise<SourceDto> { const response = await fetch(input.url); if (!response.ok) throw new Error("URL fetch failed"); return this.createImport(input.projectId, input.url, Buffer.from(await response.arrayBuffer()), "url"); }
   removeSource(input: { projectId: string; sourceId: string }): void { if (!this.ownsSource(input.projectId, input.sourceId)) throw new Error("source not owned by project"); this.db.prepare("UPDATE sources SET status = 'deleted', deleted_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ? AND project_id = ?").run(input.sourceId, input.projectId); }
-  retryTask(input: { projectId: string; sourceId: string }): TaskDto { const row = this.db.prepare("SELECT id FROM tasks WHERE project_id = ? AND source_id = ? ORDER BY created_at DESC LIMIT 1").get(input.projectId, input.sourceId) as { id: string } | undefined; if (!row) throw new Error("task not found"); return this.tasks.start(row.id, "staging"); }
+  retryTask(input: { projectId: string; sourceId: string }): TaskDto { const row = this.db.prepare("SELECT id FROM tasks WHERE project_id = ? AND source_id = ? ORDER BY created_at DESC LIMIT 1").get(input.projectId, input.sourceId) as { id: string } | undefined; if (!row) throw new Error("task not found"); return this.tasks.retry(row.id, "staging"); }
   cancelTask(input: { projectId: string; taskId: string }): TaskDto { if (!this.ownsTask(input.projectId, input.taskId)) throw new Error("task not owned by project"); this.ingestion.cancel(input.taskId); return this.tasks.cancel(input.taskId); }
   private async createImport(projectId: string, originalPath: string, bytes: Buffer, kind: SourceDto["kind"]): Promise<SourceDto> {
     const sourceId = randomUUID(), revisionId = randomUUID(), now = new Date().toISOString();
@@ -68,7 +66,7 @@ export class MainSourceService {
       id: String(row.id), projectId: String(row.project_id), sourceId: row.source_id ? String(row.source_id) : null,
       kind: row.kind as TaskDto["kind"], state: row.state as TaskDto["state"], stage: row.stage as TaskDto["stage"],
       progress: Number(row.progress_1000), attempt: Number(row.attempt),
-      error: errorCode ? { code: errorCode, messageKey: typeof row.error_message === "string" && row.error_message.trim() ? row.error_message : "errors.internal", recoverable: isRetryableCode(errorCode) } : null,
+      error: errorCode ? { code: errorCode, messageKey: MESSAGE_KEYS.has(String(row.error_message)) ? String(row.error_message) : ({ UNSAFE_INPUT: "errors.unsafeInput", UNSUPPORTED_FORMAT: "errors.unsupportedFormat", RATE_LIMITED: "errors.rateLimited", INTERNAL: "errors.internal" } as Record<string, string>)[errorCode] ?? `errors.${errorCode.toLowerCase()}`, recoverable: isRetryableCode(errorCode) } : null,
       idempotencyKey: row.idempotency_key ? String(row.idempotency_key) : null, createdAt: String(row.created_at), updatedAt: String(row.updated_at)
     };
   }

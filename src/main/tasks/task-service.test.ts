@@ -86,6 +86,13 @@ describe("TaskService", () => {
     expect(() => service.start(TASK_ID, "parsing")).toThrow();
   });
 
+  it("moves a failed task back to queued for an explicit retry", () => {
+    service.createTask({ projectId: PROJECT_ID, sourceId: null, kind: "ingest" });
+    service.start(TASK_ID, "parsing");
+    service.fail(TASK_ID, { code: "AUTH", messageKey: "errors.auth", recoverable: false });
+    expect(service.retry(TASK_ID, "staging")).toMatchObject({ state: "queued", stage: "staging" });
+  });
+
   it("cancels a queued or running task on request", () => {
     service.createTask({
       projectId: PROJECT_ID,

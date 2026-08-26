@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 vi.mock("@huggingface/transformers", () => ({ env: {}, pipeline: vi.fn(async () => vi.fn(async () => ({ tolist: () => [[1]] }))) }));
-import { LocalEmbeddingProvider, createTransformersEmbeddingRuntime } from "./local-embedding-provider";
+import { LocalEmbeddingProvider, createTransformersEmbeddingRuntime, isAuthoritativeLocalCapability } from "./local-embedding-provider";
 import { BUILT_IN_LOCAL_EMBEDDING_PROFILE } from "../models/local-embedding-profile";
 import { LOCAL_MODEL_MANIFEST } from "./local-model-manifest";
 import path from "node:path";
@@ -22,6 +22,12 @@ it("describes the authoritative local embedding capability", () => {
     preprocessVersion: BUILT_IN_LOCAL_EMBEDDING_PROFILE.metadata.preprocessingVersion,
     chunkingVersion: "persisted"
   });
+});
+it("rejects persisted local capability fields that differ from the manifest", () => {
+  const provider = new LocalEmbeddingProvider({} as never, async () => []);
+  const capability = provider.describe();
+  expect(isAuthoritativeLocalCapability({ ...capability, modelRevision: "wrong" }, capability)).toBe(false);
+  expect(isAuthoritativeLocalCapability(capability, capability)).toBe(true);
 });
 it("passes the caller signal and validates count, finite 384-d vectors", async () => {
   const controller = new AbortController(); const manager = { ensureReady: vi.fn(async (_o: boolean, _p: unknown, signal: AbortSignal) => { expect(signal).toBe(controller.signal); return {}; }) };

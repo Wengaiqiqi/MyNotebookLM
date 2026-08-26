@@ -7,7 +7,10 @@ export type ModelManifest = { modelId: string; revision: string; dimension: numb
 export type DownloadProgress = (value: number) => void;
 export type ModelDownloader = (file: string, offset: number, onProgress: DownloadProgress, signal: AbortSignal) => Promise<Uint8Array>;
 export type ModelRuntime<T> = (directory: string, signal: AbortSignal) => Promise<T>;
-export function managedActiveDirectory(root: string, manifest: Pick<ModelManifest, "modelId" | "revision">): string { return path.join(path.resolve(root), `${manifest.modelId.replaceAll("/", "__")}-${manifest.revision}`); }
+function validateManagedIdentity(manifest: Pick<ModelManifest, "modelId" | "revision">): void {
+  if (!/^[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+$/.test(manifest.modelId) || !/^[A-Za-z0-9._-]+$/.test(manifest.revision) || manifest.revision === "." || manifest.revision === "..") throw new Error("模型标识或 revision 无效");
+}
+export function managedActiveDirectory(root: string, manifest: Pick<ModelManifest, "modelId" | "revision">): string { validateManagedIdentity(manifest); return path.join(path.resolve(root), `${manifest.modelId.replaceAll("/", "__")}-${manifest.revision}`); }
 export function managedStagingDirectory(root: string, manifest: Pick<ModelManifest, "modelId" | "revision">): string { return `${managedActiveDirectory(root, manifest)}.partial`; }
 const MODEL_FILES = new Set(Object.keys(LOCAL_MODEL_MANIFEST.files));
 const HF_ROOT = `https://huggingface.co/${LOCAL_MODEL_ID}/resolve/${LOCAL_MODEL_REVISION}`;

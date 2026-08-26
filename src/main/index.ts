@@ -23,12 +23,12 @@ import { createTaskUpdateFanout } from "./task-updates";
 import { readFileSync } from "node:fs";
 import { createMainWindow, registerTitleOverlayHandler } from "./window";
 import { LanceStore } from "./vector/lance-store";
-import { IndexingService } from "./vector/indexing-service";
+import { IndexingService, canonicalEmbeddingFingerprint } from "./vector/indexing-service";
 import { SpaceRepository } from "./vector/space-repository";
 import { SpaceService } from "./vector/space-service";
 import { backupDatabase } from "./vector/vector-backup";
 import { createLocalModelManager, managedActiveDirectory, managedStagingDirectory } from "./vector/local-model-manager";
-import { LocalEmbeddingProvider, createTransformersEmbeddingRuntime } from "./vector/local-embedding-provider";
+import { LocalEmbeddingProvider, createTransformersEmbeddingRuntime, isAuthoritativeLocalCapability } from "./vector/local-embedding-provider";
 import { LOCAL_MODEL_MANIFEST } from "./vector/local-model-manifest";
 import { createModelProvider } from "./models/model-service";
 import { BUILT_IN_LOCAL_EMBEDDING_PROFILE, isBuiltInLocalEmbeddingProfile } from "./models/local-embedding-profile";
@@ -89,7 +89,12 @@ app.whenReady().then(async () => {
       ? BUILT_IN_LOCAL_EMBEDDING_PROFILE
       : settingsRepository.listProfiles().find(p => p.capability === "embedding" && p.enabled && p.provider === row.provider && p.modelId === row.model_id);
     if (!profile || (row.provider === "local" && !isBuiltInLocalEmbeddingProfile(profile))) throw Object.assign(new Error("Embedding profile is missing or mismatched"), { code: "EMBEDDING_PROFILE_MISMATCH", recoverable: false });
-    if (profile.provider === "local") return localEmbeddingProvider;
+    if (profile.provider === "local") {
+      const actual = localEmbeddingProvider.describe();
+      const persisted = { ...actual, modelId: row.model_id, modelRevision: row.model_revision, dimension: row.dimension ?? actual.dimension, distance: (row.distance ?? actual.distance) as "cosine", pooling: (row.pooling ?? actual.pooling) as "mean", preprocessVersion: row.preprocess_version ?? actual.preprocessVersion, chunkingVersion: row.chunking_version ?? actual.chunkingVersion };
+      if (!isAuthoritativeLocalCapability(persisted, actual)) throw Object.assign(new Error("Local embedding capability is not authoritative"), { code: "EMBEDDING_PROFILE_MISMATCH", recoverable: false });
+      return localEmbeddingProvider;
+    }
     if (!row.dimension || row.distance !== "cosine" || row.pooling !== "mean" || !row.preprocess_version || !row.chunking_version) throw Object.assign(new Error("Embedding capability is incomplete"), { code: "EMBEDDING_PROFILE_MISMATCH", recoverable: false });
     const fingerprint = (): import("../shared/vector").EmbeddingFingerprint => ({ provider: row.provider, modelId: row.model_id, modelRevision: row.model_revision, dimension: row.dimension!, distance: row.distance as "cosine", pooling: row.pooling as "mean", preprocessVersion: row.preprocess_version!, chunkingVersion: row.chunking_version! });
     return {
@@ -102,7 +107,7 @@ app.whenReady().then(async () => {
     };
   };
   const resolveEmbeddingProvider = async (revisionId: string, space: { id: string; dimension: number }) => {
-    const row = appDatabase!.connection.prepare(`SELECT es.provider, es.model_id, es.model_revision, es.dimension, es.distance, es.pooling, es.preprocess_version, es.chunking_version, es.project_id
+    const row = appDatabase!.connection.prepare(`SELECT es.provider, es.model_id, es.model_revision, es.dimension, es.distance, es.pooling, es.preprocess_version, es.chunking_version, es.fingerprint, es.project_id
       FROM source_revisions sr JOIN sources s ON s.id = sr.source_id
       JOIN embedding_spaces es ON es.id = ? AND es.project_id = s.project_id AND es.state IN ('active','preparing','building','validating') WHERE sr.id = ?`).get(space.id, revisionId) as { provider: string; model_id: string; model_revision: string; dimension: number; distance: string; pooling: string; preprocess_version: string; chunking_version: string; project_id: string } | undefined;
     if (!row) throw Object.assign(new Error("Active embedding space does not match revision project"), { code: "EMBEDDING_SPACE_PROFILE_MISMATCH", recoverable: false });
@@ -119,7 +124,7 @@ app.whenReady().then(async () => {
     const row = revisionId ? appDatabase?.connection.prepare("SELECT sr.stored_path, s.kind FROM tasks t JOIN source_revisions sr ON sr.id = ? JOIN sources s ON s.id = t.source_id WHERE t.id = ?").get(revisionId, taskId) as { stored_path?: string; kind?: string } | undefined : undefined;
     if (!row?.stored_path || !row.kind) return undefined;
     try { return { kind: row.kind, data: readFileSync(row.stored_path) }; } catch { return undefined; }
-  }, undefined, indexing);
+  }, (taskId, value) => { const task = taskService.getById(taskId); if (task?.state === "running") taskService.advance(taskId, "parsing", Math.min(600, Math.floor(value * 600))); }, indexing);
   const continueEmbedding = async (task: { id: string; sourceId: string | null }) => {
     const revisionId = taskRevisions.get(task.id) ?? (appDatabase?.connection.prepare("SELECT sr.id FROM tasks t JOIN sources s ON s.id = t.source_id JOIN source_revisions sr ON sr.source_id = s.id AND (sr.id = s.current_revision_id OR (s.current_revision_id IS NULL AND sr.state = 'awaiting_embedding')) WHERE t.id = ? AND t.project_id = s.project_id AND t.source_id = ? ORDER BY CASE WHEN sr.id = s.current_revision_id THEN 0 ELSE 1 END, sr.created_at DESC LIMIT 1").get(task.id, task.sourceId) as { id?: string } | undefined)?.id;
     if (!revisionId) throw new Error("Embedding task has no revision");
@@ -137,8 +142,8 @@ app.whenReady().then(async () => {
     return row?.id ? (taskService.getById?.(row.id) ?? undefined) : undefined;
   };
   const runTask = (task: TaskDto, work: () => Promise<void>): TaskDto => {
-    taskService.start(task.id, task.kind === "optimize" ? "indexing" : "validating");
-    void work().then(() => taskService.complete(task.id)).catch((error) => {
+    if (task.kind !== "optimize") taskService.start(task.id, "validating");
+    void work().then(() => { if (task.kind !== "optimize") taskService.complete(task.id); }).catch((error) => {
       if ((error as { code?: string }).code === "TASK_CANCELLED" || (error as { code?: string }).code === "SPACE_BUILD_CANCELLED") {
         const current = taskService.getById?.(task.id);
         if (current?.state === "queued" || current?.state === "running") taskService.cancel(task.id);
@@ -160,14 +165,15 @@ app.whenReady().then(async () => {
       if (existing) return failure("CONFLICT", "errors.taskConflict", true);
       const current = spaces.active(projectId);
       if (!current) return failure("VALIDATION", "errors.embeddingProfileUnavailable");
-      if (profile.provider !== "local") return failure("VALIDATION", "errors.embeddingProfileUnavailable");
-      const provider = await createProviderForSpace({ provider: profile.provider, model_id: profile.modelId, model_revision: LOCAL_MODEL_MANIFEST.revision }, current);
+      const trustedRevision = profile.provider === "local" ? LOCAL_MODEL_MANIFEST.revision : (profile as { modelRevision?: string }).modelRevision;
+      if (!trustedRevision) return failure("VALIDATION", "errors.embeddingProfileUnavailable");
+      const provider = await createProviderForSpace({ provider: profile.provider, model_id: profile.modelId, model_revision: trustedRevision, dimension: current.dimension, distance: "cosine", pooling: "mean", preprocess_version: "e5-query-passage-v1", chunking_version: "persisted" }, current);
       const probe = await provider.embedBatch(["embedding profile probe"], new AbortController().signal, 1);
       const dimension = probe[0]?.length;
       if (!dimension) return failure("VALIDATION", "errors.embeddingProfileUnavailable");
       const capability = provider.describe();
       const modelRevision = capability.modelRevision;
-      const fingerprint = createHash("sha256").update(JSON.stringify({ provider: capability.provider, modelId: capability.modelId, modelRevision, dimension, distance: capability.distance, pooling: capability.pooling, preprocessVersion: capability.preprocessVersion, chunkingVersion: capability.chunkingVersion })).digest("hex");
+      const fingerprint = canonicalEmbeddingFingerprint({ provider: capability.provider, modelId: capability.modelId, modelRevision, dimension, distance: capability.distance, pooling: capability.pooling, preprocessVersion: capability.preprocessVersion, chunkingVersion: capability.chunkingVersion });
       const task = taskService.createTask({ projectId, sourceId: null, kind: "validation" });
       return { ok: true, value: runTask(task, () => spaceService.rebuild({ taskId: task.id, spec: { projectId, provider: capability.provider, modelId: capability.modelId, modelRevision, dimension, distance: capability.distance, pooling: capability.pooling, preprocessVersion: capability.preprocessVersion, chunkingVersion: capability.chunkingVersion, fingerprint } })) };
     },

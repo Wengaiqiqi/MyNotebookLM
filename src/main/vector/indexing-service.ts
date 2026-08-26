@@ -1,4 +1,5 @@
 import type Database from "better-sqlite3";
+import { createHash } from "node:crypto";
 import type { EmbeddingProvider } from "./embedding-provider";
 import type { LanceRow, LanceSpace, LanceStore } from "./lance-store";
 
@@ -7,21 +8,23 @@ type Input = { taskId: string; revisionId: string; space: LanceSpace; batchSize?
 type ResolvedProvider = EmbeddingProvider;
 type ProviderResolver = ResolvedProvider | ((revisionId: string, space: LanceSpace) => Promise<ResolvedProvider>);
 type StoredLike = Omit<LanceRow, "locator"> & { locatorJson?: string; locator?: unknown };
-type SpaceBoundary = { project_id: string; source_id: string; space_id?: string; space_project_id?: string; space_dimension?: number; space_state?: string; active_space_id?: string; provider?: string; model_id?: string; model_revision?: string; distance?: string; pooling?: string; preprocess_version?: string; chunking_version?: string };
+type SpaceBoundary = { project_id: string; source_id: string; space_id?: string; space_project_id?: string; space_dimension?: number; space_state?: string; active_space_id?: string; provider?: string; model_id?: string; model_revision?: string; distance?: string; pooling?: string; preprocess_version?: string; chunking_version?: string; fingerprint?: string };
+export function canonicalEmbeddingFingerprint(value: { provider: string; modelId: string; modelRevision: string; dimension: number; distance: string; pooling: string; preprocessVersion: string; chunkingVersion: string }): string { return createHash("sha256").update(JSON.stringify(value)).digest("hex"); }
 export class IndexingService {
   private recoverChunks?: (revisionId: string) => Promise<void>;
   constructor(private readonly db: Database.Database, private readonly provider: ProviderResolver, private readonly lance: Pick<LanceStore, "createSpace" | "upsert" | "count" | "rows" | "vectorSearch" | "deleteRevision">) {}
   private async resolveProvider(revisionId: string, space: LanceSpace) { return typeof this.provider === "function" ? this.provider(revisionId, space) : this.provider; }
   private validateSpace(revisionId: string, space: LanceSpace, operation: "index" | "rebuild"): SpaceBoundary {
-    const row = this.db.prepare("SELECT sr.source_id, s.project_id, es.id AS space_id, es.project_id AS space_project_id, es.dimension AS space_dimension, es.state AS space_state, es.provider, es.model_id, es.model_revision, es.distance, es.pooling, es.preprocess_version, es.chunking_version, pes.space_id AS active_space_id FROM source_revisions sr JOIN sources s ON s.id = sr.source_id LEFT JOIN embedding_spaces es ON es.id = ? LEFT JOIN project_embedding_spaces pes ON pes.project_id = s.project_id WHERE sr.id = ?").get(space.id, revisionId) as SpaceBoundary | undefined;
+    const row = this.db.prepare("SELECT sr.source_id, s.project_id, es.id AS space_id, es.project_id AS space_project_id, es.dimension AS space_dimension, es.state AS space_state, es.provider, es.model_id, es.model_revision, es.distance, es.pooling, es.preprocess_version, es.chunking_version, es.fingerprint, pes.space_id AS active_space_id FROM source_revisions sr JOIN sources s ON s.id = sr.source_id LEFT JOIN embedding_spaces es ON es.id = ? LEFT JOIN project_embedding_spaces pes ON pes.project_id = s.project_id WHERE sr.id = ?").get(space.id, revisionId) as SpaceBoundary | undefined;
     if (!row) throw new Error("revision not found");
     const stateValid = operation === "index" ? row.space_state === "active" && row.active_space_id === space.id : ["preparing", "building", "validating"].includes(row.space_state ?? "");
-    if (row.space_id !== space.id || row.space_project_id !== row.project_id || row.space_dimension !== space.dimension || !stateValid || !row.provider || !row.model_id || !row.model_revision || !row.distance || !row.pooling || !row.preprocess_version || !row.chunking_version) throw Object.assign(new Error("Indexing space metadata mismatch"), { code: "INDEXING_SPACE_MISMATCH" });
+    const expectedFingerprint = row.provider && row.model_id && row.model_revision && row.space_dimension && row.distance && row.pooling && row.preprocess_version && row.chunking_version ? canonicalEmbeddingFingerprint({ provider: row.provider, modelId: row.model_id, modelRevision: row.model_revision, dimension: row.space_dimension, distance: row.distance, pooling: row.pooling, preprocessVersion: row.preprocess_version, chunkingVersion: row.chunking_version }) : undefined;
+    if (row.space_id !== space.id || row.space_project_id !== row.project_id || row.space_dimension !== space.dimension || !stateValid || (operation === "index" && (!expectedFingerprint || row.fingerprint !== expectedFingerprint))) throw Object.assign(new Error("Indexing space metadata mismatch"), { code: "INDEXING_SPACE_MISMATCH" });
     return row;
   }
   private validateProvider(provider: ResolvedProvider, persisted: SpaceBoundary): void {
     const description = typeof provider.describe === "function" ? provider.describe() : undefined;
-    if (!description || !persisted.provider || description.provider !== persisted.provider || description.modelId !== persisted.model_id || description.modelRevision !== persisted.model_revision || description.dimension !== persisted.space_dimension || description.distance !== persisted.distance || description.pooling !== persisted.pooling || description.preprocessVersion !== persisted.preprocess_version || description.chunkingVersion !== persisted.chunking_version) {
+    if (!description || !persisted.provider || description.provider !== persisted.provider || description.modelId !== persisted.model_id || description.modelRevision !== persisted.model_revision || description.dimension !== persisted.space_dimension || description.distance !== persisted.distance || description.pooling !== persisted.pooling || description.preprocessVersion !== persisted.preprocess_version || description.chunkingVersion !== persisted.chunking_version || (/^[0-9a-f]{64}$/i.test(persisted.fingerprint ?? "") && canonicalEmbeddingFingerprint(description) !== persisted.fingerprint)) {
       throw Object.assign(new Error("Embedding provider capability mismatch"), { code: "EMBEDDING_CAPABILITY_MISMATCH", recoverable: false });
     }
   }
