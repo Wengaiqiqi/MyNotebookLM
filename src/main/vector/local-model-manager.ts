@@ -76,7 +76,11 @@ export class LocalModelManager<T = unknown> {
       await this.stagingRuntime(staging, signal);
       const backup = `${active}.old`; await rm(backup, { recursive: true, force: true }); let hadActive = true; try { await rename(active, backup); } catch (e) { if ((e as NodeJS.ErrnoException).code !== "ENOENT") throw e; hadActive = false; }
       try { await rename(staging, active); } catch (e) { if (hadActive) await rename(backup, active); throw e; }
-      try { const result = await this.runtime(active, signal); await rm(backup, { recursive: true, force: true }); return result; } catch (e) { if (hadActive) { await rm(active, { recursive: true, force: true }); await rename(backup, active); } throw e; }
+      try { const result = await this.runtime(active, signal); await rm(backup, { recursive: true, force: true }); return result; } catch (e) {
+        await rm(active, { recursive: true, force: true });
+        if (hadActive) await rename(backup, active);
+        throw e;
+      }
     } catch (e) { await rm(staging, { recursive: true, force: true }); throw e; }
   }
 }

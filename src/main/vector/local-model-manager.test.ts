@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm, writeFile, mkdir } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile, mkdir, stat } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { describe, expect, it, vi } from "vitest";
@@ -10,11 +10,11 @@ import { createTransformersEmbeddingRuntime } from "./local-embedding-provider";
 const manifest = { modelId: "fake/model", revision: "rev1", dimension: 2, files: { "tokenizer.json": "UNRESOLVED", "onnx/model.onnx": "UNRESOLVED" } } as const;
 describe("LocalModelManager", () => {
   it("uses a fully resolved immutable Hugging Face manifest", () => {
-    expect(LOCAL_MODEL_MANIFEST.revision).toMatch(/^[0-9a-f]{40}$/);
+    expect(LOCAL_MODEL_MANIFEST.revision).toBe("761b726dd34fb83930e26aab4e9ac3899aa1fa78");
     expect(LOCAL_MODEL_MANIFEST.files).toEqual({
-      "onnx/model_quantized.onnx": expect.stringMatching(/^[0-9a-f]{64}$/),
-      "tokenizer.json": expect.stringMatching(/^[0-9a-f]{64}$/),
-      "tokenizer_config.json": expect.stringMatching(/^[0-9a-f]{64}$/)
+      "onnx/model_quantized.onnx": "f80102d3f2a1229f387d3c81909990d8945513e347b0eab049f7de3c6f98c193",
+      "tokenizer.json": "0b44a9d7b51c3c62626640cda0e2c2f70fdacdc25bbbd68038369d14ebdf4c39",
+      "tokenizer_config.json": "a1d6bc8734a6f635dc158508bef000f8e2e5a759c7d92f984b2c86e5ff53425b"
     });
   });
   it("downloads atomically, resumes partial files, and single-flights", async () => {
@@ -105,6 +105,27 @@ describe("LocalModelManager", () => {
     await mkdir(path.join(active, "onnx"), { recursive: true }); await writeFile(path.join(active, "tokenizer.json"), "old"); await writeFile(path.join(active, "onnx/model.onnx"), "old");
     let calls = 0; const manager = new LocalModelManager(root, async file => new TextEncoder().encode(file.includes("tokenizer") ? "new" : "new"), async dir => { calls++; if (calls === 1) return {}; throw new Error("active runtime failed"); }, manifest);
     await expect(manager.ensureReady()).rejects.toThrow("active runtime failed"); await expect(readFile(path.join(active, "tokenizer.json"), "utf8")).resolves.toBe("old");
+    await rm(root, { recursive: true, force: true });
+  });
+  it("removes the failed active directory when installing without an old active model", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "model-"));
+    const active = managedActiveDirectory(root, manifest);
+    const staging = managedStagingDirectory(root, manifest);
+    let calls = 0;
+    const manager = new LocalModelManager(
+      root,
+      async file => new TextEncoder().encode(file),
+      async () => {
+        calls++;
+        if (calls === 1) return {};
+        throw new Error("active runtime failed");
+      },
+      manifest
+    );
+
+    await expect(manager.ensureReady()).rejects.toThrow("active runtime failed");
+    await expect(stat(active)).rejects.toMatchObject({ code: "ENOENT" });
+    await expect(stat(staging)).rejects.toMatchObject({ code: "ENOENT" });
     await rm(root, { recursive: true, force: true });
   });
   it("appends resumed bytes and removes corrupt partial artifacts for recovery", async () => {
