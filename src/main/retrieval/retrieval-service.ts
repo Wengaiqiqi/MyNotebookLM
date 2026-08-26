@@ -7,17 +7,22 @@ import { diversifyHits, reciprocalRankFusion, type RetrievalCandidate } from "./
 type Row = RetrievalCandidate & { revisionId: string; text: string; locatorJson: string; vector?: number[] };
 type SearchInput = { projectId: string; query: string; limit: number; signal?: AbortSignal };
 export class RetrievalService {
-  private readonly store: Pick<LanceStore, "vectorSearch" | "textSearch">; private readonly provider: Pick<EmbeddingProvider, "embedBatch">; private readonly db: Database.Database; private readonly resolveSpace?: (projectId: string, space: { id:string; dimension:number }) => Promise<{provider:Pick<EmbeddingProvider, "embedBatch">}|null>;
+  private readonly store: Pick<LanceStore, "vectorSearch" | "textSearch">; private readonly provider: Pick<EmbeddingProvider, "embedBatch">; private readonly db: Database.Database; private readonly resolveSpace?: (projectId: string, space: { id:string; dimension:number }) => Promise<{provider: Pick<EmbeddingProvider, "embedBatch" | "describe">}|null>;
   constructor(a: any, b?: any, c?: any) { if (a?.lance) { this.db=a.db; this.store=a.lance; this.provider=a.provider; this.resolveSpace=a.resolveSpace; } else { this.store=a; this.provider=b; this.db=c; } }
   async search(input: SearchInput | string, query?: string): Promise<any> {
     if (typeof input === "string") { const result = await this.search({ projectId: input, query: query ?? "", limit: 20 }); if (!result.ok) throw { code: result.error.code, repair: result.error.code === "INDEX_UNAVAILABLE" }; return result.value; }
     try {
-      const space = this.db.prepare("SELECT pes.space_id, es.dimension FROM project_embedding_spaces pes JOIN embedding_spaces es ON es.id = pes.space_id WHERE pes.project_id = ? AND es.state = 'active'").get(input.projectId) as { space_id: string; dimension: number } | undefined;
+      const space = this.db.prepare("SELECT pes.space_id, es.provider, es.model_id, es.model_revision, es.dimension, es.distance, es.pooling, es.preprocess_version, es.chunking_version FROM project_embedding_spaces pes JOIN embedding_spaces es ON es.id = pes.space_id WHERE pes.project_id = ? AND es.state = 'active'").get(input.projectId) as { space_id: string; provider: string; model_id: string; model_revision: string; dimension: number; distance: string; pooling: string; preprocess_version: string; chunking_version: string } | undefined;
       if (!space) return this.failure("NOT_FOUND", false);
       const resolved = this.resolveSpace ? await this.resolveSpace(input.projectId, { id: space.space_id, dimension: space.dimension }) : null;
+      const queryProvider = resolved?.provider ?? this.provider;
+      if (typeof (queryProvider as Partial<EmbeddingProvider>).describe === "function") {
+        const description = (queryProvider as EmbeddingProvider).describe();
+        if (description.provider !== space.provider || description.modelId !== space.model_id || description.modelRevision !== space.model_revision || description.dimension !== space.dimension || description.distance !== space.distance || description.pooling !== space.pooling || description.preprocessVersion !== space.preprocess_version || description.chunkingVersion !== space.chunking_version) throw new Error("Embedding provider capability mismatch");
+      }
       const spec: LanceSpace = { id: space.space_id, dimension: space.dimension };
       const textPromise = this.store.textSearch(spec, input.query, input.limit * 3);
-      const [vector] = await (resolved?.provider ?? this.provider).embedBatch([input.query], input.signal ?? new AbortController().signal);
+      const [vector] = await queryProvider.embedBatch([input.query], input.signal ?? new AbortController().signal);
       if (!vector) throw new Error("embedding unavailable");
       const [ann, bm25] = await Promise.all([this.store.vectorSearch(spec, vector, input.limit * 3, { projectId: input.projectId }), textPromise]);
       const fused = reciprocalRankFusion([ann as Row[], bm25 as Row[]], input.limit * 3);

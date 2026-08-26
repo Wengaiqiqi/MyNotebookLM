@@ -28,4 +28,19 @@ describe("RetrievalService", () => {
     await service.search({ projectId: "p1", query: "hello", limit: 1 });
     expect(provider.embedBatch).toHaveBeenCalled();
   });
+
+  it("rejects a cloud provider capability mismatch before embedding", async () => {
+    const embedBatch = vi.fn(async () => [[1, 0]]);
+    const provider = {
+      embedBatch,
+      describe: () => ({ provider: "openai", modelId: "m", modelRevision: "wrong", dimension: 2, distance: "cosine" as const, pooling: "mean" as const, preprocessVersion: "persisted", chunkingVersion: "persisted" })
+    };
+    const lance = { vectorSearch: vi.fn(async () => []), textSearch: vi.fn(async () => []) };
+    const db = { prepare: vi.fn((sql: string) => ({
+      get: () => sql.includes("project_embedding_spaces") ? { space_id: "sp1", dimension: 2, provider: "openai", model_id: "m", model_revision: "expected" } : undefined
+    })) } as any;
+    const service = new RetrievalService({ db, lance: lance as any, provider: { embedBatch: vi.fn() } as any, resolveSpace: async () => ({ provider }) });
+    await expect(service.search({ projectId: "p1", query: "hello", limit: 1 })).resolves.toMatchObject({ ok: false, error: { code: "INDEX_UNAVAILABLE" } });
+    expect(embedBatch).not.toHaveBeenCalled();
+  });
 });

@@ -91,9 +91,10 @@ app.whenReady().then(async () => {
     if (!profile || (row.provider === "local" && !isBuiltInLocalEmbeddingProfile(profile))) throw Object.assign(new Error("Embedding profile is missing or mismatched"), { code: "EMBEDDING_PROFILE_MISMATCH", recoverable: false });
     if (profile.provider === "local") return localEmbeddingProvider;
     return {
+      describe: () => ({ provider: profile.provider, modelId: profile.modelId, modelRevision: profile.modelId, dimension: space.dimension, distance: "cosine", pooling: "mean", preprocessVersion: "persisted", chunkingVersion: "persisted" }),
       embedBatch: async (texts: string[], signal: AbortSignal, batchSize?: number) => credentialStore.withSecret(profile.id, { provider: profile.provider, baseUrl: profile.baseUrl }, async (apiKey) => {
         const model = createModelProvider(profile.provider, profile.baseUrl, apiKey);
-        const provider = createEmbeddingProvider({ provider: profile.provider, model: profile.modelId, adapter: { embed: model.embed.bind(model), describe: () => ({ provider: row.provider, modelId: row.model_id, modelRevision: row.model_revision, dimension: space.dimension, distance: "cosine", pooling: "mean", preprocessVersion: "persisted", chunkingVersion: "persisted" }) } });
+        const provider = createEmbeddingProvider({ provider: profile.provider, model: profile.modelId, adapter: { embed: model.embed.bind(model), describe: () => ({ provider: profile.provider, modelId: profile.modelId, modelRevision: profile.modelId, dimension: space.dimension, distance: "cosine", pooling: "mean", preprocessVersion: "persisted", chunkingVersion: "persisted" }) } });
         return provider.embedBatch(texts, signal, batchSize);
       })
     };
@@ -161,7 +162,7 @@ app.whenReady().then(async () => {
       const probe = await provider.embedBatch(["embedding profile probe"], new AbortController().signal, 1);
       const dimension = probe[0]?.length;
       if (!dimension) return failure("VALIDATION", "errors.embeddingProfileUnavailable");
-      const modelRevision = profile.provider === "local" ? LOCAL_MODEL_MANIFEST.revision : `probe-${createHash("sha256").update(`${profile.provider}:${profile.modelId}:${dimension}`).digest("hex").slice(0, 16)}`;
+      const modelRevision = profile.provider === "local" ? LOCAL_MODEL_MANIFEST.revision : profile.modelId;
       const fingerprint = createHash("sha256").update(JSON.stringify({ provider: profile.provider, modelId: profile.modelId, modelRevision, dimension, distance: "cosine", pooling: "mean", preprocessVersion: "persisted", chunkingVersion: "persisted" })).digest("hex");
       const task = taskService.createTask({ projectId, sourceId: null, kind: "validation" });
       return { ok: true, value: runTask(task, () => spaceService.rebuild({ taskId: task.id, spec: { projectId, provider: profile.provider, modelId: profile.modelId, modelRevision, dimension, distance: "cosine", pooling: "mean", preprocessVersion: "persisted", chunkingVersion: "persisted", fingerprint } })) };

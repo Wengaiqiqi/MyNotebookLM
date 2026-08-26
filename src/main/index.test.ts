@@ -414,7 +414,31 @@ describe("main application composition", () => {
     await vi.waitFor(() => expect((mocks.SpaceService.mock.instances[0] as any).options.rebuild).toHaveBeenCalled());
     const spec = ((mocks.SpaceService.mock.instances[0] as any).options.rebuild.mock.calls[0][0]).spec;
     expect(spec.dimension).toBe(4);
-    expect(spec.modelRevision).not.toBe(profile.modelId);
-    expect(spec.fingerprint).toBe("ff3443d873004d4a23a4f9a4175f5062a2544986bef770a6210d32e01c4a0c30");
+    expect(spec.modelRevision).toBe(profile.modelId);
+    expect(spec.modelRevision).not.toMatch(/^probe-/);
+    expect(spec.fingerprint).toBe("7c0e779b3066e4dbbd642d9e39d3e618375669224b0be5c6c1ee15531be57e88");
+  });
+
+  it("rejects retrieval before embedding when the persisted cloud capability mismatches", async () => {
+    const profile = { id: "profile-1", provider: "openai", capability: "embedding", enabled: true, modelId: "text-embedding-3-small", baseUrl: "https://api.example.test" };
+    const embed = vi.fn(async () => [[1, 0, 0, 0]]);
+    mocks.createModelProvider.mockImplementation(() => ({ embed }));
+    mocks.connection.prepare.mockImplementation((sql: string) => ({
+      get: vi.fn(() => sql.includes("model_profiles") ? profile : sql.includes("embedding_spaces") ? { id: "space-1", project_id: "project-1", provider: "openai", model_id: profile.modelId, model_revision: "wrong-revision", dimension: 4 } : undefined),
+      all: vi.fn(() => []),
+      run: vi.fn(() => ({ changes: 1 }))
+    }));
+    mocks.SettingsRepository.mockImplementation(function (this: Record<string, unknown>) {
+      this.getProfile = vi.fn(() => profile);
+      this.listProfiles = vi.fn(() => [profile]);
+    });
+    mocks.CredentialStore.mockImplementation(function (this: Record<string, unknown>) {
+      this.withSecret = vi.fn(async (_id: string, _binding: unknown, invoke: (key: string) => Promise<unknown>) => invoke("secret"));
+    });
+    await import("./index");
+    await vi.waitFor(() => expect(mocks.createMainWindow).toHaveBeenCalledOnce());
+    const service = mocks.getVectorService() as { search: (input: unknown) => Promise<any> };
+    await expect(service.search({ projectId: "project-1", query: "hello", limit: 1 })).resolves.toMatchObject({ ok: false });
+    expect(embed).not.toHaveBeenCalled();
   });
 });
