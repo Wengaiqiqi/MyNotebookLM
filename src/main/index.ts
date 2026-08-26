@@ -21,6 +21,7 @@ import { MainSourceService } from "./sources/main-source-service";
 import { createTaskUpdateFanout } from "./task-updates";
 import { readFileSync } from "node:fs";
 import { createMainWindow, registerTitleOverlayHandler } from "./window";
+import { LanceStore } from "./vector/lance-store";
 
 let appDatabase: AppDatabase | undefined;
 let cleanupProjectHandlers: (() => void) | undefined;
@@ -90,6 +91,7 @@ app.on("before-quit", (event) => {
   event?.preventDefault();
   quitting = true;
   return Promise.resolve(workerPool?.close()).finally(() => {
+  return Promise.resolve(LanceStore.closeAll()).finally(() => {
   workerPool = undefined;
   taskRevisions.clear();
   taskFanout?.close();
@@ -105,6 +107,7 @@ app.on("before-quit", (event) => {
   appDatabase?.close();
   appDatabase = undefined;
     app.quit();
+  });
   });
 });
 
