@@ -1,0 +1,29 @@
+import type Database from "better-sqlite3";
+import type { EmbeddingProvider } from "../vector/embedding-provider";
+import type { LanceStore, LanceSpace } from "../vector/lance-store";
+import type { Result, AppErrorDto } from "../../shared/app-errors";
+import { diversifyHits, reciprocalRankFusion, type RetrievalCandidate } from "./rrf";
+
+type Row = RetrievalCandidate & { revisionId: string; text: string; locatorJson: string; vector?: number[] };
+type SearchInput = { projectId: string; query: string; limit: number; signal?: AbortSignal };
+export class RetrievalService {
+  private readonly store: Pick<LanceStore, "vectorSearch" | "textSearch">; private readonly provider: Pick<EmbeddingProvider, "embedBatch">; private readonly db: Database.Database; private readonly resolveSpace?: () => Promise<{id:string;dimension:number;state:string}|null>;
+  constructor(a: any, b?: any, c?: any) { if (a?.lance) { this.db=a.db; this.store=a.lance; this.provider=a.provider; this.resolveSpace=a.resolveSpace; } else { this.store=a; this.provider=b; this.db=c; } }
+  async search(input: SearchInput | string, query?: string): Promise<any> {
+    if (typeof input === "string") { const result = await this.search({ projectId: input, query: query ?? "", limit: 20 }); if (!result.ok) throw { code: result.error.code, repair: result.error.code === "INDEX_UNAVAILABLE" }; return result.value; }
+    try {
+      const resolved = this.resolveSpace ? await this.resolveSpace() : null;
+      const space = resolved ? { space_id: resolved.id, dimension: resolved.dimension } : this.db.prepare("SELECT pes.space_id, es.dimension FROM project_embedding_spaces pes JOIN embedding_spaces es ON es.id = pes.space_id WHERE pes.project_id = ? AND pes.status = 'active' AND es.state = 'active'").get(input.projectId) as { space_id: string; dimension: number } | undefined;
+      if (!space) return this.failure("NOT_FOUND", false);
+      const spec: LanceSpace = { id: space.space_id, dimension: space.dimension };
+      const textPromise = this.store.textSearch(spec, input.query, input.limit * 3);
+      const [vector] = await this.provider.embedBatch([input.query], input.signal ?? new AbortController().signal);
+      if (!vector) throw new Error("embedding unavailable");
+      const [ann, bm25] = await Promise.all([this.store.vectorSearch(spec, vector, input.limit * 3, { projectId: input.projectId }), textPromise]);
+      const fused = reciprocalRankFusion([ann as Row[], bm25 as Row[]], input.limit * 3);
+      const value = fused.flatMap(row => { const r = this.db.prepare("SELECT sc.id chunk_id, sc.text, sc.locator_json, sr.id revision_id, s.id source_id FROM source_chunks sc JOIN source_revisions sr ON sr.id = sc.revision_id JOIN sources s ON s.id = sr.source_id WHERE sc.id = ? AND s.project_id = ? AND s.status = 'active' AND s.current_revision_id = sr.id AND sr.state = 'ready'").get(row.chunkId, input.projectId) as any; return r ? [{ ...row, chunkId: r.chunk_id, sourceId: r.source_id, revisionId: r.revision_id, text: r.text, locatorJson: r.locator_json, locator: JSON.parse(r.locator_json) }] : []; });
+      return { ok: true, value: diversifyHits(value, input.limit, 4) };
+    } catch { return this.failure("INDEX_UNAVAILABLE", true); }
+  }
+  private failure(code: AppErrorDto["code"], recoverable: boolean): Result<Row[]> { return { ok: false, error: { code, messageKey: code === "INDEX_UNAVAILABLE" ? "errors.indexUnavailable" : "errors.notFound", recoverable } }; }
+}
