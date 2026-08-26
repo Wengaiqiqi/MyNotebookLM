@@ -19,6 +19,7 @@
 - npm run typecheck 通过；npm run build 通过，并生成 out/main/ingestionWorker.js。
 - P1 复审补齐：RED 证明 crash 不会恢复；GREEN 验证替换 worker、重派发 durable task 与 service loader 注册。
 - 本轮聚焦与相关测试通过：Task9 相关 2 文件/8 tests；相关目录 19 文件/142 tests。
+- 本轮复审修复：durable payload loader 保持 Task9 最小注册接口；取消统一返回 `state: cancelled`，worker 异常/超时保持 failed；worker progress 通过 pool callback 接入并由 `throttleProgress` 限频；result chunk 使用完整字段与 locator schema 校验，error 必须为 `{ code, message }`；timeout/error/exit/cancel 共用清理收口，并补充队列取消、progress、严格 schema 端到端契约测试。
 - 全量测试仍有 2 个既有主进程/Task10 失败（43 passed、2 failed、438 total）；未修改其 IPC 文件。typecheck 也仍被既有主进程/Task10 文件错误阻断；本轮新增文件无类型错误。build 通过。
 
 ## 范围

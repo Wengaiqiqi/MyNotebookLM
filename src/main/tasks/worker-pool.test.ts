@@ -35,6 +35,51 @@ describe("worker protocol", () => {
     await pool.close();
   });
 
+  it("rejects result chunks without the complete prepared-chunk schema", async () => {
+    const worker = Object.assign(new EventEmitter(), { postMessage: () => undefined, terminate: async () => 0 });
+    const pool = new WorkerPool(1, new URL("file:///fake"), () => worker as any);
+    const pending = pool.start("bad-chunk", "text", new Uint8Array());
+    worker.emit("message", { version: 1, type: "result", taskId: "bad-chunk", chunks: [{}] });
+    await expect(pending).rejects.toThrow("Invalid worker result");
+    await pool.close();
+  });
+
+  it("accepts only structured worker errors", async () => {
+    const worker = Object.assign(new EventEmitter(), { postMessage: () => undefined, terminate: async () => 0 });
+    const pool = new WorkerPool(1, new URL("file:///fake"), () => worker as any);
+    const pending = pool.start("bad-error", "text", new Uint8Array());
+    worker.emit("message", { version: 1, type: "error", taskId: "bad-error", error: { code: "PARSE_FAILED", message: "bad" } });
+    await expect(pending).rejects.toMatchObject({ code: "PARSE_FAILED", message: "bad" });
+    await pool.close();
+  });
+
+  it("routes real worker progress through the callback", async () => {
+    const worker = Object.assign(new EventEmitter(), { postMessage: () => undefined, terminate: async () => 0 });
+    const progress: number[] = [];
+    const pool = new WorkerPool(1, new URL("file:///fake"), () => worker as any, undefined, (_taskId, value) => progress.push(value));
+    const pending = pool.start("progress", "text", new Uint8Array());
+    worker.emit("message", { version: 1, type: "progress", taskId: "progress", value: 500 });
+    worker.emit("message", { version: 1, type: "result", taskId: "progress", chunks: [] });
+    await pending;
+    expect(progress).toEqual([500]);
+    await pool.close();
+  });
+
+  it("rejects queued cancellation with the cancelled terminal state", async () => {
+    const workers: Array<EventEmitter & { postMessage: (message: unknown) => void; terminate: () => Promise<number> }> = [];
+    const pool = new WorkerPool(1, new URL("file:///fake"), () => {
+      const worker = Object.assign(new EventEmitter(), { postMessage: () => undefined, terminate: async () => 0 });
+      workers.push(worker); return worker;
+    });
+    const first = pool.start("first", "text", new Uint8Array());
+    const queued = pool.start("queued", "text", new Uint8Array());
+    pool.cancel("queued");
+    await expect(queued).rejects.toMatchObject({ state: "cancelled", code: "TASK_CANCELLED" });
+    workers[0]!.emit("message", { version: 1, type: "result", taskId: "first", chunks: [] });
+    await first;
+    await pool.close();
+  });
+
   it("replaces a crashed worker and redispatches the durable task payload", async () => {
     const workers: EventEmitter[] = [];
     const pool = new WorkerPool(1, new URL("file:///fake"), () => {
