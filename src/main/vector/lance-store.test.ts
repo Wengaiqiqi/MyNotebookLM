@@ -33,4 +33,15 @@ describe("LanceStore", () => {
     try { await store.createSpace(space); await expect(store.upsert(space, [row("bad", [1, 2], "x")])).rejects.toThrow(/dimension/); await store.upsert(space, [row("ok", [1, 0, 0], "x")]); expect((await store.rows(space))[0]?.locatorJson).toBe('{"a":1,"b":2}'); }
     finally { await store.close(); await rm(dir, { recursive: true, force: true }); }
   });
+
+  it("creates scalar indexes for metadata columns", async () => {
+    const dir = await mkdtemp(path.join(os.tmpdir(), "lance-index-"));
+    const store = await LanceStore.open(dir);
+    try {
+      await store.createSpace(space);
+      await store.upsert(space, [row("indexed", [1, 0, 0], "x")]);
+      const indexes = await (store as any).db.openTable("space_space_1").then((t: any) => t.listIndices());
+      expect(indexes.map((index: any) => index.name)).toEqual(expect.arrayContaining(["projectId_idx", "sourceId_idx", "revisionId_idx", "spaceId_idx"]));
+    } finally { await store.close(); await rm(dir, { recursive: true, force: true }); }
+  });
 });
