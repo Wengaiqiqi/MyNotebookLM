@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile, mkdir } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
@@ -23,4 +23,16 @@ describe("LocalModelManager", () => {
     await expect(readFile(path.join(root, "fake__model-rev1.partial"))).rejects.toThrow(); await rm(root, { recursive: true, force: true });
   });
   it("fails offline when the model is absent", async () => { const root = await mkdtemp(path.join(os.tmpdir(), "model-")); const m = new LocalModelManager(root, async () => new Uint8Array(), async () => ({}), manifest); await expect(m.ensureReady(true)).rejects.toThrow("离线"); await rm(root, { recursive: true, force: true }); });
+  it("preserves the active model if activation fails", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "model-")); const active = path.join(root, "fake__model-rev1");
+    await mkdir(path.join(active, "onnx"), { recursive: true }); await writeFile(path.join(active, "tokenizer.json"), "old"); await writeFile(path.join(active, "onnx/model.onnx"), "old");
+    await writeFile(path.join(active, "tokenizer.json"), "corrupt");
+    const manager = new LocalModelManager(root, async file => new TextEncoder().encode(file.includes("tokenizer") ? "corrupt" : "old"), async () => { throw new Error("runtime failed"); }, manifest);
+    await expect(manager.ensureReady()).rejects.toThrow("runtime failed"); await expect(readFile(path.join(active, "tokenizer.json"), "utf8")).resolves.toBe("corrupt"); await rm(root, { recursive: true, force: true });
+  });
+  it("appends resumed bytes and removes corrupt partial artifacts for recovery", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "model-")); const staging = path.join(root, "fake__model-rev1.partial"); await mkdir(path.join(staging, "onnx"), { recursive: true }); await writeFile(path.join(staging, "tokenizer.json.part"), Buffer.from("old"));
+    const manager = new LocalModelManager(root, async (_file, offset) => new Uint8Array(offset ? Buffer.from("-new") : Buffer.from("new")), async dir => readFile(path.join(dir, "tokenizer.json"), "utf8"), manifest);
+    await expect(manager.ensureReady()).resolves.toBe("old-new"); await rm(root, { recursive: true, force: true });
+  });
 });
