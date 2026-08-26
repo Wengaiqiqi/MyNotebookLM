@@ -23,11 +23,13 @@ export class MainSourceService {
     const sourceId = randomUUID(), revisionId = randomUUID(), now = new Date().toISOString();
     const name = originalPath.split(/[\\/]/).pop() || originalPath;
     const storedPath = originalPath, hash = createHash("sha256").update(bytes).digest("hex");
-    this.db.prepare("INSERT INTO sources(id, project_id, kind, display_name, status) VALUES (?, ?, ?, ?, 'active')").run(sourceId, projectId, kind, name);
-    this.db.prepare("INSERT INTO source_revisions(id, source_id, original_path, stored_path, source_hash, locator_kind, chunking_version, state) VALUES (?, ?, ?, ?, ?, 'offset', 'v1', 'parsing')").run(revisionId, sourceId, originalPath, storedPath, hash);
-    const created = this.tasks.createTask({ projectId, sourceId, kind: "ingest", idempotencyKey: hash + ":" + sourceId });
-    this.db.prepare("UPDATE tasks SET state = 'running', stage = 'parsing', updated_at = ? WHERE id = ?").run(now, created.id);
-    this.db.prepare("UPDATE source_revisions SET state = 'parsing' WHERE id = ?").run(revisionId);
+    const created = this.db.transaction(() => {
+      this.db.prepare("INSERT INTO sources(id, project_id, kind, display_name, status) VALUES (?, ?, ?, ?, 'active')").run(sourceId, projectId, kind, name);
+      this.db.prepare("INSERT INTO source_revisions(id, source_id, original_path, stored_path, source_hash, locator_kind, chunking_version, state) VALUES (?, ?, ?, ?, ?, 'offset', 'v1', 'parsing')").run(revisionId, sourceId, originalPath, storedPath, hash);
+      const task = this.tasks.createTask({ projectId, sourceId, kind: "ingest", idempotencyKey: hash + ":" + sourceId });
+      this.db.prepare("UPDATE tasks SET state = 'running', stage = 'parsing', updated_at = ? WHERE id = ?").run(now, task.id);
+      return task;
+    })();
     void this.ingestion.run({ taskId: created.id, revisionId, kind, data: bytes, updatedAt: now }).catch(() => { this.db.prepare("UPDATE tasks SET state = 'failed', updated_at = ? WHERE id = ?").run(new Date().toISOString(), created.id); this.db.prepare("UPDATE source_revisions SET state = 'failed' WHERE id = ?").run(revisionId); });
     return this.source(this.db.prepare("SELECT * FROM sources WHERE id = ?").get(sourceId) as Row);
   }

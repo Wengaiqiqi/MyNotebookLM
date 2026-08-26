@@ -32,8 +32,15 @@ describe("source IPC handlers", () => {
     const dialog = { showOpenDialog: vi.fn().mockResolvedValue({ canceled: true, filePaths: [] }) };
     const cleanup = registerSourceHandlers(bus as any, {} as any, dialog as any);
     const choose = bus.handlers.get(SOURCE_CHANNELS.chooseFiles)!;
-    await expect(choose({}, { projectId })).resolves.toBeNull();
+    await expect(choose({}, { projectId })).resolves.toMatchObject({ ok: true, value: null });
     cleanup();
     expect(bus.removeHandler).toHaveBeenCalledWith(SOURCE_CHANNELS.chooseFiles);
+  });
+
+  it("returns safe errors for list and listTasks failures", async () => {
+    const bus = ipc();
+    registerSourceHandlers(bus as any, { listSources: () => { throw new Error("secret path"); }, listTasks: () => { throw new Error("secret sql"); } } as any);
+    await expect(bus.handlers.get(SOURCE_CHANNELS.list)!({}, { projectId })).resolves.toMatchObject({ ok: false, error: { code: "INTERNAL" } });
+    await expect(bus.handlers.get(SOURCE_CHANNELS.listTasks)!({}, { projectId })).resolves.toMatchObject({ ok: false, error: { code: "INTERNAL" } });
   });
 });

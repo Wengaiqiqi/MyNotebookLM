@@ -71,6 +71,7 @@ export type TaskTransition = {
 
 export type TaskRepositoryHooks = {
   beforeTransitionWrite?: (id: string, expectedState: "queued" | "running") => void;
+  onTransition?: (task: TaskDto) => void;
 };
 
 export class TaskRepository {
@@ -156,7 +157,9 @@ export class TaskRepository {
         if (!current) throw new TaskNotFoundError(input.id);
         throw new StaleTaskStateError(input.id);
       }
-      return this.read(input.id);
+      const task = this.read(input.id);
+      this.hooks.onTransition?.(task);
+      return task;
     })();
   }
 
