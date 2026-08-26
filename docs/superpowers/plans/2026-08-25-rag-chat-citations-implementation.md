@@ -75,12 +75,12 @@
 
 **Flow:** validate project/conversation -> persist user -> retrieve -> persist streaming assistant -> generate -> checkpoint -> finalize citations/usage.
 
-- [ ] Write failing tests for normal stream, no results, missing generation profile, provider failure, user abort, concurrent send conflict, renderer disconnect, checkpoint recovery and actual provider/model persistence.
-- [ ] Keep active `AbortController`s in a main-only registry keyed by opaque request ID; reject cross-project/user cancellation.
-- [ ] Checkpoint assistant text at most every 1 second or 2 KiB, whichever comes first; always final-checkpoint on abort/error.
-- [ ] On startup, convert abandoned `streaming` messages to `cancelled` with interruption metadata.
-- [ ] Use the current default generation profile directly. Plan 5 inserts routing around this provider selection without changing stream/citation semantics.
-- [ ] Run focused tests with deterministic retrieval and fake streaming provider; review and commit `feat: stream persistent rag conversations`.
+- [x] Write failing tests for normal stream, no results, missing generation profile, provider failure, user abort, concurrent send conflict, renderer disconnect, checkpoint recovery and actual provider/model persistence.
+- [x] Keep active `AbortController`s in a main-only registry keyed by opaque request ID; reject cross-project/user cancellation.
+- [x] Checkpoint assistant text at most every 1 second or 2 KiB, whichever comes first; always final-checkpoint on abort/error.
+- [x] On startup, convert abandoned `streaming` messages to `cancelled` with interruption metadata.
+- [x] Use the current default generation profile directly. Plan 5 inserts routing around this provider selection without changing stream/citation semantics.
+- [x] Run focused tests with deterministic retrieval and fake streaming provider; review and commit `feat: stream persistent rag conversations`.
 
 ## Task 5: Add Conversation Operations and Citation Opening
 
