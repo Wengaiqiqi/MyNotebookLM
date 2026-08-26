@@ -24,7 +24,7 @@
 **Files:**
 - Modify: `package.json`
 - Modify: `package-lock.json`
-- Create: `src/main/db/migrations/005_conversations.sql`
+- Create: `src/main/db/migrations/007_conversations.sql`
 - Create: `src/shared/chat.ts`
 - Create: `src/main/chat/conversation-repository.ts`
 - Create: `src/main/chat/conversation-repository.test.ts`

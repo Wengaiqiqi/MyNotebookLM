@@ -405,6 +405,31 @@ describe("openAppDatabase", () => {
     }
   });
 
+  it("creates conversation persistence tables in migration 007", () => {
+    const bundledDatabase = openAppDatabase(
+      path.join(temporaryRoot, "bundled-conversations.db"),
+      path.resolve("src/main/db/migrations")
+    );
+    try {
+      expect(
+        bundledDatabase.connection.prepare(
+          "SELECT version, name FROM schema_migrations ORDER BY version"
+        ).all()
+      ).toEqual(expect.arrayContaining([{ version: 7, name: "conversations" }]));
+      expect(
+        bundledDatabase.connection.prepare(
+          "SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name"
+        ).all()
+      ).toEqual(expect.arrayContaining([
+        { name: "conversations" },
+        { name: "messages" },
+        { name: "message_citations" }
+      ]));
+    } finally {
+      bundledDatabase.close();
+    }
+  });
+
   it("enforces source foreign keys, kind/status checks and soft-delete fields", () => {
     const bundledDatabase = openAppDatabase(
       path.join(temporaryRoot, "bundled-ingestion-2.db"),
