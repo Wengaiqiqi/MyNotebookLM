@@ -2,8 +2,10 @@ import { mkdtemp, readFile, rm, writeFile, mkdir } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { describe, expect, it, vi } from "vitest";
-import { LocalModelManager, createLocalModelDownloader, type ModelDownloader } from "./local-model-manager";
+import { LocalModelManager, createLocalModelDownloader, managedActiveDirectory, managedStagingDirectory, type ModelDownloader } from "./local-model-manager";
 import { LOCAL_MODEL_MANIFEST } from "./local-model-manifest";
+vi.mock("@huggingface/transformers", () => ({ env: {}, pipeline: vi.fn(async () => vi.fn(async () => ({ tolist: () => [[1]] }))) }));
+import { createTransformersEmbeddingRuntime } from "./local-embedding-provider";
 
 const manifest = { modelId: "fake/model", revision: "rev1", dimension: 2, files: { "tokenizer.json": "UNRESOLVED", "onnx/model.onnx": "UNRESOLVED" } } as const;
 describe("LocalModelManager", () => {
@@ -21,6 +23,59 @@ describe("LocalModelManager", () => {
     const manager = new LocalModelManager(root, download, async dir => readFile(path.join(dir, "tokenizer.json")), manifest);
     const [a, b] = await Promise.all([manager.ensureReady(), manager.ensureReady()]); expect(a).toEqual(b); expect(calls).toBe(2);
     await expect(readFile(path.join(root, "fake__model-rev1.partial"))).rejects.toThrow(); await rm(root, { recursive: true, force: true });
+  });
+  it("keeps production staging self-check on its exact managed staging directory", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "model-"));
+    const active = managedActiveDirectory(root, manifest);
+    const staging = managedStagingDirectory(root, manifest);
+    const activeRuntime = createTransformersEmbeddingRuntime(root, active);
+    const stagingRuntime = createTransformersEmbeddingRuntime(root, staging);
+    const download: ModelDownloader = async file => new TextEncoder().encode(file);
+    const manager = new LocalModelManager(
+      root,
+      download,
+      (directory, signal) => activeRuntime(directory, [], signal),
+      manifest,
+      (directory, signal) => stagingRuntime(directory, [], signal)
+    );
+
+    await expect(manager.ensureReady()).resolves.toEqual([[1]]);
+    await expect(readFile(path.join(active, "tokenizer.json"), "utf8")).resolves.toBe("tokenizer.json");
+    await expect(readFile(staging)).rejects.toThrow();
+    await rm(root, { recursive: true, force: true });
+  });
+  it("isolates cancellation between single-flight waiters and keeps each progress callback", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "model-"));
+    let release!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    let calls = 0;
+    const signals: AbortSignal[] = [];
+    const firstProgress: number[] = [];
+    const secondProgress: number[] = [];
+    const downloader: ModelDownloader = async (file, _offset, progress, signal) => {
+      calls++;
+      signals.push(signal);
+      progress(.5);
+      if (calls === 1) {
+        await gate;
+        if (signal.aborted) throw signal.reason;
+      }
+      return new TextEncoder().encode(file);
+    };
+    const manager = new LocalModelManager(root, downloader, async directory => readFile(path.join(directory, "tokenizer.json")), manifest);
+    const firstController = new AbortController();
+    const secondController = new AbortController();
+    const first = manager.ensureReady(false, value => firstProgress.push(value), firstController.signal);
+    await vi.waitFor(() => expect(calls).toBe(1));
+    const second = manager.ensureReady(false, value => secondProgress.push(value), secondController.signal);
+    firstController.abort();
+    await expect(first).rejects.toThrow();
+    release();
+    await expect(second).resolves.toEqual(Buffer.from("tokenizer.json"));
+    expect(signals[0]).not.toBe(firstController.signal);
+    expect(firstProgress.length).toBeGreaterThan(0);
+    expect(secondProgress.length).toBeGreaterThan(0);
+    await rm(root, { recursive: true, force: true });
   });
   it("passes the verified active directory to runtime", async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), "model-")); const seen: string[] = [];

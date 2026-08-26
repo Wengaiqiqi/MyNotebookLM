@@ -135,7 +135,8 @@ vi.mock("./vector/space-repository", () => ({ SpaceRepository: mocks.SpaceReposi
 vi.mock("./vector/space-service", () => ({ SpaceService: mocks.SpaceService }));
 vi.mock("./vector/local-model-manager", () => ({
   createLocalModelManager: vi.fn(() => ({ ensureReady: vi.fn() })),
-  managedActiveDirectory: vi.fn((root: string, manifest: { modelId: string; revision: string }) => root + "/" + manifest.modelId.replaceAll("/", "__") + "-" + manifest.revision)
+  managedActiveDirectory: vi.fn((root: string, manifest: { modelId: string; revision: string }) => root + "/" + manifest.modelId.replaceAll("/", "__") + "-" + manifest.revision),
+  managedStagingDirectory: vi.fn((root: string, manifest: { modelId: string; revision: string }) => root + "/" + manifest.modelId.replaceAll("/", "__") + "-" + manifest.revision + ".partial")
 }));
 vi.mock("./vector/local-embedding-provider", () => ({
   createTransformersEmbeddingRuntime: vi.fn(() => vi.fn()),
@@ -259,11 +260,17 @@ describe("main application composition", () => {
     await vi.waitFor(() => expect(mocks.createMainWindow).toHaveBeenCalledOnce());
     const { createLocalModelManager } = await import("./vector/local-model-manager");
     const { createTransformersEmbeddingRuntime, LocalEmbeddingProvider } = await import("./vector/local-embedding-provider");
-    expect(createTransformersEmbeddingRuntime).toHaveBeenCalledWith(
+    expect(createTransformersEmbeddingRuntime).toHaveBeenNthCalledWith(
+      1,
       "C:\\data\\MyNotebookLM\\models\\huggingface",
       "C:\\data\\MyNotebookLM\\models\\huggingface/Xenova__multilingual-e5-small-761b726dd34fb83930e26aab4e9ac3899aa1fa78"
     );
-    expect(createLocalModelManager).toHaveBeenCalledWith("C:\\data\\MyNotebookLM\\models\\huggingface", expect.any(Function));
+    expect(createTransformersEmbeddingRuntime).toHaveBeenNthCalledWith(
+      2,
+      "C:\\data\\MyNotebookLM\\models\\huggingface",
+      "C:\\data\\MyNotebookLM\\models\\huggingface/Xenova__multilingual-e5-small-761b726dd34fb83930e26aab4e9ac3899aa1fa78.partial"
+    );
+    expect(createLocalModelManager).toHaveBeenCalledWith("C:\\data\\MyNotebookLM\\models\\huggingface", expect.any(Function), expect.any(Function), expect.any(Function));
     expect(LocalEmbeddingProvider).toHaveBeenCalledOnce();
     expect(mocks.IndexingService).toHaveBeenCalledWith(mocks.connection, expect.any(Function), expect.anything());
   });
