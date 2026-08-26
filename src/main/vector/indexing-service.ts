@@ -4,7 +4,7 @@ import type { LanceRow, LanceSpace, LanceStore } from "./lance-store";
 
 type Chunk = { id: string; ordinal: number; content_hash: string; text: string; locator_json: string };
 type Input = { taskId: string; revisionId: string; space: LanceSpace; batchSize?: number; signal?: AbortSignal; now?: string };
-type ResolvedProvider = Pick<EmbeddingProvider, "embedBatch"> & Partial<Pick<EmbeddingProvider, "describe">>;
+type ResolvedProvider = EmbeddingProvider;
 type ProviderResolver = ResolvedProvider | ((revisionId: string, space: LanceSpace) => Promise<ResolvedProvider>);
 type StoredLike = Omit<LanceRow, "locator"> & { locatorJson?: string; locator?: unknown };
 type SpaceBoundary = { project_id: string; source_id: string; space_id?: string; space_project_id?: string; space_dimension?: number; space_state?: string; active_space_id?: string; provider?: string; model_id?: string; model_revision?: string; distance?: string; pooling?: string; preprocess_version?: string; chunking_version?: string };
@@ -12,23 +12,22 @@ export class IndexingService {
   private recoverChunks?: (revisionId: string) => Promise<void>;
   constructor(private readonly db: Database.Database, private readonly provider: ProviderResolver, private readonly lance: Pick<LanceStore, "createSpace" | "upsert" | "count" | "rows" | "vectorSearch" | "deleteRevision">) {}
   private async resolveProvider(revisionId: string, space: LanceSpace) { return typeof this.provider === "function" ? this.provider(revisionId, space) : this.provider; }
-  private validateSpace(revisionId: string, space: LanceSpace, operation: "index" | "rebuild"): { project_id: string; source_id: string } {
+  private validateSpace(revisionId: string, space: LanceSpace, operation: "index" | "rebuild"): SpaceBoundary {
     const row = this.db.prepare("SELECT sr.source_id, s.project_id, es.id AS space_id, es.project_id AS space_project_id, es.dimension AS space_dimension, es.state AS space_state, es.provider, es.model_id, es.model_revision, es.distance, es.pooling, es.preprocess_version, es.chunking_version, pes.space_id AS active_space_id FROM source_revisions sr JOIN sources s ON s.id = sr.source_id LEFT JOIN embedding_spaces es ON es.id = ? LEFT JOIN project_embedding_spaces pes ON pes.project_id = s.project_id WHERE sr.id = ?").get(space.id, revisionId) as SpaceBoundary | undefined;
     if (!row) throw new Error("revision not found");
     const stateValid = operation === "index" ? row.space_state === "active" && row.active_space_id === space.id : ["preparing", "building", "validating"].includes(row.space_state ?? "");
-    if (row.space_id !== space.id || row.space_project_id !== row.project_id || row.space_dimension !== space.dimension || !stateValid) throw Object.assign(new Error("Indexing space metadata mismatch"), { code: "INDEXING_SPACE_MISMATCH" });
+    if (row.space_id !== space.id || row.space_project_id !== row.project_id || row.space_dimension !== space.dimension || !stateValid || !row.provider || !row.model_id || !row.model_revision || !row.distance || !row.pooling || !row.preprocess_version || !row.chunking_version) throw Object.assign(new Error("Indexing space metadata mismatch"), { code: "INDEXING_SPACE_MISMATCH" });
     return row;
   }
   private validateProvider(provider: ResolvedProvider, persisted: SpaceBoundary): void {
-    const description = provider.describe?.();
+    const description = typeof provider.describe === "function" ? provider.describe() : undefined;
     if (!description || !persisted.provider || description.provider !== persisted.provider || description.modelId !== persisted.model_id || description.modelRevision !== persisted.model_revision || description.dimension !== persisted.space_dimension || description.distance !== persisted.distance || description.pooling !== persisted.pooling || description.preprocessVersion !== persisted.preprocess_version || description.chunkingVersion !== persisted.chunking_version) {
       throw Object.assign(new Error("Embedding provider capability mismatch"), { code: "EMBEDDING_CAPABILITY_MISMATCH", recoverable: false });
     }
   }
-  private async resolveAndValidateProvider(revisionId: string, space: LanceSpace): Promise<ResolvedProvider> {
+  private async resolveAndValidateProvider(revisionId: string, space: LanceSpace, persisted: SpaceBoundary): Promise<ResolvedProvider> {
     const provider = await this.resolveProvider(revisionId, space);
-    const row = this.db.prepare("SELECT es.provider, es.model_id, es.model_revision, es.dimension AS space_dimension, es.distance, es.pooling, es.preprocess_version, es.chunking_version FROM source_revisions sr JOIN sources s ON s.id = sr.source_id JOIN embedding_spaces es ON es.id = ? AND es.project_id = s.project_id WHERE sr.id = ?").get(space.id, revisionId) as SpaceBoundary | undefined;
-    if (row && row.provider) this.validateProvider(provider, row);
+    this.validateProvider(provider, persisted);
     return provider;
   }
   private validateRow(row: StoredLike | undefined, chunk: Chunk | undefined, source: { project_id: string; source_id: string }, revisionId: string, space: LanceSpace): boolean {
@@ -43,10 +42,11 @@ export class IndexingService {
   }
   setChunkRecovery(recover: (revisionId: string) => Promise<void>): void { this.recoverChunks = recover; }
   async index(input: Input): Promise<void> {
-    const source = this.validateSpace(input.revisionId, input.space, "index");
+    const persisted = this.validateSpace(input.revisionId, input.space, "index");
+    const source = persisted;
     try {
+      const provider = await this.resolveAndValidateProvider(input.revisionId, input.space, persisted);
       await this.lance.createSpace?.(input.space);
-      const provider = await this.resolveAndValidateProvider(input.revisionId, input.space);
       const chunks = this.db.prepare("SELECT id, ordinal, content_hash, text, locator_json FROM source_chunks WHERE revision_id = ? ORDER BY ordinal").all(input.revisionId) as Chunk[];
       const size = Math.max(1, input.batchSize ?? 32);
       for (let i = 0; i < chunks.length; i += size) {
@@ -69,13 +69,14 @@ export class IndexingService {
     } catch (error) { await this.lance.deleteRevision(input.space, input.revisionId); throw error; }
   }
   async rebuild(input: { revisionId: string; space: LanceSpace; signal?: AbortSignal; batchSize?: number }): Promise<void> {
-    const source = this.validateSpace(input.revisionId, input.space, "rebuild");
+    const persisted = this.validateSpace(input.revisionId, input.space, "rebuild");
+    const source = persisted;
+    const provider = await this.resolveAndValidateProvider(input.revisionId, input.space, persisted);
     let chunks = this.db.prepare("SELECT id, ordinal, content_hash, text, locator_json FROM source_chunks WHERE revision_id = ? ORDER BY ordinal").all(input.revisionId) as Chunk[];
     if (chunks.length === 0 && this.recoverChunks) { await this.recoverChunks(input.revisionId); }
     chunks = this.db.prepare("SELECT id, ordinal, content_hash, text, locator_json FROM source_chunks WHERE revision_id = ? ORDER BY ordinal").all(input.revisionId) as Chunk[];
     if (chunks.length === 0) throw Object.assign(new Error("No SQLite source_chunks available for rebuild and no recoverable managed original was supplied"), { code: "SPACE_REBUILD_SOURCE_UNRECOVERABLE", recoverable: false });
     await this.lance.createSpace?.(input.space);
-    const provider = await this.resolveAndValidateProvider(input.revisionId, input.space);
     for (let i = 0; i < chunks.length; i += Math.max(1, input.batchSize ?? 32)) {
       if (input.signal?.aborted) throw Object.assign(new Error("Space build cancelled"), { code: "SPACE_BUILD_CANCELLED" });
       const part = chunks.slice(i, i + Math.max(1, input.batchSize ?? 32));

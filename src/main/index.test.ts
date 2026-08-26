@@ -402,7 +402,7 @@ describe("main application composition", () => {
     expect(JSON.stringify((mocks.TaskService.mock.instances[0] as any).fail.mock.calls)).not.toContain(secret);
   });
 
-  it("builds migration spec from the target provider probe", async () => {
+  it("fails closed instead of inventing a cloud provider revision", async () => {
     const profile = { id: "profile-1", provider: "openai", capability: "embedding", enabled: true, modelId: "text-embedding-3-small", baseUrl: "https://api.example.test" };
     mocks.connection.prepare.mockImplementation((sql: string) => ({
       get: vi.fn(() => sql.includes("model_profiles") ? profile : sql.includes("embedding_spaces") ? { id: "old", projectId: "project-1", dimension: 2 } : undefined),
@@ -422,14 +422,23 @@ describe("main application composition", () => {
     await import("./index");
     await vi.waitFor(() => expect(mocks.createMainWindow).toHaveBeenCalledOnce());
     const service = mocks.getVectorService() as { startMigration: (input: unknown) => Promise<any> };
-    const result = await service.startMigration({ projectId: "project-1", profileId: "profile-1" });
-    expect(result.ok).toBe(true);
-    await vi.waitFor(() => expect((mocks.SpaceService.mock.instances[0] as any).options.rebuild).toHaveBeenCalled());
-    const spec = ((mocks.SpaceService.mock.instances[0] as any).options.rebuild.mock.calls[0][0]).spec;
-    expect(spec.dimension).toBe(4);
-    expect(spec.modelRevision).toBe(profile.modelId);
-    expect(spec.modelRevision).not.toMatch(/^probe-/);
-    expect(spec.fingerprint).toBe("7c0e779b3066e4dbbd642d9e39d3e618375669224b0be5c6c1ee15531be57e88");
+    await expect(service.startMigration({ projectId: "project-1", profileId: "profile-1" })).resolves.toMatchObject({ ok: false, error: { code: "VALIDATION" } });
+    expect((mocks.SpaceService.mock.instances[0] as any).options.rebuild).not.toHaveBeenCalled();
+  });
+
+  it("fails closed when a cloud migration has no trusted provider revision", async () => {
+    const profile = { id: "profile-1", provider: "openai", capability: "embedding", enabled: true, modelId: "text-embedding-3-small", baseUrl: "https://api.example.test" };
+    mocks.connection.prepare.mockImplementation((sql: string) => ({
+      get: vi.fn(() => sql.includes("model_profiles") ? profile : sql.includes("embedding_spaces") ? { id: "old", projectId: "project-1", dimension: 2 } : undefined),
+      all: vi.fn(() => []),
+      run: vi.fn(() => ({ changes: 1 }))
+    }));
+    mocks.SettingsRepository.mockImplementation(function (this: Record<string, unknown>) { this.getProfile = vi.fn(() => profile); this.listProfiles = vi.fn(() => [profile]); });
+    await import("./index");
+    await vi.waitFor(() => expect(mocks.createMainWindow).toHaveBeenCalledOnce());
+    const service = mocks.getVectorService() as { startMigration: (input: unknown) => Promise<any> };
+    await expect(service.startMigration({ projectId: "project-1", profileId: "profile-1" })).resolves.toMatchObject({ ok: false, error: { code: "VALIDATION" } });
+    expect((mocks.SpaceService.mock.instances[0] as any).options.rebuild).not.toHaveBeenCalled();
   });
 
   it("rejects retrieval before embedding when the persisted cloud capability mismatches", async () => {
