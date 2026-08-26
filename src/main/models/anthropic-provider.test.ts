@@ -146,6 +146,27 @@ describe("Anthropic provider", () => {
     expect(events).toEqual([{ type: "done", finishReason: "end_turn" }]);
   });
 
+  it.each([
+    ["message_start", '{"type":"message_start","message":{"usage":{"input_tokens":1}}}'],
+    ["content_block_start", '{"type":"content_block_start","index":0}'],
+    ["content_block_stop", '{"type":"content_block_stop","index":0}']
+  ])("rejects %s after stop_reason", async (_label, lateEvent) => {
+    const fake = await server((_request, response) => {
+      response.writeHead(200, { "content-type": "text/event-stream" });
+      response.write('data: {"type":"message_delta","delta":{"stop_reason":"end_turn"}}\n\n');
+      response.write(`data: ${lateEvent}\n\n`);
+      response.end('data: {"type":"message_stop"}\n\n');
+    });
+    const events: unknown[] = [];
+    const error = await providerError(async () => {
+      for await (const event of new AnthropicProvider({ baseUrl: origin(fake) }).generate({
+        model: "claude-test", messages: [{ role: "user", content: "Hello" }]
+      }, new AbortController().signal)) events.push(event);
+    });
+    expect(events).not.toContainEqual(expect.objectContaining({ type: "done" }));
+    expect(error.failure.error.code).toBe("PROVIDER");
+  });
+
   it("rejects known text events after stop_reason", async () => {
     const fake = await server((_request, response) => {
       response.writeHead(200, { "content-type": "text/event-stream" });
