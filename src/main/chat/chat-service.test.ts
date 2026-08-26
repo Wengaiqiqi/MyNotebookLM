@@ -4,6 +4,8 @@ import type Database from "better-sqlite3";
 import { openAppDatabase, type AppDatabase } from "../db/database";
 import { ConversationRepository } from "./conversation-repository";
 import { ChatService, recoverInterruptedStreams, sendChatMessage, type ChatSendDeps } from "./chat-service";
+import { CitationOpener } from "./citation-opener";
+import type { CitationDto } from "../../shared/chat";
 import type { Result } from "../../shared/app-errors";
 import type { GenerationEvent } from "../models/provider";
 
@@ -285,6 +287,125 @@ function expectOk(result: Result<{ requestId: string; assistantMessageId: string
     expect(row.state).toBe("cancelled");
     expect(row.error_code).toBe("INTERRUPTED");
     expect(row.reason).toBe("interruption");
+  });
+});
+
+describe("ChatService conversation operations and retrieval failure", () => {
+  let world: World;
+
+  function baseDeps(overrides?: Partial<ChatSendDeps>): ChatSendDeps {
+    const provider = fakeProvider();
+    return {
+      db: world.database.connection,
+      generationProfile: makeProfile(),
+      providerFactory: () => provider,
+      retrieval: async () => [
+        {
+          label: "S1",
+          chunkId: world.chunkId,
+          sourceId: "88888888-8888-4888-8888-888888888888",
+          sourceKind: "pdf",
+          text: "Authoritative evidence",
+          sourceDisplayName: "Research PDF",
+          locator: { kind: "page", page: 2 },
+          locatorSummary: "page 2"
+        }
+      ],
+      now: () => new Date(AT),
+      randomId: (n) => `id-${Math.random().toString(36).slice(2, 8)}-${n}`,
+      ...overrides
+    };
+  }
+
+  beforeEach(() => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    world = setupWorld();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    world.database.close();
+  });
+
+  function service(deps?: Partial<ChatSendDeps>): ChatService {
+    const provider = fakeProvider();
+    return new ChatService({
+      db: world.database.connection,
+      generationProfile: makeProfile(),
+      providerFactory: () => provider,
+      retrieval: async () => [],
+      now: () => new Date(AT),
+      randomId: (n) => `id-${Math.random().toString(36).slice(2, 8)}-${n}`,
+      ...deps
+    });
+  }
+
+  it("lists, creates, renames, archives and deletes conversations with ownership", () => {
+    const svc = service();
+    const created = svc.createConversation({ projectId: PROJECT_ID, title: "New chat" });
+    expect(created.title).toBe("New chat");
+    expect(svc.listConversations(PROJECT_ID)).toHaveLength(2);
+    expect(svc.renameConversation({ projectId: PROJECT_ID, conversationId: created.id, title: "Renamed" }).title).toBe("Renamed");
+    expect(svc.archiveConversation({ projectId: PROJECT_ID, conversationId: created.id }).archivedAt).toBe(AT);
+    expect(() => svc.renameConversation({ projectId: PROJECT_ID, conversationId: created.id, title: "Nope" })).toThrow(/archived/);
+    expect(svc.listConversations(PROJECT_ID)).toHaveLength(1);
+    svc.deleteConversation({ projectId: PROJECT_ID, conversationId: created.id });
+  });
+
+  it("regenerates a reply without duplicating the user message and keeps lineage", async () => {
+    const sendDeps = baseDeps();
+    const first = await collectEvents(sendDeps, { projectId: PROJECT_ID, conversationId: world.conversationId, question: "Only once" });
+    expect(first.result.ok).toBe(true);
+    const assistantId = (first.result as { ok: true; value: { assistantMessageId: string } }).value.assistantMessageId;
+
+    const regenEvents: Array<Record<string, unknown>> = [];
+    const regen = await service().regenerate(
+      { projectId: PROJECT_ID, conversationId: world.conversationId, messageId: assistantId },
+      (event) => regenEvents.push(event)
+    );
+    expect(regen.ok).toBe(true);
+    const messages = world.repository.listMessages(PROJECT_ID, world.conversationId);
+    const userCount = messages.filter((m) => m.role === "user").length;
+    expect(userCount).toBe(1);
+    const oldAssistant = messages.find((m) => m.id === assistantId)!;
+    expect(oldAssistant.superseded).toBe(true);
+    const newAssistant = messages.at(-1)!;
+    expect(newAssistant.supersedesMessageId).toBe(assistantId);
+    expect(newAssistant.replyToMessageId).toBe(oldAssistant.replyToMessageId);
+    expect(messages.filter((m) => m.role === "assistant" && !m.superseded)).toHaveLength(1);
+  });
+
+  it("refuses regeneration for an archived conversation", async () => {
+    const sendDeps = baseDeps();
+    const first = await collectEvents(sendDeps, { projectId: PROJECT_ID, conversationId: world.conversationId, question: "hello" });
+    const assistantId = (first.result as { ok: true; value: { assistantMessageId: string } }).value.assistantMessageId;
+    const svc = service();
+    svc.archiveConversation({ projectId: PROJECT_ID, conversationId: world.conversationId });
+    const result = await svc.regenerate({ projectId: PROJECT_ID, conversationId: world.conversationId, messageId: assistantId }, () => {});
+    expect(result).toMatchObject({ ok: false, error: { code: "CONFLICT" } });
+  });
+
+  it("surfaces retrieval failure as failed message + INDEX_UNAVAILABLE instead of empty evidence", async () => {
+    const deps = baseDeps({ retrieval: async () => { throw new Error("lance down"); } });
+    const { result, events } = await collectEvents(deps, { projectId: PROJECT_ID, conversationId: world.conversationId, question: "?" });
+    expect(result).toMatchObject({ ok: false, error: { code: "INDEX_UNAVAILABLE", recoverable: true } });
+    expect(events.at(-1)).toMatchObject({ type: "failed", error: { code: "INDEX_UNAVAILABLE", recoverable: true } });
+    const messages = world.repository.listMessages(PROJECT_ID, world.conversationId);
+    expect(messages.at(-1)).toMatchObject({ role: "assistant", state: "failed", errorCode: "INDEX_UNAVAILABLE" });
+  });
+
+  it("opens citations from completed answers through the citation opener", async () => {
+    world.database.connection.prepare("UPDATE source_revisions SET state = 'ready' WHERE id = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'").run();
+    const openPath = vi.fn(async () => "");
+    const opener = new CitationOpener(world.database.connection, { openPath, openExternal: vi.fn() });
+    const svc = service({ retrieval: async () => [] });
+    const sent = await collectEvents(baseDeps(), { projectId: PROJECT_ID, conversationId: world.conversationId, question: "cite it" });
+    const completed = sent.events.at(-1)! as { message: { citations: CitationDto[] } };
+    const citation = completed.message.citations[0]!;
+    expect(svc.listMessages({ projectId: PROJECT_ID, conversationId: world.conversationId }).at(-1)!.citations.map((c) => c.sourceDisplayName)).toContain("Research PDF");
+    openPath.mockResolvedValue("");
+    const opened = await opener.openCitation({ projectId: PROJECT_ID, citationId: citation.id });
+    expect(opened.ok).toBe(true);
   });
 });
 

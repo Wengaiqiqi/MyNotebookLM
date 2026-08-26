@@ -2,7 +2,7 @@ import type Database from "better-sqlite3";
 import type { ModelProfileDto } from "../../shared/models";
 import type { AppErrorDto, Result } from "../../shared/app-errors";
 import type { ChatTurn, GenerationEvent, ModelProvider } from "../models/provider";
-import type { MessageDto } from "../../shared/chat";
+import type { ConversationDto, MessageDto } from "../../shared/chat";
 import type { RetrievedCitation } from "./citation-parser";
 import { CitationStreamBuffer, finalizeCitations } from "./citation-parser";
 import { persistParsedCitations } from "./citation-persist";
@@ -28,6 +28,8 @@ export type ChatSendDeps = {
 };
 
 export type SendInput = { projectId: string; conversationId: string; question: string };
+export type RegenerateInput = { projectId: string; conversationId: string; messageId: string };
+type ConversationQuery = { projectId: string; conversationId: string };
 
 type StreamEvent =
   | { type: "started"; requestId: string; messageId: string }
@@ -48,6 +50,18 @@ export function recoverInterruptedStreams(db: Database.Database, now = new Date(
   return result.changes;
 }
 
+type TurnContext = {
+  turn: ConversationQuery;
+  repo: ConversationRepository;
+  profile: ModelProfileDto;
+  owner: SessionOwner;
+  nextId: () => string;
+  userMessage: MessageDto;
+  /** When set, this turn replaces an earlier assistant reply instead of appending after a fresh user message. */
+  supersedesMessageId: string | null;
+  emit: (event: StreamEvent) => void;
+};
+
 export class ChatService {
   private readonly registry = new ChatSessionRegistry();
   private readonly inFlightConversations = new Set<string>();
@@ -62,51 +76,126 @@ export class ChatService {
     return this.registry.cancel(requestId, caller);
   }
 
+  // ---------- Conversation operations (Task 5) ----------
+
+  listConversations(projectId: string): ConversationDto[] {
+    return this.repo().listConversations(projectId);
+  }
+
+  createConversation(input: { projectId: string; title: string }): ConversationDto {
+    return this.repo().createConversation({
+      id: crypto.randomUUID(),
+      projectId: input.projectId,
+      title: input.title.trim() || "New conversation",
+      createdAt: this.clock().toISOString()
+    });
+  }
+
+  renameConversation(input: ConversationQuery & { title: string }): ConversationDto {
+    const repo = this.repo();
+    const conversation = repo.getConversation(input.projectId, input.conversationId);
+    if (!conversation || conversation.archivedAt || conversation.deletedAt) throw new Error("conversation archived");
+    return repo.renameConversation(input.projectId, input.conversationId, input.title.trim(), this.clock().toISOString());
+  }
+
+  archiveConversation(input: ConversationQuery): ConversationDto {
+    const repo = this.repo();
+    repo.getConversation(input.projectId, input.conversationId);
+    return repo.archiveConversation(input.projectId, input.conversationId, this.clock().toISOString());
+  }
+
+  deleteConversation(input: ConversationQuery): void {
+    this.repo().removeConversation(input.projectId, input.conversationId, this.clock().toISOString());
+  }
+
+  listMessages(input: ConversationQuery): MessageDto[] {
+    return this.repo().listMessages(input.projectId, input.conversationId);
+  }
+
   async send(input: SendInput, emit: (event: StreamEvent) => void): Promise<Result<{ requestId: string; assistantMessageId: string }>> {
     const owner: SessionOwner = { projectId: input.projectId, userId: SESSION_USER };
     try {
-      return await this.sendInner(input, owner, emit);
+      const repo = this.repo();
+      const profile = this.generationProfile();
+      if (!profile) return { ok: false, error: appError("VALIDATION", "errors.generationProfileMissing") };
+      // Ownership is validated inside the repository before anything is written.
+      const conversation = repo.getConversation(input.projectId, input.conversationId);
+      if (!conversation || conversation.archivedAt) return { ok: false, error: appError("CONFLICT", "errors.chatArchived") };
+      if (this.inFlightConversations.has(input.conversationId)) {
+        return { ok: false, error: appError("CONFLICT", "errors.chatSendInFlight", true) };
+      }
+      let counter = 0;
+      const nextId = (): string => (this.deps.randomId ? this.deps.randomId(++counter) : crypto.randomUUID());
+      const userMessage = repo.appendUserMessage({
+        projectId: input.projectId,
+        conversationId: input.conversationId,
+        id: nextId(),
+        content: input.question,
+        createdAt: this.clock().toISOString()
+      });
+      return await this.runTurn({ turn: input, repo, profile, owner, nextId, userMessage, supersedesMessageId: null, emit });
     } catch (reason) {
-      const message = reason instanceof Error ? reason.message : String(reason);
-      return { ok: false, error: appError("INTERNAL", `errors.internal:${message}`) };
+      return internalResult(reason);
     }
   }
 
-  private async sendInner(input: SendInput, owner: SessionOwner, emit: (event: StreamEvent) => void): Promise<Result<{ requestId: string; assistantMessageId: string }>> {
-    const now = this.deps.now ?? (() => new Date());
-    let idCounter = 0;
-    const nextId = (_n: number) => (this.deps.randomId ? this.deps.randomId(++idCounter) : crypto.randomUUID());
-    const repo = new ConversationRepository(this.deps.db);
-    const profile = this.deps.generationProfile;
-    if (!profile || !profile.enabled || profile.capability !== "generation") {
-      return { ok: false, error: appError("VALIDATION", "errors.generationProfileMissing") };
+  async regenerate(input: RegenerateInput, emit: (event: StreamEvent) => void): Promise<Result<{ requestId: string; assistantMessageId: string }>> {
+    const owner: SessionOwner = { projectId: input.projectId, userId: SESSION_USER };
+    try {
+      const repo = this.repo();
+      const profile = this.generationProfile();
+      if (!profile) return { ok: false, error: appError("VALIDATION", "errors.generationProfileMissing") };
+      const conversation = repo.getConversation(input.projectId, input.conversationId);
+      if (!conversation || conversation.archivedAt) return { ok: false, error: appError("CONFLICT", "errors.chatArchived") };
+      const old = repo.getMessage(input.projectId, input.messageId);
+      if (!old || old.role !== "assistant" || !old.replyToMessageId) return { ok: false, error: appError("NOT_FOUND", "errors.notFound") };
+      if (old.superseded) return { ok: false, error: appError("CONFLICT", "errors.chatRegenerateSuperseded") };
+      const userMessage = repo.getMessage(input.projectId, old.replyToMessageId);
+      if (!userMessage || userMessage.role !== "user" || userMessage.content === "") {
+        return { ok: false, error: appError("NOT_FOUND", "errors.notFound") };
+      }
+      if (this.inFlightConversations.has(input.conversationId)) {
+        return { ok: false, error: appError("CONFLICT", "errors.chatSendInFlight", true) };
+      }
+      let counter = 0;
+      const nextId = (): string => (this.deps.randomId ? this.deps.randomId(++counter) : crypto.randomUUID());
+      return await this.runTurn({ turn: input, repo, profile, owner, nextId, userMessage, supersedesMessageId: old.id, emit });
+    } catch (reason) {
+      return internalResult(reason);
     }
+  }
 
-    // Ownership is validated inside the repository before anything is written.
-    repo.getConversation(input.projectId, input.conversationId);
-    if (this.inFlightConversations.has(input.conversationId)) {
-      return { ok: false, error: appError("CONFLICT", "errors.chatSendInFlight", true) };
-    }
-
-    const userMessage = repo.appendUserMessage({
-      projectId: input.projectId,
-      conversationId: input.conversationId,
-      id: nextId(1),
-      content: input.question,
-      createdAt: now().toISOString()
-    });
-
+  /**
+   * Shared streaming turn: retrieve -> draft -> generate -> finalize.
+   * A plain send already persisted the fresh user message; regeneration points at the
+   * existing user/assistant pair, so no duplicate user row can be created.
+   */
+  private async runTurn(args: TurnContext): Promise<Result<{ requestId: string; assistantMessageId: string }>> {
+    const { turn, repo, profile, owner, nextId, userMessage, supersedesMessageId, emit } = args;
     let retrieved: RetrievableChunk[];
     try {
-      retrieved = await this.deps.retrieval({ projectId: input.projectId, question: input.question });
+      retrieved = await this.deps.retrieval({ projectId: turn.projectId, question: userMessage.content });
     } catch {
-      // ponytail: retrieval outage degrades to no-evidence answer; Task 5 adds repair surfacing.
-      retrieved = [];
+      // Retrieval outage must surface as a repairable failure, never as a no-evidence answer.
+      const indexError = appError("INDEX_UNAVAILABLE", "errors.indexUnavailable", true);
+      const draft = repo.startAssistantMessage({
+        projectId: turn.projectId,
+        conversationId: turn.conversationId,
+        id: nextId(),
+        replyToMessageId: userMessage.id,
+        provider: profile.provider,
+        profileId: profile.id,
+        model: profile.modelId,
+        createdAt: this.clock().toISOString()
+      });
+      repo.failAssistantMessage({ projectId: turn.projectId, messageId: draft.id, errorCode: indexError.code, updatedAt: this.clock().toISOString() });
+      emit({ type: "failed", messageId: draft.id, error: { code: indexError.code, messageKey: indexError.messageKey, recoverable: indexError.recoverable } });
+      return { ok: false, error: indexError };
     }
     const retrievalsByLabel: Record<string, RetrievedCitation> = {};
     for (const item of retrieved) retrievalsByLabel[item.label] = item;
 
-    const context = assembleContext({ question: input.question, retrieved, priorTurns: [], locale: "en" });
+    const context = assembleContext({ question: userMessage.content, retrieved, priorTurns: [], locale: "en" });
     // Context builder owns deterministic S-labels; align the citation map to what it issued.
     for (const c of context.citations) {
       const match = retrieved.find((r) => r.chunkId === c.chunkId);
@@ -114,32 +203,45 @@ export class ChatService {
     }
 
     const provider = this.deps.providerFactory(profile);
-    const assistant = repo.startAssistantMessage({
-      projectId: input.projectId,
-      conversationId: input.conversationId,
-      id: nextId(2),
-      replyToMessageId: userMessage.id,
-      provider: profile.provider,
-      profileId: profile.id,
-      model: profile.modelId,
-      createdAt: now().toISOString()
-    });
+    const startedAt = this.clock().toISOString();
+    const draftId = nextId();
+    const assistant = supersedesMessageId
+      ? repo.regenerateAssistantMessage({
+          projectId: turn.projectId,
+          conversationId: turn.conversationId,
+          id: draftId,
+          provider: profile.provider,
+          profileId: profile.id,
+          model: profile.modelId,
+          supersedesMessageId,
+          createdAt: startedAt
+        })
+      : repo.startAssistantMessage({
+          projectId: turn.projectId,
+          conversationId: turn.conversationId,
+          id: draftId,
+          replyToMessageId: userMessage.id,
+          provider: profile.provider,
+          profileId: profile.id,
+          model: profile.modelId,
+          createdAt: startedAt
+        });
 
-    const requestId = nextId(3);
+    const requestId = nextId();
     // Reserve BEFORE generation work so stop/conflict see a consistent state.
     const { signal } = this.registry.register(requestId, owner);
-    this.inFlightConversations.add(input.conversationId);
+    this.inFlightConversations.add(turn.conversationId);
     emit({ type: "started", requestId, messageId: assistant.id });
 
-    const outcome = await this.runGeneration({ repo, input, profile, provider, retrievals: retrievalsByLabel, contextMessages: context.messages, assistantId: assistant.id, signal, emit });
+    const outcome = await this.runGeneration({ repo, turn, profile, provider, retrievals: retrievalsByLabel, contextMessages: context.messages, assistantId: assistant.id, signal, emit });
     this.registry.complete(requestId, owner);
-    this.inFlightConversations.delete(input.conversationId);
+    this.inFlightConversations.delete(turn.conversationId);
     return outcome;
   }
 
   private async runGeneration(args: {
     repo: ConversationRepository;
-    input: SendInput;
+    turn: ConversationQuery;
     profile: ModelProfileDto;
     provider: ModelProvider;
     retrievals: Record<string, RetrievedCitation>;
@@ -148,8 +250,8 @@ export class ChatService {
     signal: AbortSignal;
     emit: (event: StreamEvent) => void;
   }): Promise<Result<{ requestId: string; assistantMessageId: string }>> {
-    const { repo, input, profile, provider, retrievals, contextMessages, assistantId, signal, emit } = args;
-    const now = this.deps.now ?? (() => new Date());
+    const { repo, turn, profile, provider, retrievals, contextMessages, assistantId, signal, emit } = args;
+    const now = this.clock.bind(this);
     let fullText = "";
     let lastCheckpointAt = now().getTime();
     let bytesSinceCheckpoint = 0;
@@ -161,7 +263,7 @@ export class ChatService {
 
     const checkpoint = (): void => {
       repo.checkpointAssistantContent({
-        projectId: input.projectId,
+        projectId: turn.projectId,
         messageId: assistantId,
         content: fullText,
         updatedAt: now().toISOString()
@@ -208,7 +310,7 @@ export class ChatService {
 
     if (signal.aborted || failure?.code === "CANCELLED") {
       const cancelled = repo.cancelAssistantMessage({
-        projectId: input.projectId,
+        projectId: turn.projectId,
         messageId: assistantId,
         updatedAt: now().toISOString()
       });
@@ -218,7 +320,7 @@ export class ChatService {
 
     if (failure) {
       repo.failAssistantMessage({
-        projectId: input.projectId,
+        projectId: turn.projectId,
         messageId: assistantId,
         errorCode: failure.code,
         updatedAt: now().toISOString()
@@ -231,15 +333,15 @@ export class ChatService {
     const parsed = finalizeCitations(fullText, retrievals);
     for (const citation of parsed.citations) {
       persistParsedCitations(this.deps.db, {
-        projectId: input.projectId,
+        projectId: turn.projectId,
         messageId: assistantId,
         parsed: { citations: [citation], hasInvalidCitations: false, content: fullText },
         retrievals
       });
     }
     const completed = repo.completeAssistantMessage({
-      projectId: input.projectId,
-      conversationId: input.conversationId,
+      projectId: turn.projectId,
+      conversationId: turn.conversationId,
       id: assistantId,
       content: fullText,
       usage: usage ?? { inputTokens: 0, outputTokens: 0, totalTokens: 0 },
@@ -249,6 +351,24 @@ export class ChatService {
     emit({ type: "completed", messageId: completed.id, message: completed });
     return { ok: true, value: { requestId: "", assistantMessageId: completed.id } };
   }
+
+  private repo(): ConversationRepository {
+    return new ConversationRepository(this.deps.db);
+  }
+
+  private clock(): Date {
+    return (this.deps.now ?? (() => new Date()))();
+  }
+
+  private generationProfile(): ModelProfileDto | undefined {
+    const profile = this.deps.generationProfile;
+    return profile && profile.enabled && profile.capability === "generation" ? profile : undefined;
+  }
+}
+
+function internalResult(reason: unknown): Result<never> {
+  const message = reason instanceof Error ? reason.message : String(reason);
+  return { ok: false, error: appError("INTERNAL", `errors.internal:${message}`) };
 }
 
 export async function sendChatMessage(deps: ChatSendDeps, input: SendInput, emit: (event: StreamEvent) => void): Promise<Result<{ requestId: string; assistantMessageId: string }>> {
