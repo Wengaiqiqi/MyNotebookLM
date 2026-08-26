@@ -6,7 +6,7 @@ describe("RetrievalService", () => {
     let release!: () => void; const gate = new Promise<void>(r => { release = r; });
     const lance = { vectorSearch: vi.fn(async () => { await gate; return [{ chunkId: "c1", contentHash: "h1", sourceId: "s1", revisionId: "r1", ordinal: 0, text: "stale", locatorJson: "{}" }]; }), textSearch: vi.fn(async () => [{ chunkId: "c1", contentHash: "h1", sourceId: "s1", revisionId: "r1", ordinal: 0, text: "stale", locatorJson: "{}" }]) };
     const db = { prepare: vi.fn(() => ({ get: () => ({ project_id: "p1", status: "active", current_revision_id: "r1", revision_state: "ready", space_state: "active", chunk_id: "c1", source_id: "s1", revision_id: "r1", text: "authoritative", locator_json: "{\"page\":1}" }) })) } as any;
-    const service = new RetrievalService({ db, lance: lance as any, provider: { embedBatch: vi.fn(async () => [[1, 0]]) } as any, resolveSpace: async () => ({ id: "sp1", dimension: 2, state: "active" }) });
+    const service = new RetrievalService({ db, lance: lance as any, provider: { embedBatch: vi.fn(async () => [[1, 0]]) } as any });
     const promise = service.search("p1", "hello"); await new Promise(r => setTimeout(r, 0)); expect(lance.textSearch).toHaveBeenCalled(); release();
     await expect(promise).resolves.toEqual([expect.objectContaining({ text: "authoritative" })]);
   });
@@ -16,16 +16,28 @@ describe("RetrievalService", () => {
     await expect(service.search("p1", "x")).rejects.toMatchObject({ code: "INDEX_UNAVAILABLE", repair: true });
   });
 
-  it("resolves the query provider from the active project's persisted space", async () => {
-    const provider = { embedBatch: vi.fn(async () => [[1, 0]]) };
+  it("fails closed without calling the fallback provider when the configured resolver returns null", async () => {
+    const fallback = { embedBatch: vi.fn(async () => [[1, 0]]) };
+    const lance = { vectorSearch: vi.fn(async () => []), textSearch: vi.fn(async () => []) };
+    const db = { prepare: vi.fn(() => ({ get: () => ({ space_id: "sp1", provider: "local", model_id: "m", model_revision: "r", dimension: 2, distance: "cosine", pooling: "mean", preprocess_version: "v1", chunking_version: "v1" }) })) } as any;
+    const service = new RetrievalService({ db, lance: lance as any, provider: fallback as any, resolveSpace: async () => null });
+
+    await expect(service.search({ projectId: "p1", query: "hello", limit: 1 })).resolves.toMatchObject({ ok: false, error: { code: "INDEX_UNAVAILABLE", recoverable: true } });
+    expect(fallback.embedBatch).not.toHaveBeenCalled();
+    expect(lance.textSearch).not.toHaveBeenCalled();
+  });
+
+  it.each(["local", "openai"])("resolves the %s query provider from the active project's persisted space", async (kind) => {
+    const capability = { provider: kind, modelId: "m", modelRevision: "r", dimension: 2, distance: "cosine" as const, pooling: "mean" as const, preprocessVersion: "v1", chunkingVersion: "v1" };
+    const provider = { embedBatch: vi.fn(async () => [[1, 0]]), describe: () => capability };
     const resolveSpace = vi.fn(async (projectId: string) => {
       expect(projectId).toBe("p1");
       return { id: "sp1", dimension: 2, state: "active", provider } as never;
     });
     const lance = { vectorSearch: vi.fn(async () => []), textSearch: vi.fn(async () => []) };
-    const db = { prepare: vi.fn(() => ({ get: () => ({ space_id: "sp1", dimension: 2 }) })) } as any;
+    const db = { prepare: vi.fn(() => ({ get: () => ({ space_id: "sp1", dimension: 2, provider: kind, model_id: "m", model_revision: "r", distance: "cosine", pooling: "mean", preprocess_version: "v1", chunking_version: "v1" }) })) } as any;
     const service = new RetrievalService({ db, lance: lance as any, provider: { embedBatch: vi.fn(async () => [[9, 9]]) } as any, resolveSpace });
-    await service.search({ projectId: "p1", query: "hello", limit: 1 });
+    await expect(service.search({ projectId: "p1", query: "hello", limit: 1 })).resolves.toEqual({ ok: true, value: [] });
     expect(provider.embedBatch).toHaveBeenCalled();
   });
 

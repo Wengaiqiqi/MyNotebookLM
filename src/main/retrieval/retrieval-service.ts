@@ -15,6 +15,7 @@ export class RetrievalService {
       const space = this.db.prepare("SELECT pes.space_id, es.provider, es.model_id, es.model_revision, es.dimension, es.distance, es.pooling, es.preprocess_version, es.chunking_version FROM project_embedding_spaces pes JOIN embedding_spaces es ON es.id = pes.space_id WHERE pes.project_id = ? AND es.state = 'active'").get(input.projectId) as { space_id: string; provider: string; model_id: string; model_revision: string; dimension: number; distance: string; pooling: string; preprocess_version: string; chunking_version: string } | undefined;
       if (!space) return this.failure("NOT_FOUND", false);
       const resolved = this.resolveSpace ? await this.resolveSpace(input.projectId, { id: space.space_id, dimension: space.dimension }) : null;
+      if (this.resolveSpace && !resolved?.provider) return this.failure("INDEX_UNAVAILABLE", true);
       const queryProvider = resolved?.provider ?? this.provider;
       if (typeof (queryProvider as Partial<EmbeddingProvider>).describe === "function") {
         const description = (queryProvider as EmbeddingProvider).describe();
