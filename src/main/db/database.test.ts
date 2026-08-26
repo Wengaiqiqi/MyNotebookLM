@@ -29,6 +29,9 @@ const credentialBindingMigration = readFileSync(
 const sourcesTasksMigration = readFileSync(new URL("./migrations/004_sources_tasks.sql", import.meta.url), "utf8");
 const spacesMigration = readFileSync(new URL("./migrations/005_embedding_spaces.sql", import.meta.url), "utf8");
 const spaceTasksMigration = readFileSync(new URL("./migrations/006_space_tasks.sql", import.meta.url), "utf8");
+const conversationsMigration = readFileSync(new URL("./migrations/007_conversations.sql", import.meta.url), "utf8");
+const relaxCitationsMigration = readFileSync(new URL("./migrations/008_relax_message_citation_uniqueness.sql", import.meta.url), "utf8");
+const conversationArchiveMigration = readFileSync(new URL("./migrations/009_add_conversation_archive.sql", import.meta.url), "utf8");
 
 describe("openAppDatabase", () => {
   let temporaryRoot: string;
@@ -427,6 +430,41 @@ describe("openAppDatabase", () => {
       ]));
     } finally {
       bundledDatabase.close();
+    }
+  });
+
+  it("upgrades an archive-era database by adding archived_at through a dedicated migration", () => {
+    expect(conversationsMigration).not.toContain("archived_at");
+    writeFileSync(path.join(migrationsDir, "002_settings_models.sql"), settingsModelsMigration);
+    writeFileSync(path.join(migrationsDir, "003_credential_binding.sql"), credentialBindingMigration);
+    writeFileSync(path.join(migrationsDir, "004_sources_tasks.sql"), sourcesTasksMigration);
+    writeFileSync(path.join(migrationsDir, "005_embedding_spaces.sql"), spacesMigration);
+    writeFileSync(path.join(migrationsDir, "006_space_tasks.sql"), spaceTasksMigration);
+    writeFileSync(path.join(migrationsDir, "007_conversations.sql"), conversationsMigration);
+    writeFileSync(path.join(migrationsDir, "008_relax_message_citation_uniqueness.sql"), relaxCitationsMigration);
+
+    const legacyDatabase = openAppDatabase(databaseFile, migrationsDir);
+    try {
+      expect(
+        legacyDatabase.connection.prepare(
+          "SELECT COUNT(*) AS columns_found FROM pragma_table_info('conversations') WHERE name = 'archived_at'"
+        ).pluck().get()
+      ).toBe(0);
+    } finally {
+      legacyDatabase.close();
+    }
+
+    writeFileSync(path.join(migrationsDir, "009_add_conversation_archive.sql"), conversationArchiveMigration);
+    const upgradedDatabase = openAppDatabase(databaseFile, migrationsDir);
+    try {
+      expect(
+        upgradedDatabase.connection.prepare("SELECT version FROM schema_migrations ORDER BY version").pluck().all()
+      ).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9]);
+      expect(
+        upgradedDatabase.connection.prepare("SELECT name FROM pragma_table_info('conversations')").pluck().all()
+      ).toContain("archived_at");
+    } finally {
+      upgradedDatabase.close();
     }
   });
 
