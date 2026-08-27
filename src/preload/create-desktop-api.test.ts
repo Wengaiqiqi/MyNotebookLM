@@ -5,6 +5,8 @@ import {
   PROJECT_CHANNELS,
   SETTINGS_CHANNELS,
   RETRIEVAL_CHANNELS,
+  CHAT_CHANNELS,
+  CITATION_CHANNELS,
   VECTOR_CHANNELS,
   type DesktopApi
 } from "../shared/ipc";
@@ -56,7 +58,7 @@ describe("createDesktopApi", () => {
   it("preserves project commands while exposing only the named model settings groups", () => {
     const api = createDesktopApi({ invoke: vi.fn() });
 
-    expect(Object.keys(api)).toEqual(["vector", "retrieval", "sources", "tasks", "projects", "settings", "models", "credentials", "titleOverlay"]);
+    expect(Object.keys(api)).toEqual(["vector", "retrieval", "sources", "tasks", "projects", "settings", "models", "credentials", "titleOverlay", "conversations", "chat", "citations"]);
     expect(Object.keys(api.vector)).toEqual(["getHealth", "startMigration", "rebuild", "optimize", "cancelTask", "subscribe"]);
     expect(Object.keys(api.retrieval)).toEqual(["search"]);
     expect(Object.keys(api.projects)).toEqual(["list", "create", "rename", "archive", "remove"]);
@@ -328,5 +330,89 @@ describe("createDesktopApi", () => {
     const invoke = vi.fn().mockResolvedValue({});
 
     await expect(call(createDesktopApi({ invoke }))).rejects.toThrow();
+  });
+
+  const chatProjectId = "11111111-1111-4111-8111-111111111111";
+  const chatConversationId = "33333333-3333-4333-8333-333333333333";
+  const chatRequestId = "22222222-2222-4222-8222-222222222222";
+
+  it("routes conversation/chat/citation commands through versioned channels", async () => {
+    const conversation = { id: chatConversationId, projectId: chatProjectId, title: "Chat", createdAt: "2026-08-27T00:00:00.000Z", updatedAt: "2026-08-27T00:00:00.000Z", deletedAt: null, archivedAt: null };
+    const streamValue = { requestId: chatRequestId, assistantMessageId: "assistant-1" };
+    const invoke = vi.fn()
+      .mockResolvedValueOnce(ok([conversation]))
+      .mockResolvedValueOnce(ok(conversation))
+      .mockResolvedValueOnce(ok(conversation))
+      .mockResolvedValueOnce(ok(conversation))
+      .mockResolvedValueOnce(ok(undefined))
+      .mockResolvedValueOnce(ok([]))
+      .mockResolvedValueOnce(ok(streamValue))
+      .mockResolvedValueOnce(ok(true))
+      .mockResolvedValueOnce(ok(streamValue))
+      .mockResolvedValueOnce(ok({ opened: "document" }));
+    const api = createDesktopApi({ invoke });
+
+    await api.conversations.list({ projectId: chatProjectId });
+    await api.conversations.create({ projectId: chatProjectId, title: "Chat" });
+    await api.conversations.rename({ projectId: chatProjectId, conversationId: chatConversationId, title: "Renamed" });
+    await api.conversations.archive({ projectId: chatProjectId, conversationId: chatConversationId });
+    await api.conversations.delete({ projectId: chatProjectId, conversationId: chatConversationId });
+    await api.conversations.listMessages({ projectId: chatProjectId, conversationId: chatConversationId });
+    await api.chat.send({ projectId: chatProjectId, conversationId: chatConversationId, question: "Hi" });
+    await api.chat.stop({ projectId: chatProjectId, requestId: chatRequestId });
+    await api.chat.regenerate({ projectId: chatProjectId, conversationId: chatConversationId, messageId: "assistant-1" });
+    await api.citations.open({ projectId: chatProjectId, citationId: "assistant-1:S1:0" });
+
+    expect(invoke).toHaveBeenNthCalledWith(1, CHAT_CHANNELS.listConversations, { projectId: chatProjectId });
+    expect(invoke).toHaveBeenNthCalledWith(7, CHAT_CHANNELS.send, { projectId: chatProjectId, conversationId: chatConversationId, question: "Hi" });
+    expect(invoke).toHaveBeenNthCalledWith(8, CHAT_CHANNELS.stop, { projectId: chatProjectId, requestId: chatRequestId });
+    expect(invoke).toHaveBeenNthCalledWith(9, CHAT_CHANNELS.regenerate, { projectId: chatProjectId, conversationId: chatConversationId, messageId: "assistant-1" });
+    expect(invoke).toHaveBeenNthCalledWith(10, CITATION_CHANNELS.open, { projectId: chatProjectId, citationId: "assistant-1:S1:0" });
+  });
+
+  it.each([
+    ["conversation create", (api: DesktopApi) => api.conversations.create({ projectId: chatProjectId, title: " " })],
+    ["chat send", (api: DesktopApi) => api.chat.send({ projectId: chatProjectId, conversationId: chatConversationId, question: "" })],
+    ["chat stop", (api: DesktopApi) => api.chat.stop({ projectId: chatProjectId, requestId: "garbage" })],
+    ["citation open", (api: DesktopApi) => api.citations.open({ projectId: chatProjectId, citationId: " " })]
+  ])("returns sanitized validation for invalid %s input before IPC", async (_command, call) => {
+    const invoke = vi.fn();
+
+    await expect(call(createDesktopApi({ invoke }))).resolves.toEqual(validationFailure);
+    expect(invoke).not.toHaveBeenCalled();
+  });
+
+  it("returns sanitized internal failure for malformed chat IPC results", async () => {
+    const invoke = vi.fn().mockResolvedValue({ ok: true, value: { unexpected: true } });
+
+    await expect(createDesktopApi({ invoke }).chat.send({
+      projectId: chatProjectId,
+      conversationId: chatConversationId,
+      question: "Hi"
+    })).resolves.toEqual(internalFailure);
+    expect(invoke).toHaveBeenCalledTimes(1);
+  });
+
+  it("validates and cleans up per-request chat subscriptions", () => {
+    const on = vi.fn();
+    const removeListener = vi.fn();
+    const listener = vi.fn();
+    const api = createDesktopApi({ invoke: vi.fn(), on, removeListener });
+
+    // Invalid request IDs never register a channel listener.
+    api.chat.subscribe("not-a-uuid", listener);
+    expect(on).not.toHaveBeenCalled();
+
+    const cleanup = api.chat.subscribe(chatRequestId, listener);
+    const channel = CHAT_CHANNELS.update + ":" + chatRequestId;
+    const registered = on.mock.calls[0]?.[0] === channel ? on.mock.calls[0]?.[1] as (_e: unknown, raw: unknown) => void : undefined;
+    registered?.({}, { type: "started", requestId: chatRequestId, messageId: "assistant-1" });
+    // A forged requestId or malformed payload is dropped in the renderer too.
+    registered?.({}, { type: "started", requestId: "44444444-4444-4444-8444-444444444444", messageId: "x" });
+    registered?.({}, { type: "nonsense", requestId: chatRequestId });
+    expect(listener).toHaveBeenCalledExactlyOnceWith({ type: "started", requestId: chatRequestId, messageId: "assistant-1" });
+
+    cleanup();
+    expect(removeListener).toHaveBeenCalledWith(channel, registered);
   });
 });

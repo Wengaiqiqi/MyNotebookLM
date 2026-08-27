@@ -12,10 +12,29 @@ import {
   SETTINGS_CHANNELS,
   TITLE_OVERLAY_CHANNELS,
   RETRIEVAL_CHANNELS,
+  CHAT_CHANNELS,
+  CITATION_CHANNELS,
+  type ChatRequestEvent,
   VECTOR_CHANNELS,
   type DesktopApi
 } from "../shared/ipc";
 import { SOURCE_CHANNELS } from "../shared/ipc";
+import { conversationSchema, messageSchema } from "../shared/chat";
+import {
+  chatConversationInputSchema,
+  chatCreateConversationInputSchema,
+  chatListConversationsInputSchema,
+  chatListMessagesInputSchema,
+  chatRegenerateInputSchema,
+  chatRequestIdInputSchema,
+  chatRequestEventSchemas,
+  chatOpenedResultValueSchema,
+  chatRenameConversationInputSchema,
+  chatSendInputSchema,
+  chatSendResultValueSchema,
+  chatStopInputSchema,
+  citationOpenInputSchema
+} from "../shared/ipc";
 import { sourceDtoSchema } from "../shared/sources";
 import { taskDtoSchema } from "../shared/tasks";
 import {
@@ -63,6 +82,8 @@ const modelTestResultSchema = resultSchema(modelTestResultDtoSchema);
 const credentialResultSchema = resultSchema(credentialStatusDtoSchema);
 const titleOverlayInputSchema = z.object({ theme: appThemeSchema }).strict();
 const titleOverlayResultSchema = resultSchema(z.undefined());
+const chatRequestEventSchemaList = Object.values(chatRequestEventSchemas);
+const chatRequestEventSchema = z.union(chatRequestEventSchemaList as unknown as [z.ZodType, z.ZodType, ...z.ZodType[]]);
 
 async function invokeResult<I, O>(
   ipc: IpcInvoker,
@@ -215,6 +236,39 @@ export function createDesktopApi(ipc: IpcInvoker): DesktopApi {
         titleOverlayResultSchema,
         input
       )
+    },
+    conversations: {
+      list: (input) => invokeResult(ipc, CHAT_CHANNELS.listConversations, chatListConversationsInputSchema, resultSchema(conversationSchema.array()), input),
+      create: (input) => invokeResult(ipc, CHAT_CHANNELS.createConversation, chatCreateConversationInputSchema, resultSchema(conversationSchema), input),
+      rename: (input) => invokeResult(ipc, CHAT_CHANNELS.rename, chatRenameConversationInputSchema, resultSchema(conversationSchema), input),
+      archive: (input) => invokeResult(ipc, CHAT_CHANNELS.archive, chatConversationInputSchema, resultSchema(conversationSchema), input),
+      delete: (input) => invokeResult(ipc, CHAT_CHANNELS.deleteConversation, chatConversationInputSchema, resultSchema(z.undefined()), input),
+      listMessages: (input) => invokeResult(ipc, CHAT_CHANNELS.listMessages, chatListMessagesInputSchema, resultSchema(messageSchema.array()), input)
+    },
+    chat: {
+      send: (input) => invokeResult(ipc, CHAT_CHANNELS.send, chatSendInputSchema, resultSchema(chatSendResultValueSchema), input),
+      stop: (input) => invokeResult(ipc, CHAT_CHANNELS.stop, chatStopInputSchema, resultSchema(z.boolean()), input),
+      regenerate: (input) => invokeResult(ipc, CHAT_CHANNELS.regenerate, chatRegenerateInputSchema, resultSchema(chatSendResultValueSchema), input),
+      subscribe: (requestId, listener) => {
+        const parsed = z.uuid().safeParse(requestId);
+        if (!parsed.success) return () => undefined;
+        const channel = CHAT_CHANNELS.update + ":" + parsed.data;
+        const handler = (_event: unknown, raw: unknown) => {
+          const event = chatRequestEventSchema.safeParse(raw);
+          // The main process is authoritative; the renderer re-validates defensively.
+          if (event.success && (event.data as { requestId?: unknown }).requestId === parsed.data) listener(event.data as ChatRequestEvent);
+        };
+        ipc.on?.(channel, handler);
+        return () => ipc.removeListener?.(channel, handler);
+      },
+      unsubscribe: (requestId) => {
+        const parsed = chatRequestIdInputSchema.safeParse({ requestId });
+        if (!parsed.success) return;
+        void ipc.invoke(CHAT_CHANNELS.unsubscribeRequest, parsed.data).catch(() => undefined);
+      }
+    },
+    citations: {
+      open: (input) => invokeResult(ipc, CITATION_CHANNELS.open, citationOpenInputSchema, resultSchema(chatOpenedResultValueSchema), input)
     }
   };
 }

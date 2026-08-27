@@ -9,6 +9,9 @@ import { registerProjectHandlers } from "./ipc/register-project-handlers";
 import { registerModelHandlers } from "./ipc/register-model-handlers";
 import { registerSourceHandlers } from "./ipc/register-source-handlers";
 import { registerVectorHandlers } from "./ipc/register-vector-handlers";
+import { registerChatHandlers } from "./ipc/register-chat-handlers";
+import { ChatService, recoverInterruptedStreams, type RetrievableChunk } from "./chat/chat-service";
+import { CitationOpener } from "./chat/citation-opener";
 import { ModelService } from "./models/model-service";
 import { getAppPaths } from "./platform/paths";
 import { ProjectRepository } from "./projects/project-repository";
@@ -44,6 +47,7 @@ let cleanupModelHandlers: (() => void) | undefined;
 let cleanupTitleOverlayHandler: (() => void) | undefined;
 let cleanupSourceHandlers: (() => void) | undefined;
 let cleanupVectorHandlers: (() => void) | undefined;
+let cleanupChatHandlers: (() => void) | undefined;
 let workerPool: WorkerPool | undefined;
 let taskFanout: ReturnType<typeof createTaskUpdateFanout> | undefined;
 const taskRevisions = new Map<string, string>();
@@ -66,6 +70,13 @@ app.whenReady().then(async () => {
     ? path.join(process.resourcesPath, "migrations")
     : path.resolve(__dirname, "../../src/main/db/migrations");
   appDatabase = await openAppDatabaseAsync(appPaths.database, migrationsDir);
+  // Task 4/5 startup recovery: abandoned streaming drafts become cancelled.
+  // A recovery hiccup must never block the whole app from starting.
+  try {
+    recoverInterruptedStreams(appDatabase.connection);
+  } catch {
+    // Streaming drafts stay recoverable on the next successful pass.
+  }
   const projectRepository = new ProjectRepository(appDatabase.connection);
   const projectService = new ProjectService(projectRepository);
   const settingsRepository = new SettingsRepository(appDatabase.connection);
@@ -221,6 +232,63 @@ app.whenReady().then(async () => {
     });
     cleanupVectorHandlers = registerVectorHandlers(ipcMain, vectorService);
   }
+  const chatService = new ChatService({
+    db: appDatabase.connection,
+    // The generation route is resolved per turn so default-route changes apply live.
+    get generationProfile() {
+      const profileId = settingsRepository.getRoute("chat")[0]?.profileId;
+      return profileId ? settingsRepository.getProfile(profileId) : undefined;
+    },
+    providerFactory: (profile) => ({
+      describe: () => {
+        throw new Error("provider describe is not used for generation");
+      },
+      discover: (signal) =>
+        credentialStore.withSecret(profile.id, { provider: profile.provider, baseUrl: profile.baseUrl }, (apiKey) =>
+          createModelProvider(profile.provider, profile.baseUrl, apiKey).discover(signal)),
+      async *generate(request, signal) {
+        const provider = await credentialStore.withSecret(
+          profile.id,
+          { provider: profile.provider, baseUrl: profile.baseUrl },
+          (apiKey) => Promise.resolve(createModelProvider(profile.provider, profile.baseUrl, apiKey))
+        );
+        yield* provider.generate(request, signal);
+      },
+      embed: (request, signal) =>
+        credentialStore.withSecret(profile.id, { provider: profile.provider, baseUrl: profile.baseUrl }, (apiKey) =>
+          createModelProvider(profile.provider, profile.baseUrl, apiKey).embed(request, signal))
+    }),
+    retrieval: async ({ projectId, question }) => {
+      const result = await retrieval.search({ projectId, query: question, limit: 12 });
+      if (!result.ok) throw new Error(result.error.code);
+      const rows = result.value as Array<{ chunkId: string; text: string; locator: Record<string, unknown> }>;
+      const lookups = rows.map((hit) => {
+        const row = appDatabase?.connection.prepare(
+          "SELECT s.id AS source_id, s.display_name, s.kind FROM source_chunks sc JOIN source_revisions sr ON sr.id = sc.revision_id JOIN sources s ON s.id = sr.source_id WHERE sc.id = ?"
+        ).get(hit.chunkId) as { source_id?: string; display_name?: string; kind?: string } | undefined;
+        return { hit, row };
+      });
+      return lookups.map(({ hit, row }, index): RetrievableChunk => ({
+        label: "S" + (index + 1),
+        chunkId: hit.chunkId,
+        sourceId: row?.source_id ?? "",
+        sourceDisplayName: row?.display_name ?? "",
+        sourceKind: row?.kind ?? "",
+        locator: hit.locator,
+        locatorSummary: JSON.stringify(hit.locator),
+        text: hit.text
+      }));
+    }
+  });
+  cleanupChatHandlers = registerChatHandlers({
+    resolveWindowFromSender: (sender) => BrowserWindow.getAllWindows().find((candidate) => candidate.webContents === sender),
+    ipc: ipcMain,
+    service: chatService,
+    requestHub: new Map(),
+    openCitation: (input) => new CitationOpener(appDatabase!.connection).openCitation(input),
+    onWindowClosed: () => void 0
+  });
+
   cleanupTitleOverlayHandler = registerTitleOverlayHandler(ipcMain);
 
   Menu.setApplicationMenu(null);
@@ -251,6 +319,8 @@ app.on("before-quit", (event) => {
   cleanupSourceHandlers = undefined;
   cleanupVectorHandlers?.();
   cleanupVectorHandlers = undefined;
+  cleanupChatHandlers?.();
+  cleanupChatHandlers = undefined;
   cleanupTitleOverlayHandler = undefined;
   appDatabase?.close();
   appDatabase = undefined;

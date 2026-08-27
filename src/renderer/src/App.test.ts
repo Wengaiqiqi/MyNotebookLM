@@ -172,6 +172,24 @@ function createApi(projects: ProjectDto[] = [], onboardingCompleted = true): Api
       },
       retrieval: {
         search: vi.fn<DesktopApi["retrieval"]["search"]>()
+      },
+      conversations: {
+        list: vi.fn<DesktopApi["conversations"]["list"]>(),
+        create: vi.fn<DesktopApi["conversations"]["create"]>(),
+        rename: vi.fn<DesktopApi["conversations"]["rename"]>(),
+        archive: vi.fn<DesktopApi["conversations"]["archive"]>(),
+        delete: vi.fn<DesktopApi["conversations"]["delete"]>(),
+        listMessages: vi.fn<DesktopApi["conversations"]["listMessages"]>()
+      },
+      chat: {
+        send: vi.fn<DesktopApi["chat"]["send"]>(),
+        stop: vi.fn<DesktopApi["chat"]["stop"]>(),
+        regenerate: vi.fn<DesktopApi["chat"]["regenerate"]>(),
+        subscribe: vi.fn<DesktopApi["chat"]["subscribe"]>(() => () => undefined),
+        unsubscribe: vi.fn<DesktopApi["chat"]["unsubscribe"]>()
+      },
+      citations: {
+        open: vi.fn<DesktopApi["citations"]["open"]>()
       }
     }
   };

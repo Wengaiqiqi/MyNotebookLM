@@ -7,7 +7,9 @@ type Callback = (...args: unknown[]) => void;
 const mocks = vi.hoisted(() => {
   const events: string[] = [];
   const callbacks = new Map<string, Callback>();
-  const connection = { prepare: vi.fn() };
+  // Default prepare chain keeps startup recovery from exploding in composition tests;
+  // individual tests override implementations for their specific SQL shapes.
+  const connection = { prepare: vi.fn((_sql: string): { run?: (...args: unknown[]) => unknown; get?: (...args: unknown[]) => unknown; all?: (...args: unknown[]) => unknown } => ({ run: vi.fn(() => ({ changes: 0 })), get: vi.fn(() => undefined), all: vi.fn(() => []) })) };
   const ipcMain = { handle: vi.fn(), removeHandler: vi.fn() };
   let vectorService: Record<string, (...args: any[]) => any> | undefined;
   let databasePending: Promise<void> = Promise.resolve();
@@ -129,6 +131,7 @@ const mocks = vi.hoisted(() => {
 vi.mock("electron", () => ({
   app: mocks.app,
   BrowserWindow: { getAllWindows: mocks.getAllWindows },
+  shell: { openPath: vi.fn(async () => ""), openExternal: vi.fn(async () => undefined) },
   Menu: { setApplicationMenu: mocks.setApplicationMenu },
   ipcMain: mocks.ipcMain
 }));
