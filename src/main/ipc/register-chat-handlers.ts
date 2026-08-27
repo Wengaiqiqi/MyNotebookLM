@@ -191,17 +191,17 @@ export function registerChatHandlers(args: {
   };
 
   registerHandler(CHAT_CHANNELS.listConversations, (_e, input) =>
-    validatedCall(chatListConversationsInputSchema, input, (value) => args.service.listConversations(value.projectId)));
+    validatedCall(chatListConversationsInputSchema, input, (value) => ({ ok: true as const, value: args.service.listConversations(value.projectId) })));
   registerHandler(CHAT_CHANNELS.createConversation, (_e, input) =>
-    validatedCall(chatCreateConversationInputSchema, input, (value) => args.service.createConversation(value)));
+    validatedCall(chatCreateConversationInputSchema, input, (value) => ({ ok: true as const, value: args.service.createConversation(value) })));
   registerHandler(CHAT_CHANNELS.rename, (_e, input) =>
-    validatedCall(chatRenameConversationInputSchema, input, (value) => args.service.renameConversation(value)));
+    validatedCall(chatRenameConversationInputSchema, input, (value) => ({ ok: true as const, value: args.service.renameConversation(value) })));
   registerHandler(CHAT_CHANNELS.archive, (_e, input) =>
-    validatedCall(chatConversationInputSchema, input, (value) => args.service.archiveConversation(value)));
+    validatedCall(chatConversationInputSchema, input, (value) => ({ ok: true as const, value: args.service.archiveConversation(value) })));
   registerHandler(CHAT_CHANNELS.deleteConversation, (_e, input) =>
-    validatedCall(chatConversationInputSchema, input, (value) => args.service.deleteConversation(value)));
+    validatedCall(chatConversationInputSchema, input, (value) => ({ ok: true as const, value: args.service.deleteConversation(value) })));
   registerHandler(CHAT_CHANNELS.listMessages, (_e, input) =>
-    validatedCall(chatListMessagesInputSchema, input, (value) => args.service.listMessages(value)));
+    validatedCall(chatListMessagesInputSchema, input, (value) => ({ ok: true as const, value: args.service.listMessages(value) })));
   registerHandler(CHAT_CHANNELS.send, runStream(chatSendInputSchema, (input, emit) => args.service.send(input, emit)));
   registerHandler(CHAT_CHANNELS.regenerate, runStream(chatRegenerateInputSchema, (input, emit) => args.service.regenerate(input, emit)));
   registerHandler(CHAT_CHANNELS.stop, (_e, input) =>

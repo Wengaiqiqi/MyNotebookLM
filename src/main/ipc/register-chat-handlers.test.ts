@@ -75,6 +75,18 @@ function completedMessage(extra?: Partial<{ id: string; content: string }>) {
   };
 }
 
+function conversation() {
+  return {
+    id: CONVERSATION_ID,
+    projectId: PROJECT_ID,
+    title: "New chat",
+    createdAt: "2026-08-27T00:00:00.000Z",
+    updatedAt: "2026-08-27T00:00:00.000Z",
+    deletedAt: null,
+    archivedAt: null
+  };
+}
+
 type ChatServiceLike = {
   listConversations: ReturnType<typeof vi.fn>;
   createConversation: ReturnType<typeof vi.fn>;
@@ -118,12 +130,12 @@ describe("registerChatHandlers", () => {
 
   function makeService(sendImpl?: ChatServiceLike["send"]): ChatServiceLike {
     return {
-      listConversations: vi.fn(() => []),
-      createConversation: vi.fn(),
-      renameConversation: vi.fn(),
-      archiveConversation: vi.fn(),
+      listConversations: vi.fn(() => [conversation()]),
+      createConversation: vi.fn(() => conversation()),
+      renameConversation: vi.fn(() => conversation()),
+      archiveConversation: vi.fn(() => conversation()),
       deleteConversation: vi.fn(),
-      listMessages: vi.fn(() => []),
+      listMessages: vi.fn(() => [completedMessage()]),
       send: vi.fn(
         sendImpl ??
         (async (_input, emit) => {
@@ -334,14 +346,23 @@ describe("registerChatHandlers", () => {
       onWindowClosed: () => void 0
     });
 
-    await invoke(ipc, CHAT_CHANNELS.listConversations, { projectId: PROJECT_ID });
+    await expect(invoke(ipc, CHAT_CHANNELS.listConversations, { projectId: PROJECT_ID })).resolves.toEqual({
+      ok: true,
+      value: [conversation()]
+    });
     expect(service.listConversations).toHaveBeenCalledWith(PROJECT_ID);
 
-    await invoke(ipc, CHAT_CHANNELS.createConversation, { projectId: PROJECT_ID, title: "New chat" });
+    await expect(invoke(ipc, CHAT_CHANNELS.createConversation, { projectId: PROJECT_ID, title: "New chat" })).resolves.toEqual({
+      ok: true,
+      value: conversation()
+    });
     await invoke(ipc, CHAT_CHANNELS.rename, { projectId: PROJECT_ID, conversationId: CONVERSATION_ID, title: "Renamed" });
     await invoke(ipc, CHAT_CHANNELS.archive, { projectId: PROJECT_ID, conversationId: CONVERSATION_ID });
     await invoke(ipc, CHAT_CHANNELS.deleteConversation, { projectId: PROJECT_ID, conversationId: CONVERSATION_ID });
-    await invoke(ipc, CHAT_CHANNELS.listMessages, { projectId: PROJECT_ID, conversationId: CONVERSATION_ID });
+    await expect(invoke(ipc, CHAT_CHANNELS.listMessages, { projectId: PROJECT_ID, conversationId: CONVERSATION_ID })).resolves.toEqual({
+      ok: true,
+      value: [completedMessage()]
+    });
     await invoke(ipc, CHAT_CHANNELS.regenerate, { projectId: PROJECT_ID, conversationId: CONVERSATION_ID, messageId: MESSAGE_ID });
 
     const citationId = "assistant-1:S1:0";

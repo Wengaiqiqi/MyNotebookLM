@@ -12,7 +12,9 @@ import type { RetrievableChunk } from "./chat-service";
 import { ChatService } from "./chat-service";
 import { CitationOpener } from "./citation-opener";
 import type { ModelProfileDto } from "../../shared/models";
-import type { GenerationEvent, ModelDescriptor } from "../models/provider";
+import { OpenAiCompatibleProvider } from "../models/openai-provider";
+import type { ModelProvider } from "../models/provider";
+import { startFakeProviderServer, type FakeProviderServer } from "../models/test/fake-provider-server";
 
 const PROJECT_ID = "11111111-1111-4111-8111-111111111111";
 const CHUNK_A = "99999999-9999-4999-8999-99999999999a";
@@ -22,15 +24,9 @@ const REVISION_ID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
 const SPACE_ID = "55555555-5555-4555-8555-555555555555";
 const AT = "2026-08-27T00:00:00.000Z";
 const DIMENSION = 2;
+let generationServer: FakeProviderServer | undefined;
 
 type StoredRow = { chunkId: string; projectId: string; sourceId: string; revisionId: string; spaceId: string; ordinal: number; contentHash: string; text: string; vector: number[]; locator: Record<string, unknown>; createdAt: number };
-
-type FakeGeneration = {
-  describe(): never;
-  discover(signal?: AbortSignal): Promise<ModelDescriptor[]>;
-  generate(request: unknown, signal: AbortSignal): AsyncGenerator<GenerationEvent>;
-  embed(): Promise<number[][]>;
-};
 
 /** Deterministic bag-of-words query embedding; identical queries embed identically. */
 function deterministicEmbedding(texts: string[]): number[][] {
@@ -67,11 +63,10 @@ function fakeEmbeddingProvider() {
   };
 }
 
-function providerStreaming(...chunks: string[]): FakeGeneration {
+function providerStreaming(...chunks: string[]): ModelProvider {
   return {
-    describe: () => { throw new Error("describe is not used for generation"); },
     async discover() { return []; },
-    async *generate(_request: unknown, signal: AbortSignal): AsyncGenerator<GenerationEvent> {
+    async *generate(_request: unknown, signal: AbortSignal) {
       for (const chunk of chunks) {
         if (signal.aborted) return;
         yield { type: "text-delta", text: chunk };
@@ -83,13 +78,12 @@ function providerStreaming(...chunks: string[]): FakeGeneration {
   };
 }
 
-function slowProvider(): FakeGeneration {
+function slowProvider(): ModelProvider {
   let index = 0;
   const chunks = ["one ", "two ", "three ", "four"];
   return {
-    describe: () => { throw new Error("describe is not used for generation"); },
     async discover() { return []; },
-    async *generate(_request: unknown, signal: AbortSignal): AsyncGenerator<GenerationEvent> {
+    async *generate(_request: unknown, signal: AbortSignal) {
       while (index < chunks.length && !signal.aborted) {
         yield { type: "text-delta", text: chunks[index++]! };
         await new Promise((resolve) => setTimeout(resolve, 15));
@@ -158,6 +152,8 @@ describe("RAG integration with real LanceDB and streaming chat", () => {
   }
 
   afterEach(async () => {
+    await generationServer?.close();
+    generationServer = undefined;
     database?.close();
     await lance?.close();
     if (root) await rm(root, { recursive: true, force: true });
@@ -173,7 +169,8 @@ describe("RAG integration with real LanceDB and streaming chat", () => {
     if (!search.ok) throw new Error(JSON.stringify(search.error));
     expect(search.value.map((hit: { chunkId: string }) => hit.chunkId)).toEqual([CHUNK_A, CHUNK_B]);
 
-    const service = new ChatService(chatDeps(connection, retrieval));
+    const provider = await startHttpGenerationProvider("Grounded answer ", "[S1]");
+    const service = new ChatService(chatDeps(connection, retrieval, provider));
     const conversation = service.createConversation({ projectId: PROJECT_ID, title: "Cited" });
     const events: Array<Record<string, unknown>> = [];
     const result = await service.send({ projectId: PROJECT_ID, conversationId: conversation.id, question: "alpha" }, (event) =>
@@ -183,6 +180,16 @@ describe("RAG integration with real LanceDB and streaming chat", () => {
     expect(events.at(-1)).toMatchObject({ type: "completed" });
     const completed = events.at(-1)! as { message: { citations: Array<{ label: string; sourceChunkId: string }> } };
     expect(completed.message.citations[0]).toMatchObject({ label: "S1", sourceChunkId: CHUNK_A });
+
+    const chatRequest = generationServer?.requests.find((request) => request.path === "/v1/chat/completions");
+    expect(chatRequest).toBeDefined();
+    const requestBody = JSON.parse(chatRequest!.body) as { model: string; messages: Array<{ role: string; content: string }> };
+    expect(requestBody.model).toBe("gpt-test");
+    expect(requestBody.messages).toEqual(expect.arrayContaining([
+      expect.objectContaining({ role: "system", content: expect.stringContaining("only cite markers S1..S12") }),
+      expect.objectContaining({ role: "user", content: expect.stringContaining('<evidence id="S1">') }),
+      expect.objectContaining({ role: "user", content: expect.stringContaining("alpha evidence") })
+    ]));
 
     const persisted = service.listMessages({ projectId: PROJECT_ID, conversationId: conversation.id }).at(-1)!;
     expect(persisted.state).toBe("completed");
@@ -222,23 +229,28 @@ describe("RAG integration with real LanceDB and streaming chat", () => {
   it("answers without citations when no evidence is retrieved", async () => {
     const connection = await setupWorld();
     const retrieval = new RetrievalService({ db: connection, lance, provider: fakeEmbeddingProvider() });
-    const service = new ChatService({ ...chatDeps(connection, retrieval), retrieval: async () => [] });
+    const provider = await startHttpGenerationProvider("There is no evidence in the sources for this request.");
+    const service = new ChatService({ ...chatDeps(connection, retrieval, provider), retrieval: async () => [] });
     const conversation = service.createConversation({ projectId: PROJECT_ID, title: "No evidence" });
     const events: Array<Record<string, unknown>> = [];
     const result = await service.send({ projectId: PROJECT_ID, conversationId: conversation.id, question: "omega gamma unrelated topic" }, (event) =>
       events.push(event as Record<string, unknown>)
     );
     expect(result.ok).toBe(true);
-    const completed = events.at(-1)! as { type: string; message: { citations: unknown[] } };
+    const completed = events.at(-1)! as { type: string; message: { citations: unknown[]; content: string; errorCode: string | null } };
     expect(completed.type).toBe("completed");
+    expect(completed.message.content).toBe("There is no evidence in the sources for this request.");
+    expect(completed.message.content).not.toMatch(/\[S\d+\]/);
     expect(completed.message.citations).toHaveLength(0);
+    expect(service.listMessages({ projectId: PROJECT_ID, conversationId: conversation.id }).at(-1)?.citations).toEqual([]);
   });
 
   it("keeps invalid citation markers visible in text but persists no citation rows for them", async () => {
     const connection = await setupWorld();
     const retrieval = new RetrievalService({ db: connection, lance, provider: fakeEmbeddingProvider() });
+    const provider = await startHttpGenerationProvider("[S2] plus ", "[S13]");
     const service = new ChatService({
-      ...chatDeps(connection, retrieval, providerStreaming("[S2] plus ", "[S13]")),
+      ...chatDeps(connection, retrieval, provider),
       retrieval: async () => []
     });
     const conversation = service.createConversation({ projectId: PROJECT_ID, title: "Invalid" });
@@ -247,11 +259,15 @@ describe("RAG integration with real LanceDB and streaming chat", () => {
       events.push(event as Record<string, unknown>)
     );
     expect(result.ok).toBe(true);
-    const completed = events.at(-1)! as { type: string; message: { citations: unknown[]; content: string } };
+    const completed = events.at(-1)! as { type: string; message: { citations: unknown[]; content: string; errorCode: string | null } };
     expect(completed.type).toBe("completed");
     expect(completed.message.citations).toHaveLength(0);
     expect(completed.message.content).toContain("[S2]");
     expect(completed.message.content).toContain("[S13]");
+    expect(completed.message.errorCode).toBeNull();
+    const persisted = service.listMessages({ projectId: PROJECT_ID, conversationId: conversation.id }).at(-1)!;
+    expect(persisted.content).toBe(completed.message.content);
+    expect(persisted.citations).toEqual([]);
   });
 
   it("regenerates a reply without duplicating the user row or its citations", async () => {
@@ -284,7 +300,7 @@ describe("RAG integration with real LanceDB and streaming chat", () => {
 function chatDeps(
   connection: Database.Database,
   retrieval: RetrievalService,
-  generation?: FakeGeneration
+  generation?: ModelProvider
 ): ConstructorParameters<typeof ChatService>[0] {
   return {
     db: connection,
@@ -305,4 +321,22 @@ function chatDeps(
       }));
     }
   };
+}
+
+async function startHttpGenerationProvider(...chunks: string[]): Promise<OpenAiCompatibleProvider> {
+  generationServer = await startFakeProviderServer(async (request, response) => {
+    if (request.method !== "POST" || request.path !== "/v1/chat/completions") {
+      response.writeHead(404, { "content-type": "application/json" });
+      response.end(JSON.stringify({ error: { message: "not found" } }));
+      return;
+    }
+    response.writeHead(200, { "content-type": "text/event-stream" });
+    response.end(
+      chunks.map((text) => `data: ${JSON.stringify({ choices: [{ delta: { content: text } }] })}\n\n`).join("")
+      + `data: ${JSON.stringify({ choices: [{ delta: {}, finish_reason: "stop" }] })}\n\n`
+      + `data: ${JSON.stringify({ usage: { prompt_tokens: 10, completion_tokens: 5 } })}\n\n`
+      + "data: [DONE]\n\n"
+    );
+  });
+  return new OpenAiCompatibleProvider({ baseUrl: generationServer.baseUrl });
 }

@@ -9,6 +9,13 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { _electron as electron, type ElectronApplication, type Page } from "playwright";
 
+type FakeOpenAiRequest = {
+  method: string;
+  path: string;
+  headers: http.IncomingHttpHeaders;
+  body: Record<string, unknown> | undefined;
+};
+
 async function launchWithUserData(
   userDataDir: string
 ): Promise<{ app: ElectronApplication; page: Page }> {
@@ -23,6 +30,20 @@ async function launchWithUserData(
   return { app, page: await app.firstWindow() };
 }
 
+async function closeElectron(app: ElectronApplication): Promise<void> {
+  const pid = await app.evaluate(() => process.pid);
+  await app.close();
+  for (let attempt = 0; attempt < 100; attempt++) {
+    try {
+      process.kill(pid, 0);
+    } catch {
+      return;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  throw new Error(`Electron ${pid}: shutdown timeout`);
+}
+
 async function skipOnboarding(page: Page): Promise<void> {
   const skip = page.getByRole("button", { name: /稍后配置模型|Configure later/ });
   await page.waitForFunction(() => [...document.querySelectorAll("button")].some((candidate) => {
@@ -34,10 +55,16 @@ async function skipOnboarding(page: Page): Promise<void> {
   await expect(page.getByRole("button", { name: /新建项目|New project/ }).first()).toBeEnabled();
 }
 
-async function startFakeOpenAi(): Promise<{ baseUrl: string; requests: string[]; close(): Promise<void> }> {
-  const requests: string[] = [];
+async function startFakeOpenAi(): Promise<{ baseUrl: string; requests: FakeOpenAiRequest[]; close(): Promise<void> }> {
+  const requests: FakeOpenAiRequest[] = [];
   const server = http.createServer(async (request, response) => {
-    requests.push(`${request.method ?? "?"} ${request.url ?? ""}`);
+    let body: Record<string, unknown> | undefined;
+    if (request.method === "POST") {
+      const chunks: Buffer[] = [];
+      for await (const chunk of request) chunks.push(Buffer.from(chunk));
+      body = JSON.parse(Buffer.concat(chunks).toString("utf8")) as Record<string, unknown>;
+    }
+    requests.push({ method: request.method ?? "?", path: request.url ?? "", headers: request.headers, body });
     if (request.method === "GET" && request.url === "/v1/models") {
       response.writeHead(200, { "content-type": "application/json" });
       response.end(JSON.stringify({
@@ -60,9 +87,7 @@ async function startFakeOpenAi(): Promise<{ baseUrl: string; requests: string[];
       return;
     }
     if (request.method === "POST" && request.url === "/v1/embeddings") {
-      const chunks: Buffer[] = [];
-      for await (const chunk of request) chunks.push(Buffer.from(chunk));
-      const input = JSON.parse(Buffer.concat(chunks).toString("utf8")).input;
+      const input = body?.input;
       const inputs = Array.isArray(input) ? input : [input];
       response.writeHead(200, { "content-type": "application/json" });
       response.end(JSON.stringify({ data: inputs.map((value, index) => ({
@@ -318,25 +343,14 @@ test("preload bridge completes cited RAG with a fake OpenAI-compatible provider"
   const tableName = `space_${bootstrapSpaceId.replaceAll("-", "_")}`;
   const sourcePath = path.join(userDataDir, "data", "authoritative-alpha.txt");
   let temporaryVectorsDir: string | undefined;
+  let temporaryVectors: Awaited<ReturnType<typeof lancedb.connect>> | undefined;
   let app: ElectronApplication | undefined;
   try {
     const bootstrap = await launchWithUserData(userDataDir);
     const project = await bootstrap.page.evaluate(() => (
       (window as unknown as { myNotebook: any }).myNotebook.projects.create({ name: "Preload RAG" })
     ));
-    const bootstrapPid = await bootstrap.app.evaluate(() => process.pid);
-    await bootstrap.app.close();
-    let bootstrapAlive = true;
-    for (let attempt = 0; attempt < 100 && bootstrapAlive; attempt++) {
-      try {
-        process.kill(bootstrapPid, 0);
-      } catch {
-        bootstrapAlive = false;
-        break;
-      }
-      await new Promise((resolve) => setTimeout(resolve, 50));
-    }
-    if (bootstrapAlive) throw new Error("bootstrap Electron: shutdown timeout");
+    await closeElectron(bootstrap.app);
 
     const database = new Database(path.join(userDataDir, "data", "app.db"));
     try {
@@ -361,7 +375,7 @@ test("preload bridge completes cited RAG with a fake OpenAI-compatible provider"
       database.close();
     }
     temporaryVectorsDir = await fs.mkdtemp(path.join(tmpdir(), "mynotebooklm-e2e-vectors-"));
-    const temporaryVectors = await lancedb.connect(temporaryVectorsDir);
+    temporaryVectors = await lancedb.connect(temporaryVectorsDir);
     await temporaryVectors.createTable(tableName, lancedb.makeArrowTable([{
       chunkId,
       projectId: project.id,
@@ -377,7 +391,8 @@ test("preload bridge completes cited RAG with a fake OpenAI-compatible provider"
     }]));
     const temporaryTable = await temporaryVectors.openTable(tableName);
     await temporaryTable.createIndex("text", { config: lancedb.Index.fts(), replace: false });
-    temporaryVectors.close();
+    await temporaryVectors.close();
+    temporaryVectors = undefined;
     await fs.mkdir(path.join(userDataDir, "vectors"), { recursive: true });
     await fs.cp(
       path.join(temporaryVectorsDir, `${tableName}.lance`),
@@ -386,26 +401,6 @@ test("preload bridge completes cited RAG with a fake OpenAI-compatible provider"
     );
     const launched = await launchWithUserData(userDataDir);
     app = launched.app;
-    await app.evaluate(({ ipcMain }, channels) => {
-      const handlers = (ipcMain as unknown as {
-        _invokeHandlers?: Map<string, (event: unknown, input: unknown) => Promise<unknown>>
-      })._invokeHandlers;
-      if (!handlers) throw new Error("Electron IPC invoke handlers unavailable");
-      for (const channel of channels) {
-        const original = handlers.get(channel);
-        if (!original) throw new Error(`Missing IPC handler: ${channel}`);
-        handlers.set(channel, async (event, input) => {
-          const value = await original(event, input);
-          if (Array.isArray(value)) {
-            return { ok: true, value: value.map((message) => ({
-              ...message,
-              replyToMessageId: message.replyToMessageId ?? null
-            })) };
-          }
-          return { ok: true, value };
-        });
-      }
-    }, ["chat:v1:create-conversation", "chat:v1:list-messages"]);
     const setup = await launched.page.evaluate(async ({ baseUrl, projectId, generationProfileId, embeddingProfileId, chunkId }) => {
       const api = (window as unknown as { myNotebook: any }).myNotebook;
       const generation = await api.models.saveProfile({
@@ -444,28 +439,74 @@ test("preload bridge completes cited RAG with a fake OpenAI-compatible provider"
       if (!conversation.ok) throw new Error(`conversation: ${conversation.error.code}`);
       const send = await api.chat.send({ projectId, conversationId: conversation.value.id, question: "What is the alpha evidence?" });
       if (!send.ok) throw new Error(`chat: ${send.error.code}`);
-      const messages = await api.conversations.listMessages({ projectId, conversationId: conversation.value.id });
-      if (!messages.ok) throw new Error(`messages: ${messages.error.code}`);
-      const assistant = messages.value.find((message: { id: string; citations: unknown[] }) => message.id === send.value.assistantMessageId);
-      if (!assistant) throw new Error("assistant message missing");
-      const citation = assistant.citations[0];
-      if (!citation) throw new Error("citation missing");
-      const opened = await api.citations.open({ projectId, citationId: citation.id });
-      if (!opened.ok) throw new Error(`citation open: ${opened.error.code}`);
-      return { assistant, citation, opened, hits: hits.value };
+      return {
+        projectId,
+        conversationId: conversation.value.id,
+        assistantMessageId: send.value.assistantMessageId,
+        hits: hits.value
+      };
     }, { baseUrl: provider.baseUrl, projectId: project.id, generationProfileId, embeddingProfileId, chunkId });
 
-    expect(provider.requests).toContain("POST /v1/embeddings");
-    expect(provider.requests).toContain("POST /v1/chat/completions");
-    expect(setup.assistant.state).toBe("completed");
+    const embeddingRequests = provider.requests.filter((request) => request.path === "/v1/embeddings");
+    expect(embeddingRequests.length).toBeGreaterThan(0);
+    expect(embeddingRequests.every((request) => request.body?.model === "text-embedding-e2e")).toBe(true);
+    const embeddingRequest = embeddingRequests.find((request) => (
+      Array.isArray(request.body?.input) && request.body.input.includes("alpha")
+    ));
+    expect(embeddingRequest).toBeDefined();
+    expect(embeddingRequest!.headers["content-type"]).toContain("application/json");
+    expect(embeddingRequest!.headers.authorization).toMatch(/^Bearer \S+$/);
+    expect(embeddingRequest!.body).toMatchObject({ model: "text-embedding-e2e" });
+    expect(embeddingRequest!.body?.input).toEqual(expect.arrayContaining(["alpha"]));
+    const chatRequests = provider.requests.filter((request) => request.path === "/v1/chat/completions");
+    expect(chatRequests.length).toBeGreaterThan(0);
+    expect(chatRequests.every((request) => request.body?.model === "gpt-e2e")).toBe(true);
+    const chatRequest = chatRequests.find((request) => (
+      Array.isArray(request.body?.messages)
+      && request.body.messages.some((message) => (
+        typeof message === "object" && message !== null
+        && "content" in message && typeof message.content === "string"
+        && message.content.includes('<evidence id="S1">')
+      ))
+    ));
+    expect(chatRequest).toBeDefined();
+    expect(chatRequest!.headers["content-type"]).toContain("application/json");
+    expect(chatRequest!.headers.authorization).toMatch(/^Bearer \S+$/);
+    expect(chatRequest!.body).toMatchObject({ model: "gpt-e2e" });
+    const chatMessages = chatRequest!.body?.messages as Array<{ role: string; content: string }>;
+    expect(chatMessages).toEqual(expect.arrayContaining([
+      expect.objectContaining({ role: "system", content: expect.stringContaining("only cite markers S1..S12") }),
+      expect.objectContaining({ role: "user", content: expect.stringContaining('<evidence id="S1">') }),
+      expect.objectContaining({ role: "user", content: expect.stringContaining("alpha evidence") })
+    ]));
     expect(setup.hits).toEqual(expect.arrayContaining([expect.objectContaining({ chunkId })]));
-    expect(setup.assistant.content).toContain("Grounded alpha answer [S1]");
-    expect(setup.citation).toMatchObject({ label: "S1", sourceDisplayName: "authoritative-alpha.txt" });
-    expect(setup.citation.locator).toMatchObject({ kind: "paragraph", start: 0, end: 45 });
-    expect(setup.opened).toMatchObject({ ok: true, value: { opened: "document" } });
+    await closeElectron(app);
+    app = undefined;
+
+    const restarted = await launchWithUserData(userDataDir);
+    app = restarted.app;
+    const persisted = await restarted.page.evaluate(async ({ projectId, conversationId, assistantMessageId }) => {
+      const api = (window as unknown as { myNotebook: any }).myNotebook;
+      const messages = await api.conversations.listMessages({ projectId, conversationId });
+      if (!messages.ok) throw new Error(`messages: ${messages.error.code}`);
+      const assistant = messages.value.find((message: { id: string; citations: unknown[] }) => message.id === assistantMessageId);
+      if (!assistant) throw new Error("assistant message missing after restart");
+      if (assistant.state !== "completed") throw new Error(`assistant state: ${assistant.state}`);
+      const citation = assistant.citations[0];
+      if (!citation) throw new Error("citation missing after restart");
+      const opened = await api.citations.open({ projectId, citationId: citation.id });
+      if (!opened.ok) throw new Error(`citation open: ${opened.error.code}`);
+      return { assistant, citation, opened };
+    }, setup);
+    expect(persisted.assistant.content).toContain("Grounded alpha answer [S1]");
+    expect(persisted.citation).toMatchObject({ label: "S1", sourceDisplayName: "authoritative-alpha.txt" });
+    expect(persisted.citation.locator).toMatchObject({ kind: "paragraph", start: 0, end: 45 });
+    expect(persisted.opened).toMatchObject({ ok: true, value: { opened: "document" } });
   } finally {
-    await app?.close();
+    if (app) await closeElectron(app);
     await provider.close();
+    await temporaryVectors?.close();
     if (temporaryVectorsDir) await fs.rm(temporaryVectorsDir, { recursive: true, force: true });
+    await fs.rm(userDataDir, { recursive: true, force: true });
   }
 });
