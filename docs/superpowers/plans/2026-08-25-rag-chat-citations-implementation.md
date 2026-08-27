@@ -110,10 +110,10 @@
 
 **Desktop API additions:** conversation CRUD/list messages, `chat.send`, `chat.stop`, `chat.regenerate`, `citations.open`; subscribe by opaque request ID to `started|retrieval|text-delta|usage|fallback|completed|cancelled|failed`.
 
-- [ ] Write failing tests for schema validation on every event, subscribing before send, event/request/project isolation, unsubscription and destroyed window cleanup.
-- [ ] Register subscriptions before provider work begins so the first event cannot race the renderer.
-- [ ] Backpressure/coalesce text deltas to no more than 30 renderer events/second while retaining byte-exact final text.
-- [ ] Run IPC/preload tests and typecheck; review and commit `feat: expose secure chat streams`.
+- [x] Write failing tests for schema validation on every event, subscribing before send, event/request/project isolation, unsubscription and destroyed window cleanup.
+- [x] Register subscriptions before provider work begins so the first event cannot race the renderer.
+- [x] Backpressure/coalesce text deltas to no more than 30 renderer events/second while retaining byte-exact final text.
+- [x] Run IPC/preload tests and typecheck; review and commit `feat: expose secure chat streams`.
 
 ## Task 7: Add Safe Markdown and Chat State Components
 
