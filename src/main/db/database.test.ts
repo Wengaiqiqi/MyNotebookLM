@@ -714,4 +714,96 @@ describe("openAppDatabase", () => {
       expect(() => db.connection.prepare("UPDATE model_artifacts SET progress_1000 = 1001 WHERE artifact_key = 'model'").run()).toThrow(/check/i);
     } finally { db.close(); }
   });
+
+  it("creates notes, transformations, insights and ordered route attempts with ownership and safety constraints", () => {
+    const db = openAppDatabase(path.join(temporaryRoot, "notes-routing.db"), path.resolve("src/main/db/migrations"));
+    try {
+      db.connection.prepare("INSERT INTO projects(id, name) VALUES (?, ?), (?, ?)").run(
+        "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "Project A",
+        "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", "Project B"
+      );
+      db.connection.prepare("INSERT INTO sources(id, project_id, kind, display_name) VALUES (?, ?, ?, ?)").run(
+        "cccccccc-cccc-4ccc-8ccc-cccccccccccc", "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "text", "Source"
+      );
+      db.connection.prepare("INSERT INTO sources(id, project_id, kind, display_name) VALUES (?, ?, ?, ?)").run(
+        "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbc", "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", "text", "Other source"
+      );
+      db.connection.prepare("INSERT INTO notes(id, project_id, title, body) VALUES (?, ?, ?, ?)").run(
+        "dddddddd-dddd-4ddd-8ddd-dddddddddddd", "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "Note", "# Markdown"
+      );
+      db.connection.prepare("UPDATE notes SET archived_at = ?, deleted_at = ? WHERE id = ?").run(
+        "2026-08-28T00:00:00.000Z", "2026-08-28T00:01:00.000Z", "dddddddd-dddd-4ddd-8ddd-dddddddddddd"
+      );
+      expect(db.connection.prepare("SELECT archived_at, deleted_at FROM notes WHERE id = ?").get("dddddddd-dddd-4ddd-8ddd-dddddddddddd")).toEqual({
+        archived_at: "2026-08-28T00:00:00.000Z", deleted_at: "2026-08-28T00:01:00.000Z"
+      });
+      expect(() => db.connection.prepare("UPDATE notes SET archived_at = '' WHERE id = ?").run("dddddddd-dddd-4ddd-8ddd-dddddddddddd")).toThrow(/check/i);
+      expect(() => db.connection.prepare("INSERT INTO notes(id, project_id, title, body) VALUES (?, ?, ?, ?)").run(
+        "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee", "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "x".repeat(201), "body"
+      )).toThrow(/check/i);
+      expect(() => db.connection.prepare("INSERT INTO notes(id, project_id, title, body) VALUES (?, ?, ?, ?)").run(
+        "ffffffff-ffff-4fff-8fff-ffffffffffff", "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "Note", "x".repeat(2 * 1024 * 1024 + 1)
+      )).toThrow(/check/i);
+      db.connection.prepare("INSERT INTO note_links(id, note_id, source_id) VALUES (?, ?, ?)").run(
+        "11111111-1111-4111-8111-111111111111", "dddddddd-dddd-4ddd-8ddd-dddddddddddd", "cccccccc-cccc-4ccc-8ccc-cccccccccccc"
+      );
+      expect(() => db.connection.prepare("UPDATE notes SET project_id = ? WHERE id = ?").run(
+        "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", "dddddddd-dddd-4ddd-8ddd-dddddddddddd"
+      )).toThrow(/ownership|link|project/i);
+      expect(() => db.connection.prepare("UPDATE sources SET project_id = ? WHERE id = ?").run(
+        "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", "cccccccc-cccc-4ccc-8ccc-cccccccccccc"
+      )).toThrow(/ownership|link|project/i);
+      expect(() => db.connection.prepare("INSERT INTO note_links(id, note_id, source_id) VALUES (?, ?, ?)").run(
+        "22222222-2222-4222-8222-222222222222", "dddddddd-dddd-4ddd-8ddd-dddddddddddd", "missing-source"
+      )).toThrow();
+      expect(() => db.connection.prepare("INSERT INTO note_links(id, note_id, source_id, message_id) VALUES (?, ?, ?, ?)").run(
+        "33333333-3333-4333-8333-333333333333", "dddddddd-dddd-4ddd-8ddd-dddddddddddd", "cccccccc-cccc-4ccc-8ccc-cccccccccccc", "missing-message"
+      )).toThrow();
+      expect(() => db.connection.prepare("INSERT INTO note_links(id, note_id, source_id) VALUES (?, ?, ?)").run(
+        "44444444-4444-4444-8444-444444444444", "dddddddd-dddd-4ddd-8ddd-dddddddddddd", "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbc"
+      )).toThrow();
+      db.connection.prepare("INSERT INTO conversations(id, project_id, title, created_at, updated_at) VALUES (?, ?, ?, ?, ?)").run(
+        "12121212-1212-4121-8121-121212121212", "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "Chat", "2026-01-01", "2026-01-01"
+      );
+      db.connection.prepare("INSERT INTO messages(id, conversation_id, sequence, role, content, state, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)").run(
+        "13131313-1313-4131-8131-131313131313", "12121212-1212-4121-8121-121212121212", 1, "user", "hi", "completed", "2026-01-01", "2026-01-01"
+      );
+      db.connection.prepare("INSERT INTO note_links(id, note_id, message_id) VALUES (?, ?, ?)").run(
+        "14141414-1414-4141-8141-141414141414", "dddddddd-dddd-4ddd-8ddd-dddddddddddd", "13131313-1313-4131-8131-131313131313"
+      );
+      expect(() => db.connection.prepare("UPDATE conversations SET project_id = ? WHERE id = ?").run(
+        "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", "12121212-1212-4121-8121-121212121212"
+      )).toThrow(/ownership|link|project/i);
+      expect(() => db.connection.prepare("INSERT INTO transformations(id, project_id, name, applies_to, prompt, version) VALUES (?, ?, ?, ?, ?, ?)").run(
+        "55555555-5555-4555-8555-555555555555", "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "Rule", "note", "{{content}}", 0
+      )).toThrow(/check/i);
+      db.connection.prepare("INSERT INTO transformations(id, project_id, name, applies_to, prompt, version) VALUES (?, ?, ?, ?, ?, ?)").run(
+        "66666666-6666-4666-8666-666666666666", "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "Rule", "note", "{{content}}", 1
+      );
+      db.connection.prepare("INSERT INTO insights(id, project_id, transformation_id, content, idempotency_key) VALUES (?, ?, ?, ?, ?)").run(
+        "77777777-7777-4777-8777-777777777777", "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "66666666-6666-4666-8666-666666666666", "Result", "same-input"
+      );
+      expect(() => db.connection.prepare("INSERT INTO insights(id, project_id, content, idempotency_key, provider) VALUES (?, ?, ?, ?, ?)").run(
+        "77777777-7777-4777-8777-777777777776", "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "Result", "bad-provider", "not-a-provider"
+      )).toThrow(/check/i);
+      expect(() => db.connection.prepare("INSERT INTO insights(id, project_id, content, idempotency_key, model) VALUES (?, ?, ?, ?, ?)").run(
+        "77777777-7777-4777-8777-777777777775", "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "Result", "bad-model", "x".repeat(201)
+      )).toThrow(/check/i);
+      expect(() => db.connection.prepare("INSERT INTO insights(id, project_id, transformation_id, content, idempotency_key) VALUES (?, ?, ?, ?, ?)").run(
+        "88888888-8888-4888-8888-888888888888", "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "66666666-6666-4666-8666-666666666666", "Result", "same-input"
+      )).toThrow(/unique/i);
+      expect(() => db.connection.prepare("INSERT INTO insights(id, project_id, transformation_id, content, idempotency_key) VALUES (?, ?, ?, ?, ?)").run(
+        "88888888-8888-4888-8888-888888888889", "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", "66666666-6666-4666-8666-666666666666", "Result", "other-project"
+      )).toThrow(/project/i);
+      const routeInsert = db.connection.prepare("INSERT INTO model_route_attempts(id, project_id, operation_id, task_kind, attempt_order, provider, model) VALUES (?, ?, ?, ?, ?, ?, ?)");
+      const routeWithOperation = db.connection.prepare("INSERT INTO model_route_attempts(id, project_id, operation_id, task_kind, attempt_order, provider, model) VALUES (?, ?, ?, ?, ?, ?, ?)");
+      routeWithOperation.run("99999999-9999-4999-8999-999999999999", "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "op-1", "summary", 0, "openai", "actual-model");
+      expect(() => routeWithOperation.run("99999999-9999-4999-8999-999999999998", "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "op-1", "summary", 0, "openai", "actual-model")).toThrow(/unique/i);
+      expect(() => routeInsert.run("99999999-9999-4999-8999-999999999997", "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "op-2", "summary", 0, "not-a-provider", "actual-model")).toThrow(/check/i);
+      expect(() => routeInsert.run("99999999-9999-4999-8999-999999999996", "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "op-3", "summary", 0, "openai", " ")).toThrow(/check/i);
+      expect(() => routeInsert.run("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaab", "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "op-4", "summary", -1, "openai", "actual-model")).toThrow(/check/i);
+      expect(() => routeInsert.run("99999999-9999-4999-8999-999999999995", "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "op-5", "summary", 0, "openai", "x".repeat(201))).toThrow(/check/i);
+      expect(db.connection.prepare("SELECT provider, model FROM model_route_attempts WHERE id = ?").get("99999999-9999-4999-8999-999999999999")).toEqual({ provider: "openai", model: "actual-model" });
+    } finally { db.close(); }
+  });
 });

@@ -1,11 +1,37 @@
 import { describe, expect, it } from "vitest";
 import { appErrorDtoSchema } from "./app-errors";
-import { modelProfileInputSchema, modelRouteDtoSchema } from "./models";
+import { modelProfileInputSchema, modelRouteAttemptDtoSchema, modelRouteDtoSchema } from "./models";
+import { createTransformationInputSchema, insightDtoSchema } from "./transformations";
 import { appSettingsDtoSchema } from "./settings";
 import { sourceDtoSchema, sourceLocatorSchema } from "./sources";
 import { taskDtoSchema } from "./tasks";
 
 describe("shared DTO schemas", () => {
+  it("accepts only exact transformation placeholders", () => {
+    const base = { projectId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", name: "Rule", appliesTo: "note" as const };
+    for (const prompt of ["Use {{content}} from {{source_title}}", "{{project_name}} / {{language}}"])
+      expect(createTransformationInputSchema.safeParse({ ...base, prompt }).success).toBe(true);
+    for (const prompt of ["{{unknown}}", "{{ content }}", "{{#if content}}{{content}}{{/if}}", "${content}", "<% content %>", "{% if content %}", "{{content"])
+      expect(createTransformationInputSchema.safeParse({ ...base, prompt }).success).toBe(false);
+  });
+
+  it("requires an operation id for route attempts", () => {
+    expect(modelRouteAttemptDtoSchema.safeParse({
+      id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", projectId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+      operationId: null, taskKind: "summary", attemptOrder: 0, profileId: null, provider: "openai", model: "model",
+      state: "started", errorCode: null, latencyMs: null, startedAt: "2026-01-01T00:00:00.000Z", completedAt: null,
+      finishedAt: null, createdAt: "2026-01-01T00:00:00.000Z"
+    }).success).toBe(false);
+  });
+
+  it("rejects insight DTO models longer than 200 characters", () => {
+    expect(insightDtoSchema.safeParse({
+      id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", projectId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+      transformationId: null, taskId: null, inputKind: null, inputHash: null, ruleVersion: null, content: "result",
+      provider: "openai", model: "x".repeat(201), profileId: null, usage: null, idempotencyKey: "key",
+      createdAt: "2026-01-01T00:00:00.000Z", updatedAt: "2026-01-01T00:00:00.000Z"
+    }).success).toBe(false);
+  });
   it("rejects unknown model fields", () => {
     expect(() => modelProfileInputSchema.parse({
       id: "11111111-1111-4111-8111-111111111111",

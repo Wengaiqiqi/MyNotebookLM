@@ -24,7 +24,7 @@
 ## Task 1: Add Notes, Transformation, Insight and Route Attempt Schema
 
 **Files:**
-- Create: `src/main/db/migrations/006_notes_insights_routing.sql`
+- Create: `src/main/db/migrations/010_notes_insights_routing.sql`
 - Create: `src/shared/notes.ts`
 - Create: `src/shared/transformations.ts`
 - Modify: `src/shared/models.ts`
@@ -32,9 +32,11 @@
 
 **Tables:** `notes`, `note_links`, `transformations`, `insights`, `model_route_attempts`; links target source/message/citation through typed nullable foreign IDs with one-target check.
 
-- [ ] Write failing migration tests for project ownership, Markdown length, archive/delete state, rule version, unique idempotency key, route attempt order and actual provider/model fields.
-- [ ] Define Zod DTOs and command schemas with explicit maximums: title 200 chars, note body 2 MiB, rule name 100, prompt 20 KiB.
-- [ ] Run migration tests and typecheck; review and commit `feat: add notes insights and routing schema`.
+- [x] Write failing migration tests for project ownership, Markdown length, archive/delete state, rule version, unique idempotency key, route attempt order and actual provider/model fields.
+- [x] Define Zod DTOs and command schemas with explicit maximums: title 200 chars, note body 2 MiB, rule name 100, prompt 20 KiB.
+- [x] Run migration tests and typecheck; review and commit `feat: add notes insights and routing schema`.
+
+Evidence (2026-08-28): RED failed with `no such table: notes`; post-review fixes added failing boundary tests for placeholders, route ordering, ownership and schema limits. GREEN: database + strict schemas 33/33, full suite 744/744, typecheck passed; independent fix re-review PASS.
 
 ## Task 2: Implement Note CRUD and Links
 

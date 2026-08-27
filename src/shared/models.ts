@@ -78,6 +78,25 @@ export const modelRouteDtoSchema = z.object({
   profileId: z.uuid()
 }).strict();
 
+export const modelRouteAttemptStateSchema = z.enum(["started", "completed", "failed", "cancelled"]);
+export const modelRouteAttemptDtoSchema = z.object({
+  id: z.uuid(),
+  projectId: z.uuid(),
+  operationId: z.string().trim().min(1),
+  taskKind: modelTaskKindSchema,
+  attemptOrder: z.number().int().nonnegative(),
+  profileId: z.uuid().nullable(),
+  provider: providerKindSchema,
+  model: z.string().trim().min(1).max(200),
+  state: modelRouteAttemptStateSchema,
+  errorCode: z.string().trim().min(1).nullable(),
+  latencyMs: z.number().int().nonnegative().nullable(),
+  startedAt: z.iso.datetime(),
+  completedAt: z.iso.datetime().nullable(),
+  finishedAt: z.iso.datetime().nullable(),
+  createdAt: z.iso.datetime()
+}).strict();
+
 export const defaultModelRoutesDtoSchema = z.object({
   generationProfileId: z.uuid().optional(),
   embeddingProfileId: z.uuid().optional()
@@ -211,6 +230,8 @@ export type EmbeddingMetadata = Readonly<z.infer<typeof embeddingMetadataSchema>
 export type ModelProfileInput = z.infer<typeof modelProfileInputSchema>;
 export type ModelProfileDto = z.infer<typeof modelProfileDtoSchema>;
 export type ModelRouteDto = z.infer<typeof modelRouteDtoSchema>;
+export type ModelRouteAttemptState = z.infer<typeof modelRouteAttemptStateSchema>;
+export type ModelRouteAttemptDto = z.infer<typeof modelRouteAttemptDtoSchema>;
 export type DefaultModelRoutesDto = z.infer<typeof defaultModelRoutesDtoSchema>;
 export type SetDefaultModelRoutesInput = z.infer<typeof setDefaultModelRoutesInputSchema>;
 export type ModelDescriptorDto = z.infer<typeof modelDescriptorSchema>;
