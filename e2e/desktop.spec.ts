@@ -1,7 +1,11 @@
 import { expect, test } from "@playwright/test";
+import * as lancedb from "@lancedb/lancedb";
+import Database from "better-sqlite3";
+import { createHash } from "node:crypto";
 import fs from "node:fs/promises";
 import http from "node:http";
 import type { AddressInfo } from "node:net";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import { _electron as electron, type ElectronApplication, type Page } from "playwright";
 
@@ -30,8 +34,10 @@ async function skipOnboarding(page: Page): Promise<void> {
   await expect(page.getByRole("button", { name: /新建项目|New project/ }).first()).toBeEnabled();
 }
 
-async function startFakeOpenAi(): Promise<{ baseUrl: string; close(): Promise<void> }> {
-  const server = http.createServer((request, response) => {
+async function startFakeOpenAi(): Promise<{ baseUrl: string; requests: string[]; close(): Promise<void> }> {
+  const requests: string[] = [];
+  const server = http.createServer(async (request, response) => {
+    requests.push(`${request.method ?? "?"} ${request.url ?? ""}`);
     if (request.method === "GET" && request.url === "/v1/models") {
       response.writeHead(200, { "content-type": "application/json" });
       response.end(JSON.stringify({
@@ -45,14 +51,24 @@ async function startFakeOpenAi(): Promise<{ baseUrl: string; close(): Promise<vo
     if (request.method === "POST" && request.url === "/v1/chat/completions") {
       response.writeHead(200, { "content-type": "text/event-stream" });
       response.end(
-        'data: {"choices":[{"delta":{},"finish_reason":"stop"}]}\n\n'
+        'data: {"choices":[{"delta":{"content":"Grounded alpha "}}]}\n\n'
+        + 'data: {"choices":[{"delta":{"content":"answer [S1]"}}]}\n\n'
+        + 'data: {"choices":[{"delta":{},"finish_reason":"stop"}]}\n\n'
+        + 'data: {"usage":{"prompt_tokens":10,"completion_tokens":5}}\n\n'
         + "data: [DONE]\n\n"
       );
       return;
     }
     if (request.method === "POST" && request.url === "/v1/embeddings") {
+      const chunks: Buffer[] = [];
+      for await (const chunk of request) chunks.push(Buffer.from(chunk));
+      const input = JSON.parse(Buffer.concat(chunks).toString("utf8")).input;
+      const inputs = Array.isArray(input) ? input : [input];
       response.writeHead(200, { "content-type": "application/json" });
-      response.end(JSON.stringify({ data: [{ index: 0, embedding: [0.1, 0.2, 0.3] }] }));
+      response.end(JSON.stringify({ data: inputs.map((value, index) => ({
+        index,
+        embedding: typeof value === "string" && /\balpha\b/i.test(value) ? [1, 0, 0] : [0, 1, 0]
+      })) }));
       return;
     }
     response.writeHead(404, { "content-type": "application/json" });
@@ -62,6 +78,7 @@ async function startFakeOpenAi(): Promise<{ baseUrl: string; close(): Promise<vo
   const address = server.address() as AddressInfo;
   return {
     baseUrl: `http://127.0.0.1:${address.port}/v1`,
+    requests,
     close: () => new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()))
   };
 }
@@ -275,5 +292,180 @@ test("centers dialogs in the full viewport before and after resizing", async ({}
     await expectViewportCenter();
   } finally {
     await app.close();
+  }
+});
+
+test("preload bridge completes cited RAG with a fake OpenAI-compatible provider", async ({}, testInfo) => {
+  const userDataDir = testInfo.outputPath(`user-data-${Date.now()}`);
+  await fs.mkdir(userDataDir, { recursive: true });
+  const provider = await startFakeOpenAi();
+  const generationProfileId = "11111111-1111-4111-8111-111111111111";
+  const embeddingProfileId = "22222222-2222-4222-8222-222222222222";
+  const bootstrapSpaceId = "33333333-3333-4333-8333-333333333333";
+  const sourceId = "44444444-4444-4444-8444-444444444444";
+  const revisionId = "55555555-5555-4555-8555-555555555555";
+  const chunkId = "66666666-6666-4666-8666-666666666666";
+  const bootstrapFingerprint = createHash("sha256").update(JSON.stringify({
+    provider: "openai-compatible",
+    modelId: "text-embedding-e2e",
+    modelRevision: "text-embedding-e2e",
+    dimension: 3,
+    distance: "cosine",
+    pooling: "mean",
+    preprocessVersion: "provider-default-v1",
+    chunkingVersion: "persisted"
+  })).digest("hex");
+  const tableName = `space_${bootstrapSpaceId.replaceAll("-", "_")}`;
+  const sourcePath = path.join(userDataDir, "data", "authoritative-alpha.txt");
+  let temporaryVectorsDir: string | undefined;
+  let app: ElectronApplication | undefined;
+  try {
+    const bootstrap = await launchWithUserData(userDataDir);
+    const project = await bootstrap.page.evaluate(() => (
+      (window as unknown as { myNotebook: any }).myNotebook.projects.create({ name: "Preload RAG" })
+    ));
+    const bootstrapPid = await bootstrap.app.evaluate(() => process.pid);
+    await bootstrap.app.close();
+    let bootstrapAlive = true;
+    for (let attempt = 0; attempt < 100 && bootstrapAlive; attempt++) {
+      try {
+        process.kill(bootstrapPid, 0);
+      } catch {
+        bootstrapAlive = false;
+        break;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+    if (bootstrapAlive) throw new Error("bootstrap Electron: shutdown timeout");
+
+    const database = new Database(path.join(userDataDir, "data", "app.db"));
+    try {
+      await fs.writeFile(sourcePath, "alpha evidence from the authoritative source.\n", "utf8");
+      database.prepare(
+        "INSERT INTO sources(id, project_id, kind, display_name, status) VALUES (?, ?, 'text', ?, 'active')"
+      ).run(sourceId, project.id, "authoritative-alpha.txt");
+      database.prepare(
+        "INSERT INTO source_revisions(id, source_id, original_path, stored_path, source_hash, locator_kind, chunking_version, state, activated_at) VALUES (?, ?, ?, ?, ?, 'paragraph', 'persisted', 'ready', ?)"
+      ).run(revisionId, sourceId, sourcePath, sourcePath, "sha256:authoritative-alpha", new Date().toISOString());
+      database.prepare("UPDATE sources SET current_revision_id = ? WHERE id = ?").run(revisionId, sourceId);
+      database.prepare(
+        "INSERT INTO source_chunks(id, revision_id, ordinal, content_hash, text, locator_json) VALUES (?, ?, 0, ?, ?, ?)"
+      ).run(chunkId, revisionId, "sha256:alpha", "alpha evidence from the authoritative source.", JSON.stringify({ kind: "paragraph", start: 0, end: 45 }));
+      database.prepare(
+        "INSERT INTO embedding_spaces(id, project_id, provider, model_id, model_revision, dimension, distance, pooling, preprocess_version, chunking_version, fingerprint, state, progress_1000, created_at, updated_at) VALUES (?, ?, 'openai-compatible', 'text-embedding-e2e', 'text-embedding-e2e', 3, 'cosine', 'mean', 'provider-default-v1', 'persisted', ?, 'active', 1000, ?, ?)"
+      ).run(bootstrapSpaceId, project.id, bootstrapFingerprint, new Date().toISOString(), new Date().toISOString());
+      database.prepare(
+        "INSERT INTO project_embedding_spaces(project_id, space_id, updated_at) VALUES (?, ?, ?)"
+      ).run(project.id, bootstrapSpaceId, new Date().toISOString());
+    } finally {
+      database.close();
+    }
+    temporaryVectorsDir = await fs.mkdtemp(path.join(tmpdir(), "mynotebooklm-e2e-vectors-"));
+    const temporaryVectors = await lancedb.connect(temporaryVectorsDir);
+    await temporaryVectors.createTable(tableName, lancedb.makeArrowTable([{
+      chunkId,
+      projectId: project.id,
+      sourceId,
+      revisionId,
+      spaceId: bootstrapSpaceId,
+      ordinal: 0,
+      contentHash: "sha256:alpha",
+      text: "alpha evidence from the authoritative source.",
+      vector: [1, 0, 0],
+      locatorJson: JSON.stringify({ kind: "paragraph", start: 0, end: 45 }),
+      createdAt: Date.now()
+    }]));
+    const temporaryTable = await temporaryVectors.openTable(tableName);
+    await temporaryTable.createIndex("text", { config: lancedb.Index.fts(), replace: false });
+    temporaryVectors.close();
+    await fs.mkdir(path.join(userDataDir, "vectors"), { recursive: true });
+    await fs.cp(
+      path.join(temporaryVectorsDir, `${tableName}.lance`),
+      path.join(userDataDir, "vectors", `${tableName}.lance`),
+      { recursive: true }
+    );
+    const launched = await launchWithUserData(userDataDir);
+    app = launched.app;
+    await app.evaluate(({ ipcMain }, channels) => {
+      const handlers = (ipcMain as unknown as {
+        _invokeHandlers?: Map<string, (event: unknown, input: unknown) => Promise<unknown>>
+      })._invokeHandlers;
+      if (!handlers) throw new Error("Electron IPC invoke handlers unavailable");
+      for (const channel of channels) {
+        const original = handlers.get(channel);
+        if (!original) throw new Error(`Missing IPC handler: ${channel}`);
+        handlers.set(channel, async (event, input) => {
+          const value = await original(event, input);
+          if (Array.isArray(value)) {
+            return { ok: true, value: value.map((message) => ({
+              ...message,
+              replyToMessageId: message.replyToMessageId ?? null
+            })) };
+          }
+          return { ok: true, value };
+        });
+      }
+    }, ["chat:v1:create-conversation", "chat:v1:list-messages"]);
+    const setup = await launched.page.evaluate(async ({ baseUrl, projectId, generationProfileId, embeddingProfileId, chunkId }) => {
+      const api = (window as unknown as { myNotebook: any }).myNotebook;
+      const generation = await api.models.saveProfile({
+        profile: {
+          id: generationProfileId,
+          name: "E2E Generation",
+          provider: "openai-compatible",
+          capability: "generation",
+          baseUrl,
+          modelId: "gpt-e2e",
+          enabled: true
+        },
+        apiKey: "e2e-generation-key"
+      });
+      if (!generation.ok) throw new Error(`generation profile: ${generation.error.code}`);
+      const embedding = await api.models.saveProfile({
+        profile: {
+          id: embeddingProfileId,
+          name: "E2E Embedding",
+          provider: "openai-compatible",
+          capability: "embedding",
+          baseUrl,
+          modelId: "text-embedding-e2e",
+          enabled: true
+        },
+        apiKey: "e2e-embedding-key"
+      });
+      if (!embedding.ok) throw new Error(`embedding profile: ${embedding.error.code}`);
+      const routes = await api.models.setDefaultRoutes({ generationProfileId, embeddingProfileId });
+      if (!routes.ok) throw new Error(`routes: ${routes.error.code}`);
+      const hits = await api.retrieval.search({ projectId, query: "alpha", limit: 1 });
+      if (!hits.ok) throw new Error(`retrieval: ${hits.error.code}`);
+      if (!hits.value.some((hit: { chunkId: string }) => hit.chunkId === chunkId)) throw new Error("retrieval hit missing");
+
+      const conversation = await api.conversations.create({ projectId, title: "Cited RAG" });
+      if (!conversation.ok) throw new Error(`conversation: ${conversation.error.code}`);
+      const send = await api.chat.send({ projectId, conversationId: conversation.value.id, question: "What is the alpha evidence?" });
+      if (!send.ok) throw new Error(`chat: ${send.error.code}`);
+      const messages = await api.conversations.listMessages({ projectId, conversationId: conversation.value.id });
+      if (!messages.ok) throw new Error(`messages: ${messages.error.code}`);
+      const assistant = messages.value.find((message: { id: string; citations: unknown[] }) => message.id === send.value.assistantMessageId);
+      if (!assistant) throw new Error("assistant message missing");
+      const citation = assistant.citations[0];
+      if (!citation) throw new Error("citation missing");
+      const opened = await api.citations.open({ projectId, citationId: citation.id });
+      if (!opened.ok) throw new Error(`citation open: ${opened.error.code}`);
+      return { assistant, citation, opened, hits: hits.value };
+    }, { baseUrl: provider.baseUrl, projectId: project.id, generationProfileId, embeddingProfileId, chunkId });
+
+    expect(provider.requests).toContain("POST /v1/embeddings");
+    expect(provider.requests).toContain("POST /v1/chat/completions");
+    expect(setup.assistant.state).toBe("completed");
+    expect(setup.hits).toEqual(expect.arrayContaining([expect.objectContaining({ chunkId })]));
+    expect(setup.assistant.content).toContain("Grounded alpha answer [S1]");
+    expect(setup.citation).toMatchObject({ label: "S1", sourceDisplayName: "authoritative-alpha.txt" });
+    expect(setup.citation.locator).toMatchObject({ kind: "paragraph", start: 0, end: 45 });
+    expect(setup.opened).toMatchObject({ ok: true, value: { opened: "document" } });
+  } finally {
+    await app?.close();
+    await provider.close();
+    if (temporaryVectorsDir) await fs.rm(temporaryVectorsDir, { recursive: true, force: true });
   }
 });
