@@ -46,10 +46,12 @@ Evidence (2026-08-28): RED failed with `no such table: notes`; post-review fixes
 - Create: `src/main/notes/note-service.ts`
 - Create: `src/main/notes/note-service.test.ts`
 
-- [ ] Write failing tests for create/edit/list/archive/restore/delete, optimistic version conflict, project isolation and valid/invalid links to sources, messages and citations.
-- [ ] Implement repository transactions and service validation; normalize line endings but preserve Markdown content.
-- [ ] Deleting/archiving a linked source does not delete the note; link DTO reports target unavailable.
-- [ ] Run focused tests; review and commit `feat: add persistent linked notes`.
+- [x] Write failing tests for create/edit/list/archive/restore/delete, optimistic version conflict, project isolation and valid/invalid links to sources, messages and citations.
+- [x] Implement repository transactions and service validation; normalize line endings but preserve Markdown content.
+- [x] Deleting/archiving a linked source does not delete the note; link DTO reports target unavailable.
+- [x] Run focused tests; review and commit `feat: add persistent linked notes`.
+
+Evidence (2026-08-28): RED began with missing repository/service modules; review fixes added failing tests for state CAS, strict list commands, link error classes, deleted-note isolation and repeated transitions. GREEN: note + strict schema tests 16/16, full suite 752/752, typecheck passed; independent fix re-review PASS.
 
 ## Task 3: Implement Model Route Resolution
 

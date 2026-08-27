@@ -5,6 +5,7 @@ import { createTransformationInputSchema, insightDtoSchema } from "./transformat
 import { appSettingsDtoSchema } from "./settings";
 import { sourceDtoSchema, sourceLocatorSchema } from "./sources";
 import { taskDtoSchema } from "./tasks";
+import { listNotesInputSchema } from "./notes";
 
 describe("shared DTO schemas", () => {
   it("accepts only exact transformation placeholders", () => {
@@ -97,6 +98,10 @@ describe("shared DTO schemas", () => {
       updatedAt: "2026-01-01T00:00:00.000Z",
       unexpected: true
     })).toThrow();
+  });
+
+  it("rejects unknown note list fields", () => {
+    expect(() => listNotesInputSchema.parse({ projectId: "11111111-1111-4111-8111-111111111111", unexpected: true })).toThrow();
   });
 
   it("validates normalized source locators", () => {

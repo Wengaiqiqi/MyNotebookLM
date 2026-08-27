@@ -32,6 +32,8 @@ export const updateNoteInputSchema = z.object({
   version: z.number().int().positive()
 }).strict();
 export const noteIdInputSchema = z.object({ projectId: z.uuid(), id: z.uuid() }).strict();
+export const listNotesInputSchema = z.object({ projectId: z.uuid(), includeArchived: z.boolean().optional() }).strict();
+export const noteStateInputSchema = z.object({ projectId: z.uuid(), id: z.uuid(), version: z.number().int().positive() }).strict();
 
 const noteLinkTargetSchema = z.object({
   sourceId: z.uuid().nullable().optional(),
@@ -48,6 +50,7 @@ export const noteLinkDtoSchema = z.object({
   sourceId: z.uuid().nullable(),
   messageId: z.uuid().nullable(),
   citationId: z.uuid().nullable(),
+  targetAvailable: z.boolean(),
   createdAt: z.iso.datetime()
 }).strict();
 export const createNoteLinkInputSchema = z.object({
@@ -64,6 +67,7 @@ export type NoteDto = z.infer<typeof noteDtoSchema>;
 export type CreateNoteInput = z.infer<typeof createNoteInputSchema>;
 export type UpdateNoteInput = z.infer<typeof updateNoteInputSchema>;
 export type NoteIdInput = z.infer<typeof noteIdInputSchema>;
+export type NoteStateInput = z.infer<typeof noteStateInputSchema>;
 export type NoteLinkDto = z.infer<typeof noteLinkDtoSchema>;
 export type CreateNoteLinkInput = z.infer<typeof createNoteLinkInputSchema>;
 export type DeleteNoteLinkInput = z.infer<typeof deleteNoteLinkInputSchema>;
