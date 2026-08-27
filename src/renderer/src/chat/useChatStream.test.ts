@@ -81,6 +81,27 @@ afterEach(() => {
 });
 
 describe("useChatStream", () => {
+  it("optimistically shows the sent question as a user message right after send", async () => {
+    const h = createApi();
+    h.send.mockResolvedValue(makeOk(REQUEST_ID, MESSAGE_ID));
+    const { result } = renderHook(() => useChatStream(h.api.chat, PROJECT_ID, CONVERSATION_ID, []));
+
+    await act(async () => {
+      await result.current.send("What does the report say?");
+    });
+
+    const users = result.current.messages.filter((m) => m.role === "user");
+    expect(users.length).toBe(1);
+    expect(users[0]?.content).toBe("What does the report say?");
+    expect(result.current.messages.at(-1)?.role).toBe("assistant");
+
+    // Terminal reconciliation drops the temporary user row once the persisted
+    // transcript arrives via completed, keeping exactly one copy.
+    await emitAsync(h, REQUEST_ID, { type: "completed", requestId: REQUEST_ID, messageId: MESSAGE_ID, message: makeMessage({}) });
+    expect(result.current.messages.filter((m) => m.role === "user").length).toBe(0);
+    expect(result.current.messages.length).toBe(1);
+  });
+
   it("sends a question and renders live text deltas into streaming state", async () => {
     const h = createApi();
     h.send.mockResolvedValue({ ok: true as const, value: { requestId: REQUEST_ID, assistantMessageId: MESSAGE_ID } });
@@ -92,20 +113,20 @@ describe("useChatStream", () => {
     });
     expect(h.send).toHaveBeenCalledWith({ projectId: PROJECT_ID, conversationId: CONVERSATION_ID, question: "What does the report say?" });
     expect(result.current.streamingMessageId).toBe(MESSAGE_ID);
-    expect(result.current.messages.map((m) => m.content)).toEqual(["Q?", ""]);
+    expect(result.current.messages.map((m) => m.content)).toEqual(["Q?", "What does the report say?", ""]);
 
     await emitAsync(h, REQUEST_ID, { type: "started", requestId: REQUEST_ID, messageId: MESSAGE_ID });
     await emitAsync(h, REQUEST_ID, { type: "text-delta", requestId: REQUEST_ID, messageId: MESSAGE_ID, text: "The repo" });
     await emitAsync(h, REQUEST_ID, { type: "text-delta", requestId: REQUEST_ID, messageId: MESSAGE_ID, text: "rt says yes." });
-    expect(result.current.messages[1]?.content).toBe("The report says yes.");
+    expect(result.current.messages.at(-1)?.content).toBe("The report says yes.");
     expect(result.current.state).toBe("streaming");
     expect(result.current.error).toBeNull();
 
     await emitAsync(h, REQUEST_ID, { type: "completed", requestId: REQUEST_ID, messageId: MESSAGE_ID, message: makeMessage({ content: "The report says yes. [S1]" }) });
     expect(result.current.state).toBe("idle");
     expect(result.current.streamingMessageId).toBeNull();
-    expect(result.current.messages[1]?.state).toBe("completed");
-    expect(result.current.messages[1]?.content).toBe("The report says yes. [S1]");
+    expect(result.current.messages.at(-1)?.state).toBe("completed");
+    expect(result.current.messages.at(-1)?.content).toBe("The report says yes. [S1]");
   });
 
   it("stops an in-flight request and keeps partial text with cancelled state", async () => {
@@ -224,5 +245,17 @@ describe("useChatStream", () => {
     expect(result.current.state).toBe("failed");
     expect(result.current.error?.code).toBe("CONFLICT");
     expect(result.current.messages.filter((m) => m.role === "assistant").length).toBe(0);
+  });
+
+  it("maps an unexpected IPC throw to failed state with an error instead of staying silent", async () => {
+    const h = createApi();
+    h.send.mockRejectedValue(new Error("ipc bridge crashed"));
+    const { result } = renderHook(() => useChatStream(h.api.chat, PROJECT_ID, CONVERSATION_ID, []));
+    await act(async () => {
+      const ok = await result.current.send("q");
+      expect(ok).toBe(false);
+    });
+    expect(result.current.state).toBe("failed");
+    expect(result.current.error).not.toBeNull();
   });
 });

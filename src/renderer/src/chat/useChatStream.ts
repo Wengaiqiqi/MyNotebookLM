@@ -39,6 +39,9 @@ export function useChatStream(
   const [state, setState] = useState<ChatStreamState>("idle");
   const [error, setError] = useState<AppErrorDto | null>(null);
   const [repairableMessageId, setRepairableMessageId] = useState<string | null>(null);
+  // Optimistic user rows are keyed by request id so the completed reconciliation
+  // can drop them once the persisted transcript arrives, preventing duplicates.
+  const optimisticUserRef = useRef<Map<string, string>>(new Map());
   // Live turn info in a ref so the event sink never goes stale mid-stream.
   const turnRef = useRef<{ requestId: string } | null>(null);
   const unsubscribeRef = useRef<(() => void) | null>(null);
@@ -71,7 +74,15 @@ export function useChatStream(
         setMessages((prev) => prev.map((m) => (m.id === event.messageId ? { ...m, content: m.content + event.text } : m)));
         break;
       case "completed":
-        setMessages((prev) => prev.map((m) => (m.id === event.message.id ? event.message : m)));
+        setMessages((prev) => {
+          const optimisticUserId = optimisticUserRef.current.get(event.requestId);
+          if (optimisticUserId !== undefined) {
+            return prev
+              .filter((m) => m.id !== optimisticUserId)
+              .map((m) => (m.id === event.message.id ? event.message : m));
+          }
+          return prev.map((m) => (m.id === event.message.id ? event.message : m));
+        });
         setState("idle");
         setError(null);
         setRepairableMessageId(null);
@@ -154,6 +165,12 @@ export function useChatStream(
       return true;
     } catch {
       teardown();
+      setState("failed");
+      setError({
+        code: "INTERNAL",
+        messageKey: "errors.internal",
+        recoverable: true
+      });
       return false;
     }
   }, [chat, applyEvent, teardown, conversationId]);
@@ -161,9 +178,34 @@ export function useChatStream(
   const send = useCallback((question: string): Promise<boolean> => {
     setError(null);
     setRepairableMessageId(null);
-    // Main persists the user message with the assistant draft; delta events drive
-    // the visible draft so no optimistic assistant row is invented here.
-    return runTurn(() => chat.send({ projectId, conversationId, question }));
+    const localUserMessage = {
+      id: "local-user-" + Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 8),
+      conversationId,
+      sequence: Number.MAX_SAFE_INTEGER,
+      role: "user" as const,
+      content: question,
+      state: "completed" as const,
+      replyToMessageId: null,
+      supersedesMessageId: null,
+      superseded: false,
+      provider: null,
+      profileId: null,
+      model: null,
+      usage: null,
+      errorCode: null,
+      completionReason: null,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      citations: []
+    };
+    setMessages((prev) => [...prev, localUserMessage]);
+    return runTurn(async () => {
+      const result = await chat.send({ projectId, conversationId, question });
+      if (result.ok && result.value.requestId !== "") {
+        optimisticUserRef.current.set(result.value.requestId, localUserMessage.id);
+      }
+      return result;
+    });
   }, [runTurn, chat, projectId, conversationId]);
 
   const regenerate = useCallback((messageId: string): Promise<boolean> => {

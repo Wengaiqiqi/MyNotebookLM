@@ -103,6 +103,18 @@ const en = {
     archiveProject: "Could not archive the project.",
     removeProject: "Could not delete the project."
   },
+  chat: {
+    message: {
+      streaming: "Answering…",
+      completed: "Answered",
+      cancelled: "Stopped.",
+      failed: "The answer failed."
+    },
+    repair: {
+      retry: "Retry answer",
+      repair: "Repair answer"
+    }
+  },
   research: {
     workspaceTitle: "Bring in sources to begin your research",
     importSources: "Import sources",

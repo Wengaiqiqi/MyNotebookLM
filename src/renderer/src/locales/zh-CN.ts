@@ -103,6 +103,18 @@ const zhCN = {
     archiveProject: "无法归档项目。",
     removeProject: "无法删除项目。"
   },
+  chat: {
+    message: {
+      streaming: "回答中…",
+      completed: "已回答",
+      cancelled: "已停止。",
+      failed: "回答失败。"
+    },
+    repair: {
+      retry: "重试回答",
+      repair: "修复回答"
+    }
+  },
   research: {
     workspaceTitle: "导入资料，开始你的研究",
     importSources: "导入资料",

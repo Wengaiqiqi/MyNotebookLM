@@ -17,8 +17,13 @@ const ALLOWED_TAGS = [
 ];
 const ALLOWED_ATTR = ["href"];
 const FORBID_TAGS = ["img", "script", "style", "iframe", "object", "embed"];
+// Module-level single registration so streaming renders never accumulate
+// duplicate afterSanitizeAttributes hooks on the shared DOMPurify instance.
+let linkHardeningRegistered = false;
 
-function addLinkHardening(): void {
+function ensureLinkHardening(): void {
+  if (linkHardeningRegistered) return;
+  linkHardeningRegistered = true;
   DOMPurify.addHook("afterSanitizeAttributes", (node) => {
     if (node instanceof Element && node.tagName === "A" && node.hasAttribute("href")) {
       node.setAttribute("target", "_blank");
@@ -31,14 +36,14 @@ marked.setOptions({ async: false });
 
 /** Render Markdown to sanitized HTML; raw HTML is escaped, not executed. */
 export function renderSafeMarkdown(text: string): string {
-  addLinkHardening();
+  ensureLinkHardening();
   // Marked 18 has no sanitizer left; escape every raw '<' before parsing so
   // HTML/script markup stays inert literal text while Markdown syntax
   // (blockquotes use '>', code, tables) keeps working. DOMPurify then runs an
   // explicit allowlist over the generated tree as defense in depth.
   const neutralized = text.replace(/</g, "&lt;");
   const parsed = marked.parse(neutralized, { async: false });
-  return DOMPurify.sanitize(parsed, { ALLOWED_TAGS, FORBID_TAGS });
+  return DOMPurify.sanitize(parsed, { ALLOWED_TAGS, ALLOWED_ATTR, FORBID_TAGS });
 }
 
 type Piece = string | CitationDto;

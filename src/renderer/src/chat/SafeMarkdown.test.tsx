@@ -1,9 +1,10 @@
 // @vitest-environment jsdom
 
 import * as React from "react";
+import DOMPurify from "dompurify";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { CitationDto, MessageDto } from "../../../shared/chat";
 import { citationSchema, messageStateSchema } from "../../../shared/chat";
 import SafeMarkdown, { AssistantMessageView } from "./SafeMarkdown";
@@ -169,6 +170,23 @@ describe("SafeMarkdown sanitization", () => {
 });
 
 describe("AssistantMessageView", () => {
+  it("keeps safe link href by passing the explicit attribute allowlist to sanitize", async () => {
+    const container = await render(
+      <SafeMarkdown text={"[docs](https://example.com/docs) and ![img](https://cdn.example/x.png)"} citations={[]} />
+    );
+    // ALLOWED_ATTR = ["href"] must actually reach DOMPurify: link href survives.
+    expect(container.querySelector("a")?.getAttribute("href")).toBe("https://example.com/docs");
+    expect(container.querySelector("a")?.getAttributeNames()).toEqual(["href", "target", "rel"]);
+  });
+
+  it("registers the link-hardening hook once instead of accumulating per render", async () => {
+    const addHookSpy = vi.spyOn(DOMPurify, "addHook");
+    for (let i = 0; i < 3; i += 1) {
+      await render(<SafeMarkdown text="[x](https://example.com)" citations={[]} />);
+    }
+    expect(addHookSpy).not.toHaveBeenCalled();
+  });
+
   it("shows failed state preserving partial content and exposes repair action", async () => {
     let repairs = 0;
     const container = await render(
