@@ -123,11 +123,11 @@
 - Create: `src/renderer/src/chat/useChatStream.ts`
 - Create: `src/renderer/src/chat/useChatStream.test.ts`
 
-- [ ] Write failing tests proving scripts, raw HTML, javascript/data links, remote images and inline handlers are stripped; code/lists/tables and safe HTTP links remain.
-- [ ] Configure Marked with raw HTML disabled/escaped and DOMPurify with an explicit tag/attribute allowlist; render citations as buttons only when matching structured citation DTOs.
-- [ ] Write hook tests for send, live deltas, stop, failure repair, restart hydration, regenerate and subscription cleanup.
-- [ ] Implement functional state components without final styling. Plan 6 applies the user-approved visual.
-- [ ] Run focused component tests; review and commit `feat: add safe streaming chat components`.
+- [x] Write failing tests proving scripts, raw HTML, javascript/data links, remote images and inline handlers are stripped; code/lists/tables and safe HTTP links remain.
+- [x] Configure Marked with raw HTML disabled/escaped and DOMPurify with an explicit tag/attribute allowlist; render citations as buttons only when matching structured citation DTOs.
+- [x] Write hook tests for send, live deltas, stop, failure repair, restart hydration, regenerate and subscription cleanup.
+- [x] Implement functional state components without final styling. Plan 6 applies the user-approved visual.
+- [x] Run focused component tests; review and commit `feat: add safe streaming chat components`.
 
 ## Task 8: Complete RAG Integration Evidence
 
