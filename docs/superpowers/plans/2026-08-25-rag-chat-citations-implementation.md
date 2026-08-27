@@ -135,11 +135,11 @@
 - Create: `src/main/chat/rag-integration.test.ts`
 - Modify: `e2e/desktop.spec.ts`
 
-- [ ] Add an integration test: indexed fixtures -> deterministic query embedding -> ANN/BM25/RRF -> prompt -> fake provider streaming citations -> persisted completed message -> citation open lookup.
-- [ ] Add cancellation, no-evidence, invalid citation and regenerate variants.
-- [ ] Add an Electron E2E through the preload bridge using fake providers; do not freeze final chat styling before Plan 6 approval.
-- [ ] Run all chat/retrieval tests, full suite, typecheck and build; run Gate D from the master plan.
-- [ ] Review and commit `test: verify end to end cited rag`.
+- [x] Add an integration test: indexed fixtures -> deterministic query embedding -> ANN/BM25/RRF -> prompt -> fake provider streaming citations -> persisted completed message -> citation open lookup.
+- [x] Add cancellation, no-evidence, invalid citation and regenerate variants.
+- [x] Add an Electron E2E through the preload bridge using fake providers; do not freeze final chat styling before Plan 6 approval.
+- [x] Run all chat/retrieval tests, full suite, typecheck and build; run Gate D from the master plan.
+- [x] Review and commit `test: verify end to end cited rag`.
 
 ## Completion Gate
 
