@@ -1,6 +1,7 @@
-import type Database from "better-sqlite3";
+﻿import type Database from "better-sqlite3";
 import { randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
+import path from "node:path";
 import { createHash } from "node:crypto";
 import type { SourceDto } from "../../shared/sources";
 import type { TaskDto } from "../../shared/tasks";
@@ -19,12 +20,13 @@ const ERROR_CODES = new Set<TaskErrorSummaryDto["code"]>([
 const MESSAGE_KEYS = new Set(["errors.interrupted", "errors.internal", "errors.validation", "errors.notFound", "errors.conflict", "errors.cancelled", "errors.auth", "errors.rateLimited", "errors.timeout", "errors.network", "errors.provider", "errors.unsupportedFormat", "errors.unsafeInput", "errors.indexUnavailable", "errors.modelCapability", "errors.embeddingProfileUnavailable", "errors.taskConflict"]);
 function taskError(error: unknown): TaskErrorSummaryDto {
   const candidate = error as { code?: unknown; message?: unknown };
+  const recoverableHint = (candidate as { recoverable?: unknown }).recoverable === true;
   const code = typeof candidate.code === "string" && ERROR_CODES.has(candidate.code as TaskErrorSummaryDto["code"])
     ? candidate.code as TaskErrorSummaryDto["code"]
     : "INTERNAL";
   const supplied = typeof candidate.message === "string" ? candidate.message : "";
   const messageKey = MESSAGE_KEYS.has(supplied) ? supplied : ({ UNSAFE_INPUT: "errors.unsafeInput", UNSUPPORTED_FORMAT: "errors.unsupportedFormat", RATE_LIMITED: "errors.rateLimited", INDEX_UNAVAILABLE: "errors.indexUnavailable", INTERNAL: "errors.internal" } as Record<string, string>)[code] ?? `errors.${code.toLowerCase()}`;
-  return { code, messageKey, recoverable: false };
+  return { code, messageKey, recoverable: recoverableHint || isRetryableCode(code) };
 }
 export class MainSourceService {
   constructor(private readonly db: Database.Database, private readonly tasks: TaskService, private readonly ingestion: IngestionService, private readonly storageRoot?: string, private readonly bindRevision?: (taskId: string, revisionId: string) => void) {}

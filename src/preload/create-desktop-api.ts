@@ -133,7 +133,7 @@ export function createDesktopApi(ipc: IpcInvoker): DesktopApi {
       search: (input) => invokeResult(ipc, RETRIEVAL_CHANNELS.search, retrievalSearchInputSchema, resultSchema(searchHitSchema.array()), input)
     },
     sources: {
-      chooseFiles: async (input) => { const parsed = z.object({ projectId: z.uuid() }).strict().safeParse(input); if (!parsed.success) return null; const raw = await ipc.invoke(SOURCE_CHANNELS.chooseFiles, parsed.data); return raw === null ? null : z.string().array().parse(raw); },
+      chooseFiles: async (input) => { const parsed = z.object({ projectId: z.uuid() }).strict().safeParse(input); if (!parsed.success) return null; const raw = await ipc.invoke(SOURCE_CHANNELS.chooseFiles, parsed.data); const unwrapped = raw && typeof raw === "object" && "value" in raw ? (raw as { value: unknown }).value : raw; return unwrapped === null || unwrapped === undefined ? null : z.string().array().parse(unwrapped); },
       importFile: (input) => invokeResult(ipc, SOURCE_CHANNELS.importFile, z.object({ projectId: z.uuid(), dialogToken: z.string().min(1) }).strict(), resultSchema(sourceDtoSchema), input),
       importUrl: (input) => invokeResult(ipc, SOURCE_CHANNELS.importUrl, z.object({ projectId: z.uuid(), url: z.url() }).strict(), resultSchema(sourceDtoSchema), input),
       list: async (input) => sourceDtoSchema.array().parse(await ipc.invoke(SOURCE_CHANNELS.list, z.object({ projectId: z.uuid() }).strict().parse(input))),

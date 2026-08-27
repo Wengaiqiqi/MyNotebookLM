@@ -10,6 +10,7 @@ type ProviderResolver = ResolvedProvider | ((revisionId: string, space: LanceSpa
 type StoredLike = Omit<LanceRow, "locator"> & { locatorJson?: string; locator?: unknown };
 type SpaceBoundary = { project_id: string; source_id: string; space_id?: string; space_project_id?: string; space_dimension?: number; space_state?: string; active_space_id?: string; provider?: string; model_id?: string; model_revision?: string; distance?: string; pooling?: string; preprocess_version?: string; chunking_version?: string; fingerprint?: string };
 export function canonicalEmbeddingFingerprint(value: { provider: string; modelId: string; modelRevision: string; dimension: number; distance: string; pooling: string; preprocessVersion: string; chunkingVersion: string }): string { return createHash("sha256").update(JSON.stringify(value)).digest("hex"); }
+function canonicalLocatorJson(value: unknown): string { if (value === null || typeof value !== "object") return JSON.stringify(value); if (Array.isArray(value)) return "[" + value.map(canonicalLocatorJson).join(",") + "]"; return "{" + Object.keys(value as Record<string, unknown>).sort().map(k => JSON.stringify(k) + ":" + canonicalLocatorJson((value as Record<string, unknown>)[k])).join(",") + "}"; }
 export class IndexingService {
   private recoverChunks?: (revisionId: string) => Promise<void>;
   constructor(private readonly db: Database.Database, private readonly provider: ProviderResolver, private readonly lance: Pick<LanceStore, "createSpace" | "upsert" | "count" | "rows" | "vectorSearch" | "deleteRevision">) {}
@@ -37,7 +38,7 @@ export class IndexingService {
     if (!row || !chunk) return false;
     const locator = "locator" in row ? row.locator : (() => { try { return JSON.parse(row.locatorJson ?? ""); } catch { return undefined; } })();
     const vector = Array.from(row.vector as ArrayLike<number>);
-    return row.chunkId === chunk.id && row.contentHash === chunk.content_hash && row.projectId === source.project_id && row.sourceId === source.source_id && row.spaceId === space.id && row.revisionId === revisionId && row.ordinal === chunk.ordinal && row.text === chunk.text && JSON.stringify(locator) === JSON.stringify(JSON.parse(chunk.locator_json)) && vector.length === space.dimension && vector.every(Number.isFinite);
+    return row.chunkId === chunk.id && row.contentHash === chunk.content_hash && row.projectId === source.project_id && row.sourceId === source.source_id && row.spaceId === space.id && row.revisionId === revisionId && row.ordinal === chunk.ordinal && row.text === chunk.text && canonicalLocatorJson(locator) === canonicalLocatorJson(JSON.parse(chunk.locator_json)) && vector.length === space.dimension && vector.every(Number.isFinite);
   }
   private validateRows(rows: StoredLike[], chunks: Chunk[], source: { project_id: string; source_id: string }, revisionId: string, space: LanceSpace): void {
     const expected = new Set(chunks.map(c => c.id));

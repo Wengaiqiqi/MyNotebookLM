@@ -49,7 +49,7 @@ describe("main source import orchestration", () => {
     const service = new MainSourceService(db, tasks, ingestion);
     await service.importFile({ projectId: "00000000-0000-4000-8000-000000000001", path: "src/test/fixtures/text/bilingual-sample.txt" });
     await vi.waitFor(() => expect(fail).toHaveBeenCalledOnce());
-    expect(fail).toHaveBeenCalledWith("00000000-0000-4000-8000-000000000003", expect.objectContaining({ code: "PROVIDER", recoverable: false }));
+    expect(fail).toHaveBeenCalledWith("00000000-0000-4000-8000-000000000003", expect.objectContaining({ code: "PROVIDER", recoverable: true }));
     expect(fail.mock.calls[0]![1].messageKey).toBe("errors.provider");
   });
 

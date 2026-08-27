@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, Menu } from "electron";
+﻿import { app, BrowserWindow, ipcMain, Menu } from "electron";
 import { randomUUID } from "node:crypto";
 import { mkdir } from "node:fs/promises";
 import path from "node:path";
@@ -178,13 +178,13 @@ app.whenReady().then(async () => {
       const existing = activeTask(projectId);
       if (existing) return failure("CONFLICT", "errors.taskConflict", true);
       const current = spaces.active(projectId);
-      if (!current) return failure("VALIDATION", "errors.embeddingProfileUnavailable");
       const modelId = profile.modelId.trim();
       if (!modelId) return failure("VALIDATION", "errors.embeddingProfileUnavailable");
       const trustedRevision = profile.provider === "local" ? LOCAL_MODEL_MANIFEST.revision : modelId;
-      const capabilitySeed = { provider: profile.provider, modelId, modelRevision: trustedRevision, dimension: profile.provider === "local" ? LOCAL_MODEL_MANIFEST.dimension : current.dimension, distance: "cosine" as const, pooling: "mean" as const, preprocessVersion: profile.provider === "local" ? "e5-query-passage-v1" : "provider-default-v1", chunkingVersion: "persisted" };
-      const provider = await createProviderForSpace({ provider: capabilitySeed.provider, model_id: capabilitySeed.modelId, model_revision: capabilitySeed.modelRevision, dimension: capabilitySeed.dimension, distance: capabilitySeed.distance, pooling: capabilitySeed.pooling, preprocess_version: capabilitySeed.preprocessVersion, chunking_version: capabilitySeed.chunkingVersion, ...(profile.provider === "local" ? { fingerprint: canonicalEmbeddingFingerprint(capabilitySeed) } : {}) }, current);
-      const probe = await provider.embedBatch(["embedding profile probe"], new AbortController().signal, 1);
+      const seedDimension = current?.dimension ?? (profile.provider === "local" ? LOCAL_MODEL_MANIFEST.dimension : 1);
+      const capabilitySeed = { provider: profile.provider, modelId, modelRevision: trustedRevision, dimension: profile.provider === "local" ? LOCAL_MODEL_MANIFEST.dimension : seedDimension, distance: "cosine" as const, pooling: "mean" as const, preprocessVersion: profile.provider === "local" ? "e5-query-passage-v1" : "provider-default-v1", chunkingVersion: "persisted" };
+      const provider = await createProviderForSpace({ provider: capabilitySeed.provider, model_id: capabilitySeed.modelId, model_revision: capabilitySeed.modelRevision, dimension: capabilitySeed.dimension, distance: capabilitySeed.distance, pooling: capabilitySeed.pooling, preprocess_version: capabilitySeed.preprocessVersion, chunking_version: capabilitySeed.chunkingVersion, ...(profile.provider === "local" ? { fingerprint: canonicalEmbeddingFingerprint(capabilitySeed) } : {}) }, { id: current?.id ?? "", dimension: capabilitySeed.dimension });
+      const probe = await provider?.embedBatch?.(["embedding profile probe"], new AbortController().signal, 1);
       const dimension = probe[0]?.length;
       if (!dimension) return failure("VALIDATION", "errors.embeddingProfileUnavailable");
       const capability = provider.describe();
@@ -218,7 +218,8 @@ app.whenReady().then(async () => {
     search: async ({ projectId, query, limit }: { projectId: string; query: string; limit: number }): Promise<Result<SearchHitDto[]>> => {
       const result = await retrieval.search({ projectId, query, limit });
       if (!result.ok) return result as Result<SearchHitDto[]>;
-      return { ok: true, value: result.value.map((hit: { chunkId: string; score?: number; text: string; locator: unknown }) => ({ chunkId: hit.chunkId, score: hit.score ?? 0, text: hit.text, locator: hit.locator })) };
+      const hits = result.value.map((hit: { chunkId: string; score?: number; text: string; locator: unknown }) => ({ chunkId: hit.chunkId, score: hit.score ?? 0, text: hit.text, locator: hit.locator }));
+      return { ok: true, value: hits };
     }
   };
   cleanupProjectHandlers = registerProjectHandlers(ipcMain, projectService);
