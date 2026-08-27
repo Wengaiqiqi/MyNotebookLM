@@ -74,10 +74,12 @@ async function emitAsync(api: ReturnType<typeof createApi>, requestId: string, e
 
 beforeEach(() => {
   (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+  vi.stubGlobal("crypto", { randomUUID: () => REQUEST_ID });
 });
 
 afterEach(() => {
   vi.restoreAllMocks();
+  vi.unstubAllGlobals();
 });
 
 describe("useChatStream", () => {
@@ -111,7 +113,7 @@ describe("useChatStream", () => {
     await act(async () => {
       await result.current.send("What does the report say?");
     });
-    expect(h.send).toHaveBeenCalledWith({ projectId: PROJECT_ID, conversationId: CONVERSATION_ID, question: "What does the report say?" });
+    expect(h.send).toHaveBeenCalledWith(expect.objectContaining({ projectId: PROJECT_ID, conversationId: CONVERSATION_ID, question: "What does the report say?", requestId: expect.any(String) }));
     expect(result.current.streamingMessageId).toBe(MESSAGE_ID);
     expect(result.current.messages.map((m) => m.content)).toEqual(["Q?", "What does the report say?", ""]);
 
@@ -169,7 +171,7 @@ describe("useChatStream", () => {
     expect(result.current.messages.at(-1)?.content).toBe("half written");
 
     await act(async () => { await result.current.repair(); });
-    expect(h.regenerate).toHaveBeenCalledWith({ projectId: PROJECT_ID, conversationId: CONVERSATION_ID, messageId: MESSAGE_ID });
+    expect(h.regenerate).toHaveBeenCalledWith(expect.objectContaining({ projectId: PROJECT_ID, conversationId: CONVERSATION_ID, messageId: MESSAGE_ID, requestId: expect.any(String) }));
     expect(result.current.state).toBe("streaming");
     expect(result.current.error).toBeNull();
   });
@@ -201,27 +203,53 @@ describe("useChatStream", () => {
     const { result } = renderHook(() => useChatStream(h.api.chat, PROJECT_ID, CONVERSATION_ID, withHistory));
 
     await act(async () => { await result.current.regenerate("a1"); });
-    expect(h.regenerate).toHaveBeenCalledWith({ projectId: PROJECT_ID, conversationId: CONVERSATION_ID, messageId: "a1" });
+    expect(h.regenerate).toHaveBeenCalledWith(expect.objectContaining({ projectId: PROJECT_ID, conversationId: CONVERSATION_ID, messageId: "a1", requestId: expect.any(String) }));
     expect(result.current.streamingMessageId).toBe(MESSAGE_ID);
     // Only the historical user message exists; no duplicate user row was appended.
     expect(result.current.messages.filter((m) => m.role === "user").length).toBe(1);
   });
 
-  it("cleans up subscription when unmounted mid-stream", async () => {
+  it("subscribes before a pending send, receives deltas, and can stop it", async () => {
     const h = createApi();
     let release!: (value: ReturnType<typeof makeOk>) => void;
     const gate = new Promise<ReturnType<typeof makeOk>>((resolve) => { release = resolve; });
     h.send.mockReturnValue(gate);
-    const { result, unmount } = renderHook(() => useChatStream(h.api.chat, PROJECT_ID, CONVERSATION_ID, []));
-    void result.current.send("q");
-    // Request id only exists after the invoke resolves (Task 6 contract), so
-    // subscription happens then; unmount immediately after to drop it.
+    const { result } = renderHook(() => useChatStream(h.api.chat, PROJECT_ID, CONVERSATION_ID, []));
+    let sendPromise!: Promise<boolean>;
     await act(async () => {
-      release(makeOk(REQUEST_ID, MESSAGE_ID));
+      sendPromise = result.current.send("q");
+      await Promise.resolve();
     });
-    expect(h.subscribe).toHaveBeenCalledWith(REQUEST_ID, expect.any(Function));
-    unmount();
-    expect(h.removeListener).toHaveBeenCalledWith(REQUEST_ID);
+    const requestId = (h.send.mock.calls[0]?.[0] as { requestId: string }).requestId;
+    expect(requestId).toMatch(/[0-9a-f]{8}-[0-9a-f-]{27}/);
+    expect(h.subscribe).toHaveBeenCalledWith(requestId, expect.any(Function));
+    await emitAsync(h, requestId, { type: "started", requestId, messageId: MESSAGE_ID });
+    await emitAsync(h, requestId, { type: "text-delta", requestId, messageId: MESSAGE_ID, text: "live" });
+    expect(result.current.messages.at(-1)?.content).toBe("live");
+    await act(async () => { await expect(result.current.stop()).resolves.toBe(true); });
+    expect(h.stop).toHaveBeenCalledWith({ projectId: PROJECT_ID, requestId });
+    release(makeOk(requestId, MESSAGE_ID));
+    await act(async () => { await sendPromise; });
+  });
+
+  it("does not return to streaming when terminal arrives before invoke resolves", async () => {
+    const h = createApi();
+    let release!: (value: ReturnType<typeof makeOk>) => void;
+    h.send.mockReturnValue(new Promise<ReturnType<typeof makeOk>>((resolve) => { release = resolve; }));
+    const { result } = renderHook(() => useChatStream(h.api.chat, PROJECT_ID, CONVERSATION_ID, []));
+    let sendPromise!: Promise<boolean>;
+    await act(async () => {
+      sendPromise = result.current.send("q");
+      await Promise.resolve();
+    });
+    const requestId = (h.send.mock.calls[0]?.[0] as { requestId: string }).requestId;
+    await emitAsync(h, requestId, { type: "started", requestId, messageId: MESSAGE_ID });
+    await emitAsync(h, requestId, { type: "completed", requestId, messageId: MESSAGE_ID, message: makeMessage({ content: "done" }) });
+    expect(result.current.state).toBe("idle");
+    release(makeOk(requestId, MESSAGE_ID));
+    await act(async () => { await sendPromise; });
+    expect(result.current.state).toBe("idle");
+    expect(result.current.streamingMessageId).toBeNull();
   });
 
   it("ignores events for other request ids while streaming", async () => {

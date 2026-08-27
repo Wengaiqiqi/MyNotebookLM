@@ -106,6 +106,10 @@ async function invokeResult<I, O>(
 }
 
 export function createDesktopApi(ipc: IpcInvoker): DesktopApi {
+  const pendingSubscriptions = new Map<string, Promise<unknown>>();
+  const awaitSubscription = async (requestId: string): Promise<void> => {
+    await pendingSubscriptions.get(requestId);
+  };
   return {
     vector: {
       getHealth: (input) => invokeResult(ipc, VECTOR_CHANNELS.getHealth, vectorTaskInputSchema, resultSchema(vectorHealthSchema), input),
@@ -246,9 +250,19 @@ export function createDesktopApi(ipc: IpcInvoker): DesktopApi {
       listMessages: (input) => invokeResult(ipc, CHAT_CHANNELS.listMessages, chatListMessagesInputSchema, resultSchema(messageSchema.array()), input)
     },
     chat: {
-      send: (input) => invokeResult(ipc, CHAT_CHANNELS.send, chatSendInputSchema, resultSchema(chatSendResultValueSchema), input),
+      send: async (input) => {
+        const parsed = chatSendInputSchema.safeParse(input);
+        if (!parsed.success) return validationFailure();
+        await awaitSubscription(parsed.data.requestId);
+        return invokeResult(ipc, CHAT_CHANNELS.send, chatSendInputSchema, resultSchema(chatSendResultValueSchema), parsed.data);
+      },
       stop: (input) => invokeResult(ipc, CHAT_CHANNELS.stop, chatStopInputSchema, resultSchema(z.boolean()), input),
-      regenerate: (input) => invokeResult(ipc, CHAT_CHANNELS.regenerate, chatRegenerateInputSchema, resultSchema(chatSendResultValueSchema), input),
+      regenerate: async (input) => {
+        const parsed = chatRegenerateInputSchema.safeParse(input);
+        if (!parsed.success) return validationFailure();
+        await awaitSubscription(parsed.data.requestId);
+        return invokeResult(ipc, CHAT_CHANNELS.regenerate, chatRegenerateInputSchema, resultSchema(chatSendResultValueSchema), parsed.data);
+      },
       subscribe: (requestId, listener) => {
         const parsed = z.uuid().safeParse(requestId);
         if (!parsed.success) return () => undefined;
@@ -260,9 +274,11 @@ export function createDesktopApi(ipc: IpcInvoker): DesktopApi {
         };
         ipc.on?.(channel, handler);
         // Main only fans out to windows registered here; register before streaming.
-        void Promise.resolve(ipc.invoke(CHAT_CHANNELS.subscribeRequest, { requestId: parsed.data })).catch(() => undefined);
+        const registration = Promise.resolve(ipc.invoke(CHAT_CHANNELS.subscribeRequest, { requestId: parsed.data })).catch(() => undefined);
+        pendingSubscriptions.set(parsed.data, registration);
         return () => {
           ipc.removeListener?.(channel, handler);
+          if (pendingSubscriptions.get(parsed.data) === registration) pendingSubscriptions.delete(parsed.data);
           void Promise.resolve(ipc.invoke(CHAT_CHANNELS.unsubscribeRequest, { requestId: parsed.data })).catch(() => undefined);
         };
       },

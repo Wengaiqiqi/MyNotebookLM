@@ -121,6 +121,7 @@ const MESSAGE_ID = "assistant-1";
 const SEND_INPUT = {
   projectId: PROJECT_ID,
   conversationId: CONVERSATION_ID,
+  requestId: "22222222-2222-4222-8222-222222222222",
   question: "What does S1 say?"
 };
 
@@ -138,9 +139,10 @@ describe("registerChatHandlers", () => {
       listMessages: vi.fn(() => [completedMessage()]),
       send: vi.fn(
         sendImpl ??
-        (async (_input, emit) => {
-          emit?.({ type: "started", requestId: nextRequestId(), messageId: MESSAGE_ID });
-          return okResult("rid");
+        (async (input, emit) => {
+          const requestId = (input as { requestId: string }).requestId;
+          emit?.({ type: "started", requestId, messageId: MESSAGE_ID });
+          return okResult(requestId);
         })
       ),
       regenerate: async () => okResult("regen"),
@@ -171,7 +173,7 @@ describe("registerChatHandlers", () => {
   });
 
   it("subscribes the window before provider work starts so no first event races", async () => {
-    const rid = nextRequestId();
+    const rid = SEND_INPUT.requestId;
     let emittedDuringSend = false;
     const service = makeService(async (_input, emit) => {
       // Subscription must already exist when the first event fires.
@@ -182,7 +184,7 @@ describe("registerChatHandlers", () => {
     });
     const { ipc } = setup(service);
     await invoke(ipc, CHAT_CHANNELS.subscribeRequest, { requestId: rid });
-    await invoke(ipc, CHAT_CHANNELS.send, SEND_INPUT);
+    await invoke(ipc, CHAT_CHANNELS.send, { ...SEND_INPUT, requestId: rid });
     expect(emittedDuringSend).toBe(true);
     const window = FakeWindow.all.at(-1)!;
     expect(window.delivered().some((value) => value.type === "started")).toBe(true);
@@ -200,7 +202,7 @@ describe("registerChatHandlers", () => {
     const { ipc } = setup(service);
     const window = new FakeWindow();
     registry.set(rid, new Set([window]));
-    await invoke(ipc, CHAT_CHANNELS.send, SEND_INPUT);
+    await invoke(ipc, CHAT_CHANNELS.send, { ...SEND_INPUT, requestId: rid });
     expect(window.delivered()).toEqual([
       { type: "started", requestId: rid, messageId: MESSAGE_ID }
     ]);
@@ -220,7 +222,7 @@ describe("registerChatHandlers", () => {
     registry.set(ridA, new Set([windowA]));
     registry.set(ridB, new Set([windowB]));
 
-    await invoke(ipc, CHAT_CHANNELS.send, SEND_INPUT);
+    await invoke(ipc, CHAT_CHANNELS.send, { ...SEND_INPUT, requestId: ridA });
 
     for (const event of windowA.delivered()) expect(event.requestId).toBe(ridA);
     expect(windowB.delivered()).toEqual([]);
@@ -272,7 +274,7 @@ describe("registerChatHandlers", () => {
     const { ipc } = setup(service);
     const window = new FakeWindow();
     registry.set(rid, new Set([window]));
-    await invoke(ipc, CHAT_CHANNELS.send, SEND_INPUT);
+    await invoke(ipc, CHAT_CHANNELS.send, { ...SEND_INPUT, requestId: rid });
     vi.advanceTimersByTime(4000);
 
     const deltas = window.delivered().filter((value) => value.type === "text-delta") as Array<{ text: string }>;
@@ -295,7 +297,7 @@ describe("registerChatHandlers", () => {
     const window = new FakeWindow();
     registry.set(rid, new Set([window]));
 
-    await expect(invoke(ipc, CHAT_CHANNELS.send, SEND_INPUT)).rejects.toThrow("provider connection lost mid-stream");
+    await expect(invoke(ipc, CHAT_CHANNELS.send, { ...SEND_INPUT, requestId: rid })).rejects.toThrow("provider connection lost mid-stream");
     // Even though no terminal event arrived, the flush timer must be released.
     expect(clearIntervalSpy).toHaveBeenCalled();
 
@@ -363,7 +365,7 @@ describe("registerChatHandlers", () => {
       ok: true,
       value: [completedMessage()]
     });
-    await invoke(ipc, CHAT_CHANNELS.regenerate, { projectId: PROJECT_ID, conversationId: CONVERSATION_ID, messageId: MESSAGE_ID });
+    await invoke(ipc, CHAT_CHANNELS.regenerate, { requestId: SEND_INPUT.requestId, projectId: PROJECT_ID, conversationId: CONVERSATION_ID, messageId: MESSAGE_ID });
 
     const citationId = "assistant-1:S1:0";
     await invoke(ipc, CITATION_CHANNELS.open, { projectId: PROJECT_ID, citationId });

@@ -27,16 +27,16 @@ export type ChatSendDeps = {
   randomId?: (n: number) => string;
 };
 
-export type SendInput = { projectId: string; conversationId: string; question: string };
-export type RegenerateInput = { projectId: string; conversationId: string; messageId: string };
+export type SendInput = { requestId: string; projectId: string; conversationId: string; question: string };
+export type RegenerateInput = { requestId: string; projectId: string; conversationId: string; messageId: string };
 type ConversationQuery = { projectId: string; conversationId: string };
 
 type StreamEvent =
   | { type: "started"; requestId: string; messageId: string }
-  | { type: "delta"; messageId: string; text: string }
-  | { type: "completed"; messageId: string; message: MessageDto }
-  | { type: "cancelled"; messageId: string; message: MessageDto }
-  | { type: "failed"; messageId: string; error: { code: string; messageKey: string; recoverable: boolean } };
+  | { type: "delta"; requestId: string; messageId: string; text: string }
+  | { type: "completed"; requestId: string; messageId: string; message: MessageDto }
+  | { type: "cancelled"; requestId: string; messageId: string; message: MessageDto }
+  | { type: "failed"; requestId: string; messageId: string; error: { code: string; messageKey: string; recoverable: boolean } };
 
 function appError(code: AppErrorDto["code"], messageKey: string, recoverable = false): AppErrorDto {
   return { code, messageKey, recoverable };
@@ -51,7 +51,8 @@ export function recoverInterruptedStreams(db: Database.Database, now = new Date(
 }
 
 type TurnContext = {
-  turn: ConversationQuery;
+  requestId: string;
+  turn: ConversationQuery & { requestId: string };
   repo: ConversationRepository;
   profile: ModelProfileDto;
   owner: SessionOwner;
@@ -133,7 +134,7 @@ export class ChatService {
         content: input.question,
         createdAt: this.clock().toISOString()
       });
-      return await this.runTurn({ turn: input, repo, profile, owner, nextId, userMessage, supersedesMessageId: null, emit });
+      return await this.runTurn({ requestId: input.requestId, turn: input, repo, profile, owner, nextId, userMessage, supersedesMessageId: null, emit });
     } catch (reason) {
       return internalResult(reason);
     }
@@ -159,7 +160,7 @@ export class ChatService {
       }
       let counter = 0;
       const nextId = (): string => (this.deps.randomId ? this.deps.randomId(++counter) : crypto.randomUUID());
-      return await this.runTurn({ turn: input, repo, profile, owner, nextId, userMessage, supersedesMessageId: old.id, emit });
+      return await this.runTurn({ requestId: input.requestId, turn: input, repo, profile, owner, nextId, userMessage, supersedesMessageId: old.id, emit });
     } catch (reason) {
       return internalResult(reason);
     }
@@ -189,7 +190,7 @@ export class ChatService {
         createdAt: this.clock().toISOString()
       });
       repo.failAssistantMessage({ projectId: turn.projectId, messageId: draft.id, errorCode: indexError.code, updatedAt: this.clock().toISOString() });
-      emit({ type: "failed", messageId: draft.id, error: { code: indexError.code, messageKey: indexError.messageKey, recoverable: indexError.recoverable } });
+      emit({ type: "failed", requestId: turn.requestId, messageId: draft.id, error: { code: indexError.code, messageKey: indexError.messageKey, recoverable: indexError.recoverable } });
       return { ok: false, error: indexError };
     }
     const retrievalsByLabel: Record<string, RetrievedCitation> = {};
@@ -227,13 +228,13 @@ export class ChatService {
           createdAt: startedAt
         });
 
-    const requestId = nextId();
+    const requestId = turn.requestId;
     // Reserve BEFORE generation work so stop/conflict see a consistent state.
     const { signal } = this.registry.register(requestId, owner);
     this.inFlightConversations.add(turn.conversationId);
     emit({ type: "started", requestId, messageId: assistant.id });
 
-    const outcome = await this.runGeneration({ repo, turn, profile, provider, retrievals: retrievalsByLabel, contextMessages: context.messages, assistantId: assistant.id, signal, emit });
+    const outcome = await this.runGeneration({ repo, turn, profile, provider, retrievals: retrievalsByLabel, contextMessages: context.messages, assistantId: assistant.id, requestId, signal, emit });
     this.registry.complete(requestId, owner);
     this.inFlightConversations.delete(turn.conversationId);
     return outcome;
@@ -247,10 +248,11 @@ export class ChatService {
     retrievals: Record<string, RetrievedCitation>;
     contextMessages: ChatTurn[];
     assistantId: string;
+    requestId: string;
     signal: AbortSignal;
     emit: (event: StreamEvent) => void;
   }): Promise<Result<{ requestId: string; assistantMessageId: string }>> {
-    const { repo, turn, profile, provider, retrievals, contextMessages, assistantId, signal, emit } = args;
+    const { repo, turn, profile, provider, retrievals, contextMessages, assistantId, requestId, signal, emit } = args;
     const now = this.clock.bind(this);
     let fullText = "";
     let lastCheckpointAt = now().getTime();
@@ -278,7 +280,7 @@ export class ChatService {
           if (signal.aborted) break;
           const visible = buffer.push(event.text);
           fullText += visible;
-          emit({ type: "delta", messageId: assistantId, text: visible });
+          emit({ type: "delta", requestId, messageId: assistantId, text: visible });
           bytesSinceCheckpoint += Buffer.byteLength(event.text, "utf8");
           const elapsed = now().getTime() - lastCheckpointAt;
           // Checkpoint at most every 1s or 2KiB, whichever comes first.
@@ -314,8 +316,8 @@ export class ChatService {
         messageId: assistantId,
         updatedAt: now().toISOString()
       });
-      emit({ type: "cancelled", messageId: assistantId, message: cancelled });
-      return { ok: true, value: { requestId: "", assistantMessageId: assistantId } };
+      emit({ type: "cancelled", requestId, messageId: assistantId, message: cancelled });
+      return { ok: true, value: { requestId, assistantMessageId: assistantId } };
     }
 
     if (failure) {
@@ -325,7 +327,7 @@ export class ChatService {
         errorCode: failure.code,
         updatedAt: now().toISOString()
       });
-      emit({ type: "failed", messageId: assistantId, error: { code: failure.code, messageKey: failure.messageKey, recoverable: failure.recoverable } });
+      emit({ type: "failed", requestId, messageId: assistantId, error: { code: failure.code, messageKey: failure.messageKey, recoverable: failure.recoverable } });
       return { ok: false, error: failure };
     }
 
@@ -348,8 +350,8 @@ export class ChatService {
       completionReason: finishReason,
       updatedAt: now().toISOString()
     });
-    emit({ type: "completed", messageId: completed.id, message: completed });
-    return { ok: true, value: { requestId: "", assistantMessageId: completed.id } };
+    emit({ type: "completed", requestId, messageId: completed.id, message: completed });
+    return { ok: true, value: { requestId, assistantMessageId: completed.id } };
   }
 
   private repo(): ConversationRepository {

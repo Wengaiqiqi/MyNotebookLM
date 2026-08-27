@@ -89,13 +89,13 @@ export const chatCreateConversationInputSchema = z.object({ projectId: z.uuid(),
 export const chatRenameConversationInputSchema = z.object({ projectId: z.uuid(), conversationId: z.uuid(), title: chatTitleSchema }).strict();
 export const chatConversationInputSchema = z.object({ projectId: z.uuid(), conversationId: z.uuid() }).strict();
 export const chatListMessagesInputSchema = z.object({ projectId: z.uuid(), conversationId: z.uuid() }).strict();
-export const chatSendInputSchema = z.object({ projectId: z.uuid(), conversationId: z.uuid(), question: z.string().trim().min(1).max(20_000) }).strict();
+export const chatSendInputSchema = z.object({ requestId: z.uuid(), projectId: z.uuid(), conversationId: z.uuid(), question: z.string().trim().min(1).max(20_000) }).strict();
 export const chatStopInputSchema = z.object({ projectId: z.uuid(), requestId: z.uuid() }).strict();
-export const chatRegenerateInputSchema = z.object({ projectId: z.uuid(), conversationId: z.uuid(), messageId: z.string().min(1).max(128) }).strict();
+export const chatRegenerateInputSchema = z.object({ requestId: z.uuid(), projectId: z.uuid(), conversationId: z.uuid(), messageId: z.string().min(1).max(128) }).strict();
 export const chatRequestIdInputSchema = z.object({ requestId: z.uuid() }).strict();
 export const citationOpenInputSchema = z.object({ projectId: z.uuid(), citationId: z.string().trim().min(1).max(256) }).strict();
 
-export const chatSendResultValueSchema = z.object({ requestId: z.string(), assistantMessageId: z.string() }).strict();
+export const chatSendResultValueSchema = z.object({ requestId: z.uuid(), assistantMessageId: z.string() }).strict();
 export type ChatSendResultValue = z.infer<typeof chatSendResultValueSchema>;
 export const chatOpenedResultValueSchema = z.object({ opened: z.enum(["document", "url"]) }).strict();
 
@@ -179,9 +179,9 @@ export interface DesktopApi {
     listMessages(input: { projectId: string; conversationId: string }): Promise<Result<MessageDto[]>>;
   };
   chat: {
-    send(input: { projectId: string; conversationId: string; question: string }): Promise<Result<ChatSendResultValue>>;
+    send(input: { requestId: string; projectId: string; conversationId: string; question: string }): Promise<Result<ChatSendResultValue>>;
     stop(input: { projectId: string; requestId: string }): Promise<Result<boolean>>;
-    regenerate(input: { projectId: string; conversationId: string; messageId: string }): Promise<Result<ChatSendResultValue>>;
+    regenerate(input: { requestId: string; projectId: string; conversationId: string; messageId: string }): Promise<Result<ChatSendResultValue>>;
     subscribe(requestId: string, listener: (event: ChatRequestEvent) => void): () => void;
     unsubscribe(requestId: string): void;
   };

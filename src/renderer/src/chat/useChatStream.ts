@@ -112,56 +112,39 @@ export function useChatStream(
   }, []);
 
   /** Run one IPC call, then subscribe to its requestId-scoped stream. */
-  const runTurn = useCallback(async (invoke: () => Promise<SendResult>): Promise<boolean> => {
+  const runTurn = useCallback(async (invoke: (requestId: string) => Promise<SendResult>): Promise<boolean> => {
     if (turnRef.current) return false; // one live turn at a time
     try {
-      const result = await invoke();
-      if (!result.ok) {
-        setState("failed");
-        setError(result.error);
-        return false;
-      }
-      const draftId = result.value.assistantMessageId;
-      // Optimistic streaming draft row; the authoritative copy arrives with the
-      // terminal event. Without it there is nowhere to splice live deltas.
-      if (draftId !== "") {
-        setMessages((prev) => prev.some((m) => m.id === draftId) ? prev : [
-          ...prev,
-          {
-            id: draftId,
-            conversationId,
-            sequence: (prev.at(-1)?.sequence ?? 0) + 1,
-            role: "assistant",
-            content: "",
-            state: "streaming",
-            replyToMessageId: null,
-            supersedesMessageId: null,
-            superseded: false,
-            provider: null,
-            profileId: null,
-            model: null,
-            usage: null,
-            errorCode: null,
-            completionReason: null,
-            createdAt: new Date().toISOString(),
-            updatedAt: new Date().toISOString(),
-            citations: []
-          }
-        ]);
-      }
-      if (result.value.requestId === "") {
-        // Synchronous stream finished inside the invoke; nothing to subscribe to.
-        return true;
-      }
+      const requestId = crypto.randomUUID();
+      turnRef.current = { requestId };
       const sink = (event: ChatRequestEvent): void => {
         if (!turnRef.current || event.requestId !== turnRef.current.requestId) return;
+        if ((event.type === "text-delta" || event.type === "cancelled" || event.type === "failed") && event.type !== "failed" && event.type !== "cancelled") {
+          setStreamingMessageId(event.messageId);
+          setMessages((prev) => prev.some((m) => m.id === event.messageId) ? prev : [...prev, {
+            id: event.messageId, conversationId, sequence: (prev.at(-1)?.sequence ?? 0) + 1, role: "assistant", content: "", state: "streaming", replyToMessageId: null, supersedesMessageId: null, superseded: false, provider: null, profileId: null, model: null, usage: null, errorCode: null, completionReason: null, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), citations: []
+          }]);
+        }
+        if (event.type === "started") {
+          setStreamingMessageId(event.messageId);
+          setMessages((prev) => prev.some((m) => m.id === event.messageId) ? prev : [...prev, {
+            id: event.messageId, conversationId, sequence: (prev.at(-1)?.sequence ?? 0) + 1, role: "assistant", content: "", state: "streaming", replyToMessageId: null, supersedesMessageId: null, superseded: false, provider: null, profileId: null, model: null, usage: null, errorCode: null, completionReason: null, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), citations: []
+          }]);
+        }
         applyEvent(event);
         if (event.type === "completed" || event.type === "cancelled" || event.type === "failed") teardown();
       };
-      unsubscribeRef.current = chat.subscribe(result.value.requestId, sink);
-      turnRef.current = { requestId: result.value.requestId };
-      setStreamingMessageId(result.value.assistantMessageId);
+      unsubscribeRef.current = chat.subscribe(requestId, sink);
       setState("streaming");
+      const result = await invoke(requestId);
+      if (!result.ok) { teardown(); setState("failed"); setError(result.error); return false; }
+      if (result.value.requestId !== requestId) { teardown(); return false; }
+      if (!turnRef.current) return true;
+      const draftId = result.value.assistantMessageId;
+      setStreamingMessageId(draftId);
+      setMessages((prev) => prev.some((m) => m.id === draftId) ? prev : [...prev, {
+        id: draftId, conversationId, sequence: (prev.at(-1)?.sequence ?? 0) + 1, role: "assistant", content: "", state: "streaming", replyToMessageId: null, supersedesMessageId: null, superseded: false, provider: null, profileId: null, model: null, usage: null, errorCode: null, completionReason: null, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), citations: []
+      }]);
       return true;
     } catch {
       teardown();
@@ -199,18 +182,15 @@ export function useChatStream(
       citations: []
     };
     setMessages((prev) => [...prev, localUserMessage]);
-    return runTurn(async () => {
-      const result = await chat.send({ projectId, conversationId, question });
-      if (result.ok && result.value.requestId !== "") {
-        optimisticUserRef.current.set(result.value.requestId, localUserMessage.id);
-      }
-      return result;
+    return runTurn((requestId) => {
+      optimisticUserRef.current.set(requestId, localUserMessage.id);
+      return chat.send({ requestId, projectId, conversationId, question });
     });
   }, [runTurn, chat, projectId, conversationId]);
 
   const regenerate = useCallback((messageId: string): Promise<boolean> => {
     setError(null);
-    return runTurn(() => chat.regenerate({ projectId, conversationId, messageId }));
+    return runTurn((requestId) => chat.regenerate({ requestId, projectId, conversationId, messageId }));
   }, [runTurn, chat, projectId, conversationId]);
 
   const stop = useCallback(async (): Promise<boolean> => {

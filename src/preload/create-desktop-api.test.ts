@@ -358,21 +358,21 @@ describe("createDesktopApi", () => {
     await api.conversations.archive({ projectId: chatProjectId, conversationId: chatConversationId });
     await api.conversations.delete({ projectId: chatProjectId, conversationId: chatConversationId });
     await api.conversations.listMessages({ projectId: chatProjectId, conversationId: chatConversationId });
-    await api.chat.send({ projectId: chatProjectId, conversationId: chatConversationId, question: "Hi" });
+    await api.chat.send({ requestId: chatRequestId, projectId: chatProjectId, conversationId: chatConversationId, question: "Hi" });
     await api.chat.stop({ projectId: chatProjectId, requestId: chatRequestId });
-    await api.chat.regenerate({ projectId: chatProjectId, conversationId: chatConversationId, messageId: "assistant-1" });
+    await api.chat.regenerate({ requestId: chatRequestId, projectId: chatProjectId, conversationId: chatConversationId, messageId: "assistant-1" });
     await api.citations.open({ projectId: chatProjectId, citationId: "assistant-1:S1:0" });
 
     expect(invoke).toHaveBeenNthCalledWith(1, CHAT_CHANNELS.listConversations, { projectId: chatProjectId });
-    expect(invoke).toHaveBeenNthCalledWith(7, CHAT_CHANNELS.send, { projectId: chatProjectId, conversationId: chatConversationId, question: "Hi" });
+    expect(invoke).toHaveBeenNthCalledWith(7, CHAT_CHANNELS.send, { requestId: chatRequestId, projectId: chatProjectId, conversationId: chatConversationId, question: "Hi" });
     expect(invoke).toHaveBeenNthCalledWith(8, CHAT_CHANNELS.stop, { projectId: chatProjectId, requestId: chatRequestId });
-    expect(invoke).toHaveBeenNthCalledWith(9, CHAT_CHANNELS.regenerate, { projectId: chatProjectId, conversationId: chatConversationId, messageId: "assistant-1" });
+    expect(invoke).toHaveBeenNthCalledWith(9, CHAT_CHANNELS.regenerate, { requestId: chatRequestId, projectId: chatProjectId, conversationId: chatConversationId, messageId: "assistant-1" });
     expect(invoke).toHaveBeenNthCalledWith(10, CITATION_CHANNELS.open, { projectId: chatProjectId, citationId: "assistant-1:S1:0" });
   });
 
   it.each([
     ["conversation create", (api: DesktopApi) => api.conversations.create({ projectId: chatProjectId, title: " " })],
-    ["chat send", (api: DesktopApi) => api.chat.send({ projectId: chatProjectId, conversationId: chatConversationId, question: "" })],
+    ["chat send", (api: DesktopApi) => api.chat.send({ requestId: chatRequestId, projectId: chatProjectId, conversationId: chatConversationId, question: "" })],
     ["chat stop", (api: DesktopApi) => api.chat.stop({ projectId: chatProjectId, requestId: "garbage" })],
     ["citation open", (api: DesktopApi) => api.citations.open({ projectId: chatProjectId, citationId: " " })]
   ])("returns sanitized validation for invalid %s input before IPC", async (_command, call) => {
@@ -388,6 +388,7 @@ describe("createDesktopApi", () => {
     await expect(createDesktopApi({ invoke }).chat.send({
       projectId: chatProjectId,
       conversationId: chatConversationId,
+      requestId: chatRequestId,
       question: "Hi"
     })).resolves.toEqual(internalFailure);
     expect(invoke).toHaveBeenCalledTimes(1);
@@ -433,5 +434,21 @@ describe("createDesktopApi", () => {
     invoke.mockClear();
     cleanup();
     expect(invoke).toHaveBeenNthCalledWith(1, CHAT_CHANNELS.unsubscribeRequest, { requestId: chatRequestId });
+  });
+
+  it("waits for subscribe registration before invoking send", async () => {
+    let release!: (value: unknown) => void;
+    const registration = new Promise<unknown>((resolve) => { release = resolve; });
+    const invoke = vi.fn((channel: string) => channel === CHAT_CHANNELS.subscribeRequest
+      ? registration
+      : Promise.resolve(ok({ requestId: chatRequestId, assistantMessageId: "assistant-1" })));
+    const api = createDesktopApi({ invoke, on: vi.fn(), removeListener: vi.fn() });
+    api.chat.subscribe(chatRequestId, vi.fn());
+    const send = api.chat.send({ requestId: chatRequestId, projectId: chatProjectId, conversationId: chatConversationId, question: "Hi" });
+    expect(invoke).toHaveBeenNthCalledWith(1, CHAT_CHANNELS.subscribeRequest, { requestId: chatRequestId });
+    expect(invoke).toHaveBeenCalledTimes(1);
+    release(ok(undefined));
+    await send;
+    expect(invoke).toHaveBeenNthCalledWith(2, CHAT_CHANNELS.send, { requestId: chatRequestId, projectId: chatProjectId, conversationId: chatConversationId, question: "Hi" });
   });
 });

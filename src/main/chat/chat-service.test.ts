@@ -11,6 +11,7 @@ import type { GenerationEvent } from "../models/provider";
 
 const PROJECT_ID = "11111111-1111-4111-8111-111111111111";
 const USER_ID = "44444444-4444-4444-8444-444444444444";
+const REQUEST_ID = "33333333-3333-4333-8333-333333333333";
 const AT = "2026-08-27T00:00:00.000Z";
 
 type World = {
@@ -114,8 +115,9 @@ function expectOk(result: Result<{ requestId: string; assistantMessageId: string
     const deps = baseDeps({
       providerFactory: () => fakeProvider(["Answer part one ", "[S1] end"])
     });
-    const { result, events } = await collectEvents(deps, { projectId: PROJECT_ID, conversationId: world.conversationId, question: "What?" });
-    expect(expectOk(result)).toMatchObject({ assistantMessageId: expect.any(String) });
+    const { result, events } = await collectEvents(deps, { requestId: REQUEST_ID, projectId: PROJECT_ID, conversationId: world.conversationId, question: "What?" });
+    expect(expectOk(result)).toMatchObject({ requestId: REQUEST_ID, assistantMessageId: expect.any(String) });
+    expect(events.every((event) => event.requestId === REQUEST_ID)).toBe(true);
     const deltas = events.filter((e) => e.type === "delta") as Array<{ messageId: string; text: string }>;
     expect(deltas.map((d) => d.text).join("")).toBe("Answer part one [S1] end");
     const completed = events.at(-1)! as { type: string; message: { state: string; usage: { totalTokens: number }; provider: string; profileId: string; model: string; citations: unknown[]; completionReason: string } };
@@ -137,7 +139,7 @@ function expectOk(result: Result<{ requestId: string; assistantMessageId: string
 
   it("handles empty retrieval without changing the success path", async () => {
     const deps = baseDeps({ retrieval: async () => [] });
-    const { result, events } = await collectEvents(deps, { projectId: PROJECT_ID, conversationId: world.conversationId, question: "?" });
+    const { result, events } = await collectEvents(deps, { requestId: REQUEST_ID, projectId: PROJECT_ID, conversationId: world.conversationId, question: "?" });
     expect(result.ok).toBe(true);
     const last = events.at(-1)! as { type: string };
     expect(last.type).toBe("completed");
@@ -145,7 +147,7 @@ function expectOk(result: Result<{ requestId: string; assistantMessageId: string
 
   it("fails before user persistence when no enabled generation profile exists", async () => {
     const deps = baseDeps({ generationProfile: undefined });
-    const { result, events } = await collectEvents(deps, { projectId: PROJECT_ID, conversationId: world.conversationId, question: "?" });
+    const { result, events } = await collectEvents(deps, { requestId: REQUEST_ID, projectId: PROJECT_ID, conversationId: world.conversationId, question: "?" });
     expect(result).toMatchObject({ ok: false, error: { code: "VALIDATION" } });
     expect(events).toHaveLength(0);
     expect(world.repository.listMessages(PROJECT_ID, world.conversationId)).toHaveLength(0);
@@ -161,7 +163,7 @@ function expectOk(result: Result<{ requestId: string; assistantMessageId: string
         async embed() { return [[]]; }
       })
     });
-    const { result, events } = await collectEvents(deps, { projectId: PROJECT_ID, conversationId: world.conversationId, question: "?" });
+    const { result, events } = await collectEvents(deps, { requestId: REQUEST_ID, projectId: PROJECT_ID, conversationId: world.conversationId, question: "?" });
     expect(result).toMatchObject({ ok: false, error: { code: "PROVIDER" } });
     expect(events.at(-1)).toMatchObject({ type: "failed", error: { code: "PROVIDER" } });
     const last = world.repository.listMessages(PROJECT_ID, world.conversationId).at(-1)!;
@@ -194,7 +196,7 @@ function expectOk(result: Result<{ requestId: string; assistantMessageId: string
     });
     const service = new ChatService(deps);
     const events: Array<Record<string, unknown>> = [];
-    const sendPromise = service.send({ projectId: PROJECT_ID, conversationId: world.conversationId, question: "stop me" }, (event) => events.push(event as Record<string, unknown>));
+    const sendPromise = service.send({ requestId: REQUEST_ID, projectId: PROJECT_ID, conversationId: world.conversationId, question: "stop me" }, (event) => events.push(event as Record<string, unknown>));
     // Stop while deltas are still streaming.
     await vi.waitFor(() => {
       expect(events.some((e) => e.type === "delta")).toBe(true);
@@ -230,12 +232,12 @@ function expectOk(result: Result<{ requestId: string; assistantMessageId: string
       })
     });
     const service = new ChatService(deps);
-    const firstStarted = service.send({ projectId: PROJECT_ID, conversationId: world.conversationId, question: "one" }, () => {});
+    const firstStarted = service.send({ requestId: REQUEST_ID, projectId: PROJECT_ID, conversationId: world.conversationId, question: "one" }, () => {});
     // One macrotask tick guarantees all pre-registration microtasks (retrieval await) have flushed.
     await new Promise((resolve) => setImmediate(resolve));
     expect(service.activeRequests()).not.toHaveLength(0);
     const secondEvents: Array<Record<string, unknown>> = [];
-    const second = await service.send({ projectId: PROJECT_ID, conversationId: world.conversationId, question: "two" }, (event) => secondEvents.push(event as Record<string, unknown>));
+    const second = await service.send({ requestId: "55555555-5555-4555-8555-555555555555", projectId: PROJECT_ID, conversationId: world.conversationId, question: "two" }, (event) => secondEvents.push(event as Record<string, unknown>));
     expectErrorCode(second, "CONFLICT");
     expect(secondEvents).toHaveLength(0);
     release();
@@ -263,7 +265,7 @@ function expectOk(result: Result<{ requestId: string; assistantMessageId: string
     let resolveStarted!: (value: Result<{ requestId: string; assistantMessageId: string }>) => void;
     const startedPromise = new Promise<Result<{ requestId: string; assistantMessageId: string }>>((resolve) => { resolveStarted = resolve; });
     void (async () => {
-      resolveStarted(await service.send({ projectId: PROJECT_ID, conversationId: world.conversationId, question: "long question" }, (event) => events.push(event as Record<string, unknown>)));
+      resolveStarted(await service.send({ requestId: REQUEST_ID, projectId: PROJECT_ID, conversationId: world.conversationId, question: "long question" }, (event) => events.push(event as Record<string, unknown>)));
     })();
     await vi.waitFor(() => {
       const started = events.find((e) => e.type === "started");
@@ -354,13 +356,13 @@ describe("ChatService conversation operations and retrieval failure", () => {
 
   it("regenerates a reply without duplicating the user message and keeps lineage", async () => {
     const sendDeps = baseDeps();
-    const first = await collectEvents(sendDeps, { projectId: PROJECT_ID, conversationId: world.conversationId, question: "Only once" });
+    const first = await collectEvents(sendDeps, { requestId: REQUEST_ID, projectId: PROJECT_ID, conversationId: world.conversationId, question: "Only once" });
     expect(first.result.ok).toBe(true);
     const assistantId = (first.result as { ok: true; value: { assistantMessageId: string } }).value.assistantMessageId;
 
     const regenEvents: Array<Record<string, unknown>> = [];
     const regen = await service().regenerate(
-      { projectId: PROJECT_ID, conversationId: world.conversationId, messageId: assistantId },
+      { requestId: "55555555-5555-4555-8555-555555555555", projectId: PROJECT_ID, conversationId: world.conversationId, messageId: assistantId },
       (event) => regenEvents.push(event)
     );
     expect(regen.ok).toBe(true);
@@ -377,17 +379,17 @@ describe("ChatService conversation operations and retrieval failure", () => {
 
   it("refuses regeneration for an archived conversation", async () => {
     const sendDeps = baseDeps();
-    const first = await collectEvents(sendDeps, { projectId: PROJECT_ID, conversationId: world.conversationId, question: "hello" });
+    const first = await collectEvents(sendDeps, { requestId: REQUEST_ID, projectId: PROJECT_ID, conversationId: world.conversationId, question: "hello" });
     const assistantId = (first.result as { ok: true; value: { assistantMessageId: string } }).value.assistantMessageId;
     const svc = service();
     svc.archiveConversation({ projectId: PROJECT_ID, conversationId: world.conversationId });
-    const result = await svc.regenerate({ projectId: PROJECT_ID, conversationId: world.conversationId, messageId: assistantId }, () => {});
+    const result = await svc.regenerate({ requestId: "88888888-8888-4888-8888-888888888888", projectId: PROJECT_ID, conversationId: world.conversationId, messageId: assistantId }, () => {});
     expect(result).toMatchObject({ ok: false, error: { code: "CONFLICT" } });
   });
 
   it("surfaces retrieval failure as failed message + INDEX_UNAVAILABLE instead of empty evidence", async () => {
     const deps = baseDeps({ retrieval: async () => { throw new Error("lance down"); } });
-    const { result, events } = await collectEvents(deps, { projectId: PROJECT_ID, conversationId: world.conversationId, question: "?" });
+    const { result, events } = await collectEvents(deps, { requestId: REQUEST_ID, projectId: PROJECT_ID, conversationId: world.conversationId, question: "?" });
     expect(result).toMatchObject({ ok: false, error: { code: "INDEX_UNAVAILABLE", recoverable: true } });
     expect(events.at(-1)).toMatchObject({ type: "failed", error: { code: "INDEX_UNAVAILABLE", recoverable: true } });
     const messages = world.repository.listMessages(PROJECT_ID, world.conversationId);
@@ -399,7 +401,7 @@ describe("ChatService conversation operations and retrieval failure", () => {
     const openPath = vi.fn(async () => "");
     const opener = new CitationOpener(world.database.connection, { openPath, openExternal: vi.fn() });
     const svc = service({ retrieval: async () => [] });
-    const sent = await collectEvents(baseDeps(), { projectId: PROJECT_ID, conversationId: world.conversationId, question: "cite it" });
+    const sent = await collectEvents(baseDeps(), { requestId: REQUEST_ID, projectId: PROJECT_ID, conversationId: world.conversationId, question: "cite it" });
     const completed = sent.events.at(-1)! as { message: { citations: CitationDto[] } };
     const citation = completed.message.citations[0]!;
     expect(svc.listMessages({ projectId: PROJECT_ID, conversationId: world.conversationId }).at(-1)!.citations.map((c) => c.sourceDisplayName)).toContain("Research PDF");

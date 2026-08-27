@@ -154,7 +154,7 @@ export function registerChatHandlers(args: {
         // "text-delta" — accept both so contract-shaped sources stay supported.
         if (type === "delta" || type === "text-delta") {
           coalescer ??= createTextCoalescer((coalesced) =>
-            deliverToRequest(String(coalesced["requestId"] ?? ""), coalesced));
+            deliverToRequest(String(coalesced["requestId"] ?? value["requestId"] ?? ""), coalesced));
           coalescer.push({ requestId: value["requestId"], messageId: value["messageId"], text: value["text"] });
           return;
         }

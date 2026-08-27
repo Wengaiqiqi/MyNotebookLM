@@ -437,13 +437,22 @@ test("preload bridge completes cited RAG with a fake OpenAI-compatible provider"
 
       const conversation = await api.conversations.create({ projectId, title: "Cited RAG" });
       if (!conversation.ok) throw new Error(`conversation: ${conversation.error.code}`);
-      const send = await api.chat.send({ projectId, conversationId: conversation.value.id, question: "What is the alpha evidence?" });
+      const requestId = crypto.randomUUID();
+      const events: any[] = [];
+      let completedResolve!: () => void;
+      const completed = new Promise<void>((resolve) => { completedResolve = resolve; });
+      const unsubscribe = api.chat.subscribe(requestId, (event: any) => { events.push(event); if (event.type === "completed") completedResolve(); });
+      const send = await api.chat.send({ requestId, projectId, conversationId: conversation.value.id, question: "What is the alpha evidence?" });
+      await completed;
+      unsubscribe();
       if (!send.ok) throw new Error(`chat: ${send.error.code}`);
       return {
         projectId,
         conversationId: conversation.value.id,
         assistantMessageId: send.value.assistantMessageId,
-        hits: hits.value
+        hits: hits.value,
+        requestId,
+        events
       };
     }, { baseUrl: provider.baseUrl, projectId: project.id, generationProfileId, embeddingProfileId, chunkId });
 
@@ -503,10 +512,12 @@ test("preload bridge completes cited RAG with a fake OpenAI-compatible provider"
     expect(persisted.citation.locator).toMatchObject({ kind: "paragraph", start: 0, end: 45 });
     expect(persisted.opened).toMatchObject({ ok: true, value: { opened: "document" } });
   } finally {
-    if (app) await closeElectron(app);
-    await provider.close();
-    await temporaryVectors?.close();
-    if (temporaryVectorsDir) await fs.rm(temporaryVectorsDir, { recursive: true, force: true });
-    await fs.rm(userDataDir, { recursive: true, force: true });
+    await Promise.allSettled([
+      app ? closeElectron(app) : Promise.resolve(),
+      provider.close(),
+      temporaryVectors?.close(),
+      temporaryVectorsDir ? fs.rm(temporaryVectorsDir, { recursive: true, force: true }) : Promise.resolve(),
+      fs.rm(userDataDir, { recursive: true, force: true })
+    ]);
   }
 });

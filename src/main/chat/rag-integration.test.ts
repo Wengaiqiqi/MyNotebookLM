@@ -17,6 +17,7 @@ import type { ModelProvider } from "../models/provider";
 import { startFakeProviderServer, type FakeProviderServer } from "../models/test/fake-provider-server";
 
 const PROJECT_ID = "11111111-1111-4111-8111-111111111111";
+const REQUEST_ID = "77777777-7777-4777-8777-777777777777";
 const CHUNK_A = "99999999-9999-4999-8999-99999999999a";
 const CHUNK_B = "99999999-9999-4999-8999-99999999999b";
 const SOURCE_ID = "88888888-8888-4888-8888-888888888888";
@@ -173,7 +174,7 @@ describe("RAG integration with real LanceDB and streaming chat", () => {
     const service = new ChatService(chatDeps(connection, retrieval, provider));
     const conversation = service.createConversation({ projectId: PROJECT_ID, title: "Cited" });
     const events: Array<Record<string, unknown>> = [];
-    const result = await service.send({ projectId: PROJECT_ID, conversationId: conversation.id, question: "alpha" }, (event) =>
+    const result = await service.send({ requestId: REQUEST_ID, projectId: PROJECT_ID, conversationId: conversation.id, question: "alpha" }, (event) =>
       events.push(event as Record<string, unknown>)
     );
     if (!result.ok) throw new Error(JSON.stringify(result.error));
@@ -210,7 +211,7 @@ describe("RAG integration with real LanceDB and streaming chat", () => {
     const service = new ChatService(chatDeps(connection, retrieval, slowProvider()));
     const conversation = service.createConversation({ projectId: PROJECT_ID, title: "Stop" });
     const events: Array<Record<string, unknown>> = [];
-    const pending = service.send({ projectId: PROJECT_ID, conversationId: conversation.id, question: "alpha" }, (event) =>
+    const pending = service.send({ requestId: REQUEST_ID, projectId: PROJECT_ID, conversationId: conversation.id, question: "alpha" }, (event) =>
       events.push(event as Record<string, unknown>)
     );
     const requestId = await vi.waitFor(() => {
@@ -233,7 +234,7 @@ describe("RAG integration with real LanceDB and streaming chat", () => {
     const service = new ChatService({ ...chatDeps(connection, retrieval, provider), retrieval: async () => [] });
     const conversation = service.createConversation({ projectId: PROJECT_ID, title: "No evidence" });
     const events: Array<Record<string, unknown>> = [];
-    const result = await service.send({ projectId: PROJECT_ID, conversationId: conversation.id, question: "omega gamma unrelated topic" }, (event) =>
+    const result = await service.send({ requestId: REQUEST_ID, projectId: PROJECT_ID, conversationId: conversation.id, question: "omega gamma unrelated topic" }, (event) =>
       events.push(event as Record<string, unknown>)
     );
     expect(result.ok).toBe(true);
@@ -255,7 +256,7 @@ describe("RAG integration with real LanceDB and streaming chat", () => {
     });
     const conversation = service.createConversation({ projectId: PROJECT_ID, title: "Invalid" });
     const events: Array<Record<string, unknown>> = [];
-    const result = await service.send({ projectId: PROJECT_ID, conversationId: conversation.id, question: "alpha" }, (event) =>
+    const result = await service.send({ requestId: REQUEST_ID, projectId: PROJECT_ID, conversationId: conversation.id, question: "alpha" }, (event) =>
       events.push(event as Record<string, unknown>)
     );
     expect(result.ok).toBe(true);
@@ -276,14 +277,14 @@ describe("RAG integration with real LanceDB and streaming chat", () => {
     const service = new ChatService(chatDeps(connection, retrieval));
     const conversation = service.createConversation({ projectId: PROJECT_ID, title: "Regenerate" });
     const firstEvents: Array<Record<string, unknown>> = [];
-    const first = await service.send({ projectId: PROJECT_ID, conversationId: conversation.id, question: "alpha" }, (event) =>
+    const first = await service.send({ requestId: REQUEST_ID, projectId: PROJECT_ID, conversationId: conversation.id, question: "alpha" }, (event) =>
       firstEvents.push(event as Record<string, unknown>)
     );
     expect(first.ok).toBe(true);
     const assistantId = first.ok ? first.value.assistantMessageId : "";
     const secondEvents: Array<Record<string, unknown>> = [];
     const regenerated = await service.regenerate(
-      { projectId: PROJECT_ID, conversationId: conversation.id, messageId: assistantId },
+      { requestId: "88888888-8888-4888-8888-888888888888", projectId: PROJECT_ID, conversationId: conversation.id, messageId: assistantId },
       (event) => secondEvents.push(event as Record<string, unknown>)
     );
     expect(regenerated.ok).toBe(true);
