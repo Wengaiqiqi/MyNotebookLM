@@ -171,6 +171,14 @@ export class SettingsRepository {
 
   replaceRoute(taskKind: ModelTaskKind, profileIds: readonly string[]): ModelRouteDto[] {
     const parsedTask = modelTaskKindSchema.parse(taskKind);
+    if (profileIds.length === 0) {
+      throw new Error(parsedTask === "embedding"
+        ? "Embedding route requires exactly one profile"
+        : "Route requires at least one profile");
+    }
+    if (parsedTask === "embedding" && profileIds.length !== 1) {
+      throw new Error("Embedding route requires exactly one profile");
+    }
     if (new Set(profileIds).size !== profileIds.length) {
       throw new Error("Route cannot contain duplicate profile IDs");
     }

@@ -64,10 +64,12 @@ Evidence (2026-08-28): RED began with missing repository/service modules; review
 
 **Task kinds:** `chat`, `note-title`, `summary`, `key-points`, `qa`, `custom-transformation`, `embedding`.
 
-- [ ] Write failing tests for explicit override, task route order, inactive/missing profile skip, capability mismatch, no route, duplicate profile rejection and embedding single-profile resolution.
-- [ ] Implement deterministic resolution returning profile snapshots, not mutable repository references.
-- [ ] Settings save validates that every generation task has at least one generation-capable route when configured; embedding route has exactly one embedding profile.
-- [ ] Run focused tests; review and commit `feat: resolve per task model routes`.
+- [x] Write failing tests for explicit override, task route order, inactive/missing profile skip, capability mismatch, no route, duplicate profile rejection and embedding single-profile resolution.
+- [x] Implement deterministic resolution returning profile snapshots, not mutable repository references.
+- [x] Settings save validates that every generation task has at least one generation-capable route when configured; embedding route has exactly one embedding profile.
+- [x] Run focused tests; review and commit `feat: resolve per task model routes`.
+
+Evidence (2026-08-28): RED failed on missing route repository/router modules; review regression tests then proved legacy/invalid embedding candidates must not fall back. GREEN: router/repository/settings 22/22, full suite 761/761, typecheck passed; independent fix re-review PASS.
 
 ## Task 4: Implement Transparent Generation Fallback
 
