@@ -259,7 +259,12 @@ export function createDesktopApi(ipc: IpcInvoker): DesktopApi {
           if (event.success && (event.data as { requestId?: unknown }).requestId === parsed.data) listener(event.data as ChatRequestEvent);
         };
         ipc.on?.(channel, handler);
-        return () => ipc.removeListener?.(channel, handler);
+        // Main only fans out to windows registered here; register before streaming.
+        void Promise.resolve(ipc.invoke(CHAT_CHANNELS.subscribeRequest, { requestId: parsed.data })).catch(() => undefined);
+        return () => {
+          ipc.removeListener?.(channel, handler);
+          void Promise.resolve(ipc.invoke(CHAT_CHANNELS.unsubscribeRequest, { requestId: parsed.data })).catch(() => undefined);
+        };
       },
       unsubscribe: (requestId) => {
         const parsed = chatRequestIdInputSchema.safeParse({ requestId });

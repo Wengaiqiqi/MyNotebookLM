@@ -104,7 +104,11 @@ export function registerChatHandlers(args: {
     args.onWindowClosed(window);
   };
 
+  // One 'destroyed' listener per window regardless of how many requests subscribed.
+  const trackedClosedWindows = new WeakSet<ChatWindowLike>();
   const trackWindowClosed = (window: ChatWindowLike): void => {
+    if (trackedClosedWindows.has(window)) return;
+    trackedClosedWindows.add(window);
     const cleanup = (): void => forgetWindow(window);
     window.webContents.on("destroyed", cleanup);
   };

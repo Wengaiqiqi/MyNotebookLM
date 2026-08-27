@@ -415,4 +415,23 @@ describe("createDesktopApi", () => {
     cleanup();
     expect(removeListener).toHaveBeenCalledWith(channel, registered);
   });
+
+  it("registers the renderer with the main process on subscribe and deregisters on cleanup", () => {
+    const invoke = vi.fn().mockResolvedValue(ok(undefined));
+    const on = vi.fn();
+    const removeListener = vi.fn();
+    const api = createDesktopApi({ invoke, on, removeListener });
+
+    // Invalid request IDs never reach the main process either.
+    api.chat.subscribe("not-a-uuid", vi.fn());
+    expect(invoke).not.toHaveBeenCalled();
+
+    api.chat.subscribe(chatRequestId, vi.fn());
+    expect(invoke).toHaveBeenNthCalledWith(1, CHAT_CHANNELS.subscribeRequest, { requestId: chatRequestId });
+
+    const cleanup = api.chat.subscribe(chatRequestId, vi.fn());
+    invoke.mockClear();
+    cleanup();
+    expect(invoke).toHaveBeenNthCalledWith(1, CHAT_CHANNELS.unsubscribeRequest, { requestId: chatRequestId });
+  });
 });

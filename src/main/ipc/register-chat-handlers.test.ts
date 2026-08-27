@@ -271,6 +271,54 @@ describe("registerChatHandlers", () => {
     expect(completed.message?.content).toBe(expectedChunks.join(""));
   });
 
+  it("clears the coalescer timer when a stream aborts without a terminal event", async () => {
+    vi.useFakeTimers();
+    const clearIntervalSpy = vi.spyOn(globalThis, "clearInterval");
+    const rid = nextRequestId();
+    const service = makeService(async (_input, emit) => {
+      emit?.({ type: "text-delta", requestId: rid, messageId: MESSAGE_ID, text: "partial" });
+      throw new Error("provider connection lost mid-stream");
+    });
+    const { ipc } = setup(service);
+    const window = new FakeWindow();
+    registry.set(rid, new Set([window]));
+
+    await expect(invoke(ipc, CHAT_CHANNELS.send, SEND_INPUT)).rejects.toThrow("provider connection lost mid-stream");
+    // Even though no terminal event arrived, the flush timer must be released.
+    expect(clearIntervalSpy).toHaveBeenCalled();
+
+    const ticksBefore = window.delivered().length;
+    await vi.advanceTimersByTimeAsync(4000);
+    // No residual timer keeps flushing into the request after the stream died.
+    expect(window.delivered().length).toBe(ticksBefore);
+    clearIntervalSpy.mockRestore();
+  });
+
+  it("tracks each window once no matter how many requests subscribe it", async () => {
+    const service = makeService();
+    windows = [];
+    registry = new Map();
+    const ipc = new Map<string, InvokeHandler>();
+    windows.push(new FakeWindow());
+    const onWindowClosed = vi.fn();
+    registerChatHandlers({
+      ipc,
+      service: service as never,
+      requestHub: registry as never,
+      resolveWindowFromSender: (sender) => (sender === "sender" ? windows.at(-1) : undefined),
+      openCitation: async () => ({ ok: true as const, value: { opened: "document" as const } }),
+      onWindowClosed
+    });
+    for (let i = 0; i < 5; i++) {
+      await invoke(ipc, CHAT_CHANNELS.subscribeRequest, { requestId: nextRequestId() });
+    }
+    const window = FakeWindow.all.at(-1)!;
+    window.destroy();
+    // Duplicate 'destroyed' listeners would fire forgetWindow five times.
+    expect(registry.size).toBe(0);
+    expect(onWindowClosed).toHaveBeenCalledTimes(1);
+  });
+
   it("exposes CRUD/list messages/citation/stop handlers with validated inputs", async () => {
     const openCitation = vi.fn(async () => ({ ok: true as const, value: { opened: "document" as const } }));
     const service = makeService();
