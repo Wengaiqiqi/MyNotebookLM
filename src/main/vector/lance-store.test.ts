@@ -17,6 +17,18 @@ async function createRawTable(dir: string, data: Record<string, unknown>[]): Pro
 const rawRow = (value: ReturnType<typeof row>): Record<string, unknown> => { const { locator: _locator, ...stored } = value; return { locatorJson: "{}", ...stored }; };
 
 describe("LanceStore", () => {
+  it("health validates the table schema and row identity", async () => {
+    const dir = await mkdtemp(path.join(os.tmpdir(), "lance-health-"));
+    const store = await LanceStore.open(dir);
+    const space = { id: "00000000-0000-4000-8000-000000000001", dimension: 3 };
+    try {
+      await expect(store.health(space)).rejects.toThrow();
+      await store.createSpace(space);
+      await expect(store.health(space)).resolves.toEqual({ indexedCount: 0 });
+      await store.upsert(space, [row("health-row", [1, 0, 0], "health")]);
+      await expect(store.health(space, "other-project")).rejects.toThrow(/validation/);
+    } finally { await store.close(); await rm(dir, { recursive: true, force: true }); }
+  });
   it("creates/opens, upserts, counts, searches, filters and deletes real data", async () => {
     const dir = await mkdtemp(path.join(os.tmpdir(), "lance-store-"));
     const store = await LanceStore.open(dir);

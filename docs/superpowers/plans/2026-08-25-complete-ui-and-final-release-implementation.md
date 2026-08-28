@@ -108,13 +108,25 @@ No new visual asset commit is created for this waived gate. The documentation ch
 - Create: `src/renderer/src/vector/IndexStatus.test.tsx`
 - Create: `src/renderer/src/vector/SpaceMigrationDialog.tsx`
 - Create: `src/renderer/src/vector/SpaceMigrationDialog.test.tsx`
+- Create: `src/renderer/src/model-settings/SettingsView.test.tsx`
+- Create: `docs/verification/screenshots/index-space-zh-light.png`
+- Create: `docs/verification/screenshots/index-space-en-dark.png`
+- Modify: `e2e/desktop.spec.ts`
+- Modify: `src/main/index.ts`
+- Modify: `src/main/sources/ingestion-service.integration.test.ts`
+- Modify: `src/main/vector/lance-store.ts`
+- Modify: `src/main/vector/lance-store.test.ts`
+- Modify: `src/renderer/src/App.tsx`
+- Modify: `src/renderer/src/locales/en.ts`
+- Modify: `src/renderer/src/locales/zh-CN.ts`
 - Modify: `src/renderer/src/model-settings/SettingsView.tsx`
 - Modify: `src/renderer/src/styles.css`
 
-- [ ] Write failing tests for healthy/unavailable/corrupt/building/failed states, model download, optimize, rebuild, migrate, cancel and failed migration retaining old Space.
-- [ ] Implement the approved index settings view and centered confirmation/progress dialogs; disable only conflicting mutations while a task runs, never unrelated navigation.
-- [ ] Add a real Electron screenshot for the index-space states under `docs/verification/screenshots/`; compare against `docs/ui/complete/README.md` and correct differences.
-- [ ] Review and commit `feat: add complete vector management interface`.
+- [x] Write failing tests for healthy/unavailable/corrupt/building/failed states, configure-model repair, optimize, rebuild, migrate, cancel and failed migration retaining old Space. Do not expose a manual embedding-model download action; built-in local artifacts remain an internal on-demand concern.
+- [x] Implement the approved independent data/index settings page and centered confirmation/progress dialogs; disable only conflicting mutations while a task runs, never unrelated navigation.
+- [x] Add real Electron screenshots for the index-space states under `docs/verification/screenshots/`; compare against `docs/ui/complete/README.md` and correct differences.
+- [x] Independent read-only review PASS after repair/re-review. Main-model evidence (2026-08-29): focused vector/settings tests `5 files / 54 tests`, full suite `98 files / 916 tests`, `npm run typecheck`, `npm run build`, Task 4 Electron E2E `1/1`, and `git diff --check` passed. The E2E uses a fake OpenAI-compatible embedding profile, confirms migration, and observes its validation task complete. A separate read-only review also passed the Windows-only real-worker integration-test timeout stabilization.
+- [x] Review and commit `feat: add complete vector management interface`.
 
 ## Task 5: Implement Approved Research Chat and Citations UI
 

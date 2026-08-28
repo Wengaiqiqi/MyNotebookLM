@@ -212,13 +212,33 @@ button:disabled { cursor: not-allowed; opacity: .55; }
 .settings-center { display: grid; grid-template-columns: 185px minmax(0, 1fr); min-height: 0; border: 1px solid var(--border); border-radius: 13px; background: var(--surface); }
 .settings-center > nav { display: flex; flex-direction: column; gap: 4px; padding: 18px 10px; border-right: 1px solid var(--border); }
 .settings-center > nav > * { min-height: 42px; padding: 11px 12px; border-radius: 7px; font-weight: 500; }
-.settings-center > nav strong { color: white; background: var(--accent); }
+.settings-center > nav button { border: 0; color: inherit; background: transparent; text-align: left; cursor: pointer; }
+.settings-center > nav button:hover { background: var(--surface-soft); }
+.settings-center > nav button[aria-current="page"] { color: white; background: var(--accent); }
 .settings-model-content { min-width: 0; padding: 22px; }
 .settings-model-content > h3 { margin: 0 0 18px; font-size: 23px; }
+.settings-index-content { align-content: start; }
 .settings-model-content .model-profile-form { padding: 19px; box-shadow: none; }
 .settings-model-content .model-form-heading p, .settings-model-content .model-step { display: none; }
 .settings-model-content .provider-mark { display: none; }
 .settings-model-content .model-form-heading { min-height: 38px; }
+.settings-index-panel { margin-top: 24px; padding-top: 22px; border-top: 1px solid var(--border); }
+.settings-index-panel > h3 { margin: 0 0 14px; font-size: 20px; }
+.index-status { display: grid; gap: 12px; padding: 18px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface-soft); }
+.index-status-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.index-status-heading h4 { margin: 3px 0 0; font-size: 18px; }
+.index-status-badge { padding: 4px 9px; border-radius: 999px; color: #278c54; background: color-mix(in srgb, #278c54 12%, transparent); font-size: 12px; font-weight: 650; }
+.index-status-copy, .index-status-preservation { margin: 0; color: var(--muted); line-height: 1.45; }
+.index-status-preservation { color: var(--text); font-weight: 600; }
+.index-status-unavailable .index-status-copy, .index-status-failed .index-status-copy { color: var(--danger); }
+.index-task-progress { display: grid; gap: 7px; padding: 9px; border-radius: 8px; background: var(--surface); }
+.index-task-progress progress { width: 100%; height: 8px; accent-color: var(--accent); }
+.index-status-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
+.index-status-actions button { min-height: 36px; padding: 0 11px; border: 1px solid var(--border); border-radius: 7px; background: var(--surface); cursor: pointer; font-size: 12px; }
+.index-status-actions button:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
+.index-status-actions .danger-button { border-color: var(--danger); color: var(--danger); }
+.vector-migration-dialog { width: min(520px, 100%); }
+.vector-migration-dialog .index-status-preservation { margin-top: 12px; }
 .settings-actions { display: grid; grid-template-columns: 1fr 140px 170px; align-items: center; gap: 14px; padding-top: 22px; }
 .settings-actions > span { color: var(--muted); font-size: 13px; }
 .settings-actions button { min-height: 42px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); cursor: pointer; }

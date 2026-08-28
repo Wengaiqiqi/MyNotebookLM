@@ -35,7 +35,7 @@
 | --- | --- | --- | --- | --- |
 | source-import | Task 3 | 文件/URL 导入、支持格式说明、来源校验、队列/阶段进度、取消、重试/删除、来源选择与重启恢复、已填充来源列表 | Foundation 全窗口布局；待 Task 3 记录真实 Electron 截图 | 未生成；imagegen 豁免；prompt set：N/A |
 | source-task-error | Task 3 | 可读失败原因、重试、移除、打开设置、检查/重建索引；对话框覆盖完整视口并居中 | Foundation 全窗口布局；待 Task 3 记录真实 Electron 截图 | 未生成；imagegen 豁免；prompt set：N/A |
-| index-space | Task 4 | Space 指纹、模型下载/构建进度、健康/不可用/损坏/失败状态、优化、重建、迁移、取消及失败后保留旧 Space 的回滚路径 | 设置工作区沿用 Foundation 导航与窗口几何；待 Task 4 记录真实 Electron 截图 | 未生成；imagegen 豁免；prompt set：N/A |
+| index-space | Task 4 | 独立“数据与索引”页展示 Space 指纹、健康/不可用/损坏/失败状态、构建进度、优化、重建、迁移、取消及失败后保留旧 Space 的回滚路径；不提供手动下载嵌入模型，缺少模型时引导到“模型服务” | Foundation 设置工作区；已记录 `index-space-zh-light.png` 与 `index-space-en-dark.png`，均为真实 Electron `1803x1128`；待 Gate F 用户最终书面批准 | 未生成 mockup；真实 Electron 截图；prompt set：N/A |
 | research-chat | Task 5 | 会话新建/选择/重命名/归档/删除、引用流式回答、来源 chips、引用详情及打开原文件/URL、停止、复制、重新生成、模型覆盖、回退提示和导入/设置/重建修复动作 | 工作区可含引用详情侧栏，但仍是单一连续窗口；待 Task 5 记录真实 Electron 截图 | 未生成；imagegen 豁免；prompt set：N/A |
 | notes | Task 6 | Markdown 编辑与安全预览、来源/消息/引用关联、新建/编辑/归档/恢复/删除、保存冲突处理、显式 AI 标题动作及失败保留原标题和正文 | Foundation 全窗口布局；待 Task 6 记录真实 Electron 截图 | 未生成；imagegen 豁免；prompt set：N/A |
 | transformations | Task 6 | 摘要、要点、Q&A、自定义规则；四个明确文本占位符校验；运行进度、取消、重试、幂等洞察结果和转换为笔记 | Foundation 全窗口布局；待 Task 6 记录真实 Electron 截图 | 未生成；imagegen 豁免；prompt set：N/A |

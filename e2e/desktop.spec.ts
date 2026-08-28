@@ -588,3 +588,58 @@ test("failed source task hydrates with English dark error and retry action", asy
     await closeElectron(app);
   }
 });
+
+test("vector health settings use the Foundation layout in zh light and en dark", async ({}, testInfo) => {
+  const userDataDir = testInfo.outputPath("user-data");
+  await fs.mkdir(userDataDir, { recursive: true });
+  await fs.mkdir(path.resolve("docs/verification/screenshots"), { recursive: true });
+  const provider = await startFakeOpenAi();
+  const { app, page } = await launchWithUserData(userDataDir);
+  try {
+    await skipOnboarding(page);
+    await page.getByRole("button", { name: "新建项目" }).first().click();
+    await page.getByLabel("项目名称").fill("索引健康截图");
+    await page.getByRole("button", { name: "确认" }).click();
+    await expect(page.getByText("索引健康截图").first()).toBeVisible();
+    await page.evaluate(async ({ baseUrl }) => {
+      const api = (window as unknown as { myNotebook: any }).myNotebook;
+      const projects = await api.projects.list();
+      const profiles = await api.models.listProfiles();
+      if (!profiles.ok) throw new Error("profiles unavailable");
+      const embeddingProfileId = "44444444-4444-4444-8444-444444444444";
+      const embedding = await api.models.saveProfile({ profile: { id: embeddingProfileId, name: "E2E Embedding", provider: "openai-compatible", capability: "embedding", baseUrl, modelId: "text-embedding-e2e", enabled: true }, apiKey: "e2e-key" });
+      const generationProfileId = "33333333-3333-4333-8333-333333333333";
+      const generation = await api.models.saveProfile({ profile: { id: generationProfileId, name: "E2E Generation", provider: "openai-compatible", capability: "generation", baseUrl, modelId: "gpt-e2e", enabled: true }, apiKey: "e2e-key" });
+      if (!embedding.ok || !generation.ok) throw new Error(`model profiles unavailable: ${embedding.ok ? "generation" : embedding.error.code}`);
+      const current = projects.find((item: any) => item.name === "索引健康截图");
+      if (!current) throw new Error("project unavailable");
+      const routes = await api.models.setDefaultRoutes({ generationProfileId, embeddingProfileId });
+      if (!routes.ok) throw new Error("embedding route unavailable");
+    }, { baseUrl: provider.baseUrl });
+    await page.getByRole("button", { name: "设置", exact: true }).click();
+    await expect(page.getByRole("heading", { name: "设置" })).toBeVisible();
+    await page.getByRole("tab", { name: "数据与索引" }).click();
+    await expect(page.getByRole("heading", { name: "索引不可用" })).toBeVisible();
+    await page.locator(".index-status").scrollIntoViewIfNeeded();
+    await page.screenshot({ path: path.resolve("docs/verification/screenshots/index-space-zh-light.png") });
+
+    await page.getByRole("button", { name: "EN", exact: true }).click();
+    await page.getByRole("button", { name: "Dark" }).click();
+    await expect(page.locator("html")).toHaveAttribute("lang", "en");
+    await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
+    await expect(page.getByRole("tab", { name: "Data & indexing" })).toBeVisible();
+    await page.getByRole("tab", { name: "Data & indexing" }).click();
+    await expect(page.getByRole("heading", { name: "Index unavailable" })).toBeVisible();
+    await page.getByRole("button", { name: "Migrate embedding Space" }).click();
+    await expect(page.getByRole("dialog")).toBeVisible();
+    await page.screenshot({ path: path.resolve("docs/verification/screenshots/index-space-en-dark.png") });
+    await page.getByRole("dialog").getByRole("button", { name: "Migrate embedding Space" }).click();
+    await expect.poll(async () => page.evaluate(async () => {
+      const tasks = await (window as unknown as { myNotebook: any }).myNotebook.tasks.list({ projectId: (await (window as unknown as { myNotebook: any }).myNotebook.projects.list()).find((item: any) => item.name === "索引健康截图")?.id });
+      return tasks.find((task: any) => task.kind === "validation")?.state;
+    })).toBe("completed");
+  } finally {
+    await closeElectron(app);
+    await provider.close();
+  }
+});

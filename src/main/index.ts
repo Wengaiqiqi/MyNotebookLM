@@ -213,7 +213,7 @@ app.whenReady().then(async () => {
     getHealth: async ({ projectId }: { projectId: string }): Promise<Result<VectorHealthDto>> => {
       const space = spaces.active(projectId);
       if (!space) return failure("NOT_FOUND", "errors.notFound");
-      try { return { ok: true, value: { spaceId: space.id, healthy: (await lance.count(space)) >= 0, indexedCount: await lance.count(space) } }; } catch { return failure("INDEX_UNAVAILABLE", "errors.indexUnavailable", true); }
+      try { const health = await lance.health(space, projectId); return { ok: true, value: { spaceId: space.id, healthy: true, indexedCount: health.indexedCount } }; } catch (error) { if (/validation|schema mismatch|identity mismatch/i.test(error instanceof Error ? error.message : String(error))) return { ok: true, value: { spaceId: space.id, healthy: false, indexedCount: 0 } }; return failure("INDEX_UNAVAILABLE", "errors.indexUnavailable", true); }
     },
     startMigration: async ({ projectId, profileId }: { projectId: string; profileId: string }): Promise<Result<TaskDto>> => {
       const profile = settingsRepository.getProfile(profileId);

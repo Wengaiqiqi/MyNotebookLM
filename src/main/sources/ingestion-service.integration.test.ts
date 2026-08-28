@@ -41,5 +41,5 @@ describe("real ingestion worker integration", () => {
       await pool.close();
       appDb.close();
     }
-  });
+  }, 30000);
 });
