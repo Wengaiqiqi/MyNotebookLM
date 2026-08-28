@@ -128,7 +128,7 @@ No new visual asset commit is created for this waived gate. The documentation ch
 - Modify: `src/renderer/src/styles.css`
 
 - [ ] Write failing tests for new/select/rename/archive/delete conversation, send, streamed text, stop, copy, regenerate, citations, fallback banner, model override and all repair states.
-- [ ] Implement approved layout. Chat becomes available when at least one source revision is indexed and a generation route exists; otherwise show import/open-settings/rebuild actions.
+- [ ] Implement the 2026-08-28 approved direction in `docs/ui/complete/README.md`: source cards/progress above the cited chat, fixed right citation cards, and a large rounded multiline composer whose right controls expose model selection, capability-gated reasoning strength, and send/stop. Omit the reference image's left plus and permission controls. Chat becomes available when at least one source revision is indexed and a generation route exists; otherwise show import/open-settings/rebuild actions.
 - [ ] Citation buttons open the in-app detail first, then an explicit original-file/URL action.
 - [ ] Preserve scroll position when reading history; auto-follow only if the user remains near the bottom.
 - [ ] Add a real Electron screenshot for the research-chat states under `docs/verification/screenshots/`; compare against `docs/ui/complete/README.md` and correct differences.
