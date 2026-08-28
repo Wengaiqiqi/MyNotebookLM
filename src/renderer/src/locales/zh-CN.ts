@@ -129,9 +129,20 @@ const zhCN = {
     noSourcesTitle: "暂无来源",
     noSourcesBody: "导入的来源与引用内容将在这里显示。",
     ask: "针对这个项目提问",
-    sourceImportUnavailable: "资料导入将在后续步骤中提供。",
+    sourceImportUnavailable: "导入文件或网页，开始你的研究。",
     researchChatUnavailable: "研究对话将在资料导入功能提供后可用。",
-    settingsUnavailable: "设置将在后续步骤中提供。"
+    settingsUnavailable: "设置将在后续步骤中提供。",
+    chooseFiles: "选择文件",
+    importUrl: "导入网址",
+    webAddress: "网页地址",
+    removeSource: "移除",
+    indexed: "已建立索引",
+    pending: "待处理",
+    selected: "已选择",
+    formats: "支持 PDF、DOCX、PPTX、XLSX、TXT、Markdown、URL、CSV",
+    importing: "正在导入…",
+    importError: "导入失败",
+    task: { cancel: "取消任务", retry: "重试任务", remove: "移除任务", completed: "已完成", failed: "失败", queued: "排队中", running: "处理中", cancelled: "已取消", validating: "验证中", staging: "准备中", parsing: "解析中", chunking: "分块中", embedding: "嵌入中", indexing: "建立索引中", verifying: "校验中", cleanup: "清理中", finalizing: "收尾中", preparing: "准备中", generating: "生成中", saving: "保存中" }
   }
 } as const;
 

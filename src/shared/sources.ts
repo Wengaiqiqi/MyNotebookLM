@@ -113,6 +113,8 @@ export const sourceDtoSchema = z.object({
   createdAt: z.iso.datetime(),
   updatedAt: z.iso.datetime(),
   deletedAt: z.iso.datetime().nullable()
+  ,locator: z.string().trim().min(1).optional()
+  ,currentRevisionState: sourceRevisionStateSchema.optional()
 }).strict();
 
 export const sourceRevisionDtoSchema = z.object({

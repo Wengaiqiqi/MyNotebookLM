@@ -135,6 +135,22 @@ button:disabled { cursor: not-allowed; opacity: .55; }
 .sources-empty > span { color: color-mix(in srgb, var(--muted) 52%, transparent); font-size: 48px; }
 .sources-empty strong { margin: 18px 0 8px; font-size: 18px; }
 .sources-empty p { margin: 0; color: var(--muted); line-height: 1.6; }
+.source-list { min-height: 0; flex: 1; overflow-y: auto; padding: 8px; }
+.source-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px; padding: 8px; border-bottom: 1px solid var(--border); }
+.source-row.selected { border-radius: 8px; background: var(--accent-soft); }
+.source-select { display: grid; min-width: 0; gap: 4px; padding: 5px; border: 0; color: inherit; background: transparent; text-align: left; cursor: pointer; }
+.source-select strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.source-select small { color: var(--muted); }
+.source-row > button:not(.source-select) { align-self: start; padding: 5px; border: 0; color: var(--danger); background: transparent; cursor: pointer; }
+.task-progress { grid-column: 1 / -1; display: grid; gap: 6px; padding: 8px; border-radius: 7px; background: var(--surface-soft); }
+.task-progress-heading { display: flex; justify-content: space-between; font-size: 12px; }
+.task-progress progress { width: 100%; height: 7px; accent-color: var(--accent); }
+.task-progress-status, .task-error { color: var(--muted); font-size: 12px; }
+.task-error { margin: 0; color: var(--danger); }
+.task-actions { display: flex; justify-content: flex-end; gap: 8px; }
+.task-actions button { padding: 3px 7px; border: 1px solid var(--border); border-radius: 5px; background: var(--surface); cursor: pointer; font-size: 12px; }
+.format-help { margin: 9px 0 14px; color: var(--muted); font-size: 12px; }
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; }
 
 .dialog-layer { position: fixed; z-index: 100; inset: 0; display: grid; place-items: center; padding: 24px; background: rgb(24 24 28 / 48%); backdrop-filter: blur(1.5px); }
 .dialog-card { width: min(440px, 100%); padding: 24px; border: 1px solid var(--border); border-radius: 13px; background: var(--surface); box-shadow: 0 22px 70px rgb(0 0 0 / 28%); }

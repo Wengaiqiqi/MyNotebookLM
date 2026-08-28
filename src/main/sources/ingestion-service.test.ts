@@ -10,7 +10,7 @@ describe("ingestion progress", () => {
   });
   it("persists only a successful worker result through the service boundary", async () => {
     const calls: unknown[] = [];
-    const db = { transaction: (fn: () => void) => () => fn(), prepare: () => ({ all: () => [], get: () => undefined, run: (...args: unknown[]) => ({ changes: calls.push(args) && 1 }) }) } as any;
+    const db = { transaction: (fn: () => void) => () => fn(), prepare: () => ({ all: () => [], get: () => ({ ok: true }), run: (...args: unknown[]) => ({ changes: calls.push(args) && 1 }) }) } as any;
     const service = new IngestionService({ start: async () => ({ version: 1, type: "result", taskId: "task", chunks: [] }), cancel: () => undefined }, db);
     await service.run({ taskId: "task", revisionId: "revision", kind: "text", data: new Uint8Array(), updatedAt: "now" });
     expect(calls.length).toBeGreaterThan(0);

@@ -521,3 +521,70 @@ test("preload bridge completes cited RAG with a fake OpenAI-compatible provider"
     ]);
   }
 });
+
+test("source import UI is reachable and exposes approved formats", async ({}, testInfo) => {
+  const userDataDir = testInfo.outputPath("user-data");
+  await fs.mkdir(userDataDir, { recursive: true });
+  const { app, page } = await launchWithUserData(userDataDir);
+  try {
+    await skipOnboarding(page);
+    await page.getByRole("button", { name: "新建项目" }).first().click();
+    await page.getByLabel("项目名称").fill("来源导入截图");
+    await page.getByRole("button", { name: "确认" }).click();
+    await expect(page.getByText("来源导入截图").first()).toBeVisible();
+    await page.getByRole("button", { name: "导入资料" }).first().click();
+    const dialog = page.getByRole("dialog");
+    await expect(dialog).toBeVisible();
+    await expect(dialog.getByText(/支持 PDF.*DOCX.*PPTX.*XLSX.*TXT.*Markdown.*URL.*CSV/)).toBeVisible();
+    await expect(dialog.getByLabel("网页地址")).toBeVisible();
+    await expect(dialog.getByRole("button", { name: "选择文件" })).toBeEnabled();
+    await page.screenshot({ path: path.resolve("docs/verification/screenshots/source-import-zh-light.png") });
+  } finally {
+    await closeElectron(app);
+  }
+});
+
+test("failed source task hydrates with English dark error and retry action", async ({}, testInfo) => {
+  const userDataDir = testInfo.outputPath("user-data");
+  await fs.mkdir(userDataDir, { recursive: true });
+  const first = await launchWithUserData(userDataDir);
+  let projectId = "";
+  try {
+    await skipOnboarding(first.page);
+    await first.page.getByRole("button", { name: "新建项目" }).first().click();
+    await first.page.getByLabel("项目名称").fill("Failed task screenshot");
+    await first.page.getByRole("button", { name: "确认" }).click();
+    projectId = await first.page.evaluate(async () => {
+      const projects = await (window as unknown as { myNotebook: { projects: { list(): Promise<Array<{ id: string }>> } } }).myNotebook.projects.list();
+      if (!projects[0]) throw new Error("project not created");
+      return projects[0].id;
+    });
+  } finally {
+    await closeElectron(first.app);
+  }
+
+  const sourceId = "77777777-7777-4777-8777-777777777777";
+  const taskId = "88888888-8888-4888-8888-888888888888";
+  const now = new Date().toISOString();
+  const database = new Database(path.join(userDataDir, "data", "app.db"));
+  try {
+    database.prepare("INSERT INTO sources(id, project_id, kind, display_name, status, created_at, updated_at) VALUES (?, ?, 'text', ?, 'active', ?, ?)").run(sourceId, projectId, "Failed import.txt", now, now);
+    database.prepare("INSERT INTO tasks(id, project_id, source_id, kind, state, stage, progress_1000, attempt, error_code, error_message, idempotency_key, created_at, updated_at) VALUES (?, ?, ?, 'ingest', 'failed', 'parsing', 400, 1, 'NETWORK', 'errors.network', ?, ?, ?)").run(taskId, projectId, sourceId, `e2e-failed-${taskId}`, now, now);
+  } finally {
+    database.close();
+  }
+
+  const { app, page } = await launchWithUserData(userDataDir);
+  try {
+    await expect(page.getByText("Failed import.txt").first()).toBeVisible();
+    await page.getByRole("button", { name: "EN", exact: true }).click();
+    await page.getByRole("button", { name: "Dark" }).click();
+    await expect(page.locator("html")).toHaveAttribute("lang", "en");
+    await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
+    await expect(page.getByRole("alert").filter({ hasText: /network|connection/i })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Retry" })).toBeVisible();
+    await page.screenshot({ path: path.resolve("docs/verification/screenshots/source-task-error-en-dark.png") });
+  } finally {
+    await closeElectron(app);
+  }
+});

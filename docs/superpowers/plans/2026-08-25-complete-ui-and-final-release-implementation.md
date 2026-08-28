@@ -73,14 +73,33 @@ No new visual asset commit is created for this waived gate. The documentation ch
 - Create: `src/renderer/src/sources/ImportDialog.test.tsx`
 - Create: `src/renderer/src/tasks/TaskProgress.tsx`
 - Create: `src/renderer/src/tasks/TaskProgress.test.tsx`
+- Create: `docs/verification/screenshots/source-import-zh-light.png`
+- Create: `docs/verification/screenshots/source-task-error-en-dark.png`
+- Modify: `e2e/desktop.spec.ts`
+- Modify: `src/main/index.ts`
+- Modify: `src/main/ipc/register-source-handlers.ts`
+- Modify: `src/main/ipc/register-source-handlers.test.ts`
+- Modify: `src/main/sources/ingestion-service.ts`
+- Modify: `src/main/sources/ingestion-service.test.ts`
+- Modify: `src/main/sources/main-source-service.ts`
+- Modify: `src/main/sources/main-source-service.test.ts`
+- Modify: `src/main/sources/url-source.ts`
+- Modify: `src/preload/create-desktop-api.ts`
+- Modify: `src/preload/create-desktop-api.test.ts`
+- Modify: `src/renderer/src/App.tsx`
+- Modify: `src/renderer/src/App.test.ts`
+- Modify: `src/renderer/src/locales/en.ts`
+- Modify: `src/renderer/src/locales/zh-CN.ts`
 - Modify: `src/renderer/src/projects/ProjectView.tsx`
 - Modify: `src/renderer/src/styles.css`
+- Modify: `src/shared/sources.ts`
 
-- [ ] Write failing tests for file dialog/import URL, every allowed format, unsupported format error, progress stages, cancel, retry, delete, source selection and restart hydration.
-- [ ] Implement the approved source screens. File input is triggered only by the main-process chooser; URL dialog validates but main remains authoritative.
-- [ ] Show source locator/type, indexed revision, task status and concrete repair action. Keyboard/screen-reader live regions announce progress no more than once per second.
-- [ ] Add real Electron screenshots for the source-import and source-task-error states under `docs/verification/screenshots/`; compare against `docs/ui/complete/README.md` and correct visual differences.
-- [ ] Review and commit `feat: complete source ingestion interface`.
+- [x] Write failing tests for file dialog/import URL, every allowed format, unsupported format error, progress stages, cancel, retry, delete, source selection and restart hydration.
+- [x] Implement the approved source screens. File input is triggered only by the main-process chooser; URL dialog validates but main remains authoritative.
+- [x] Show source locator/type, indexed revision, task status and concrete repair action. Keyboard/screen-reader live regions announce progress no more than once per second.
+- [x] Add real Electron screenshots for the source-import and source-task-error states under `docs/verification/screenshots/`; compare against `docs/ui/complete/README.md` and correct visual differences.
+- [x] Independent read-only review PASS after repair/re-review. Main-model evidence (2026-08-28): full `95 files / 895 tests`, `npm run typecheck`, `npm run build`, Task 3 Electron E2E `2/2`, and `git diff --check` passed. Screenshots are real Electron `1803x1128` in `zh-CN/light` and `en/dark`; file paths stay main-only, URL redirects are revalidated, and late worker writes are rejected by task/source/revision state checks.
+- [x] Review and commit `feat: complete source ingestion interface`.
 
 ## Task 4: Implement Approved Vector Health and Migration UI
 

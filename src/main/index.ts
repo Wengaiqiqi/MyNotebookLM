@@ -25,6 +25,7 @@ import { TaskService } from "./tasks/task-service";
 import { WorkerPool } from "./tasks/worker-pool";
 import { IngestionService } from "./sources/ingestion-service";
 import { MainSourceService } from "./sources/main-source-service";
+import { createNodeUrlSource } from "./sources/url-source";
 import { createTaskUpdateFanout } from "./task-updates";
 import { readFileSync } from "node:fs";
 import { createMainWindow, registerTitleOverlayHandler } from "./window";
@@ -191,7 +192,7 @@ app.whenReady().then(async () => {
   if (typeof (appDatabase.connection as { prepare?: unknown }).prepare === "function") {
     await taskService.recoverAndContinueEmbedding(continueEmbedding, 60 * 60 * 1000);
   }
-  const sourceService = new MainSourceService(appDatabase.connection, taskService, ingestionService, appPaths.files, (taskId, revisionId) => taskRevisions.set(taskId, revisionId));
+  const sourceService = new MainSourceService(appDatabase.connection, taskService, ingestionService, appPaths.files, (taskId, revisionId) => taskRevisions.set(taskId, revisionId), createNodeUrlSource());
   const failure = <T>(code: "VALIDATION" | "NOT_FOUND" | "CONFLICT" | "CANCELLED" | "INDEX_UNAVAILABLE" | "INTERNAL", messageKey: string, recoverable = false): Result<T> => ({ ok: false, error: { code, messageKey, recoverable } });
   const activeTask = (projectId: string): TaskDto | undefined => {
     const row = appDatabase!.connection.prepare("SELECT * FROM tasks WHERE project_id = ? AND state IN ('queued','running') AND kind IN ('validation','optimize') ORDER BY created_at DESC LIMIT 1").get(projectId) as { id?: string } | undefined;

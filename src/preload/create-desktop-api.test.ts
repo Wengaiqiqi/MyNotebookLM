@@ -57,6 +57,15 @@ const internalFailure = {
 };
 
 describe("createDesktopApi", () => {
+  it("unwraps strict source and task list results from main handlers", async () => {
+    const source = { id: "22222222-2222-4222-8222-222222222222", projectId: project.id, kind: "pdf" as const, displayName: "Report.pdf", status: "active" as const, currentRevisionId: null, createdAt: "2026-08-26T00:00:00.000Z", updatedAt: "2026-08-26T00:00:00.000Z", deletedAt: null };
+    const task = { id: "33333333-3333-4333-8333-333333333333", projectId: project.id, sourceId: source.id, kind: "ingest" as const, state: "queued" as const, stage: "staging" as const, progress: 0, attempt: 0, error: null, idempotencyKey: null, createdAt: "2026-08-26T00:00:00.000Z", updatedAt: "2026-08-26T00:00:00.000Z" };
+    const invoke = vi.fn().mockResolvedValueOnce(ok([source])).mockResolvedValueOnce(ok([task]));
+    const api = createDesktopApi({ invoke });
+    await expect(api.sources?.list({ projectId: project.id })).resolves.toEqual([source]);
+    await expect(api.tasks?.list({ projectId: project.id })).resolves.toEqual([task]);
+  });
+
   it("preserves project commands while exposing only the named model settings groups", () => {
     const api = createDesktopApi({ invoke: vi.fn() });
 

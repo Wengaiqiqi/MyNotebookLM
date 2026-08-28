@@ -112,6 +112,7 @@ const titleOverlayResultSchema = resultSchema(z.undefined());
 const chatRequestEventSchemaList = Object.values(chatRequestEventSchemas);
 const chatRequestEventSchema = z.union(chatRequestEventSchemaList as unknown as [z.ZodType, z.ZodType, ...z.ZodType[]]);
 const projectResponse = (raw: unknown) => projectDtoSchema.parse(raw && typeof raw === "object" && "ok" in raw && (raw as { ok?: unknown }).ok === true && "value" in raw ? (raw as { value: unknown }).value : raw);
+const unwrapResult = (raw: unknown) => raw && typeof raw === "object" && "ok" in raw && (raw as { ok?: unknown }).ok === true && "value" in raw ? (raw as { value: unknown }).value : raw;
 
 async function invokeResult<I, O>(
   ipc: IpcInvoker,
@@ -164,12 +165,12 @@ export function createDesktopApi(ipc: IpcInvoker): DesktopApi {
       chooseFiles: async (input) => { const parsed = z.object({ projectId: z.uuid() }).strict().safeParse(input); if (!parsed.success) return null; const raw = await ipc.invoke(SOURCE_CHANNELS.chooseFiles, parsed.data); const unwrapped = raw && typeof raw === "object" && "value" in raw ? (raw as { value: unknown }).value : raw; return unwrapped === null || unwrapped === undefined ? null : z.string().array().parse(unwrapped); },
       importFile: (input) => invokeResult(ipc, SOURCE_CHANNELS.importFile, z.object({ projectId: z.uuid(), dialogToken: z.string().min(1) }).strict(), resultSchema(sourceDtoSchema), input),
       importUrl: (input) => invokeResult(ipc, SOURCE_CHANNELS.importUrl, z.object({ projectId: z.uuid(), url: z.url() }).strict(), resultSchema(sourceDtoSchema), input),
-      list: async (input) => sourceDtoSchema.array().parse(await ipc.invoke(SOURCE_CHANNELS.list, z.object({ projectId: z.uuid() }).strict().parse(input))),
+      list: async (input) => sourceDtoSchema.array().parse(unwrapResult(await ipc.invoke(SOURCE_CHANNELS.list, z.object({ projectId: z.uuid() }).strict().parse(input)))),
       remove: (input) => invokeResult(ipc, SOURCE_CHANNELS.remove, z.object({ projectId: z.uuid(), sourceId: z.uuid() }).strict(), resultSchema(z.undefined()), input),
       retry: (input) => invokeResult(ipc, SOURCE_CHANNELS.retry, z.object({ projectId: z.uuid(), sourceId: z.uuid() }).strict(), resultSchema(taskDtoSchema), input)
     },
     tasks: {
-      list: async (input) => taskDtoSchema.array().parse(await ipc.invoke(SOURCE_CHANNELS.listTasks, z.object({ projectId: z.uuid() }).strict().parse(input))),
+      list: async (input) => taskDtoSchema.array().parse(unwrapResult(await ipc.invoke(SOURCE_CHANNELS.listTasks, z.object({ projectId: z.uuid() }).strict().parse(input)))),
       cancel: (input) => invokeResult(ipc, SOURCE_CHANNELS.cancel, z.object({ projectId: z.uuid(), taskId: z.uuid() }).strict(), resultSchema(taskDtoSchema), input),
       subscribe: (projectId, listener) => { const parsedProject = z.uuid().safeParse(projectId); if (!parsedProject.success) return () => undefined; const channel = SOURCE_CHANNELS.update + ":" + parsedProject.data; const handler = (_event: unknown, raw: unknown) => { const parsed = taskDtoSchema.safeParse(raw); if (parsed.success && parsed.data.projectId === parsedProject.data) listener(parsed.data); }; ipc.on?.(channel, handler); return () => ipc.removeListener?.(channel, handler); }
     },

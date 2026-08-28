@@ -953,9 +953,9 @@ describe("App shell behavior", () => {
     const importButton = button(container, "Import sources");
     const settings = button(container, "Settings");
 
-    expect(importButton.title).toBe("Source import will be available in a later step.");
+    expect(importButton.title).toBe("Import files or web pages to start your research.");
     expect(container.querySelector(".workspace-empty p")?.textContent).toBe(
-      "Source import will be available in a later step."
+      "Import files or web pages to start your research."
     );
     expect(container.querySelector(".composer span")?.textContent).toBe(
       "Research chat will be available after source import."
@@ -965,7 +965,7 @@ describe("App shell behavior", () => {
 
     await click(button(container, "中文"));
 
-    expect(importButton.title).toBe("资料导入将在后续步骤中提供。");
+    expect(importButton.title).toBe("导入文件或网页，开始你的研究。");
     expect(container.querySelector(".composer span")?.textContent).toBe(
       "研究对话将在资料导入功能提供后可用。"
     );

@@ -1,5 +1,8 @@
 import { createHash } from "node:crypto";
 import { isIP } from "node:net";
+import { lookup } from "node:dns/promises";
+import * as http from "node:http";
+import * as https from "node:https";
 import { parseHTML } from "linkedom";
 import { Readability } from "@mozilla/readability";
 import type { SourceLocator } from "../../shared/sources";
@@ -57,6 +60,26 @@ export type FetchedArticle = {
   sections: FetchedSection[];
   contentHash: string;
 };
+export type UrlSource = { fetch(rawUrl: string): Promise<FetchedArticle> };
+
+/** Production adapter: resolve once per hop and pin the socket to that address. */
+export function createNodeUrlSource(): UrlSource {
+  const resolver: DnsResolver = async (host) => (await lookup(host, { all: true })).map((entry) => entry.address);
+  const client: SafeHttpClient = { request: (rawUrl, init) => new Promise((resolve, reject) => {
+    const url = new URL(rawUrl);
+    const transport = url.protocol === "https:" ? https : http;
+    const address = init.addresses[0];
+    if (!address) { reject(new Error("host did not resolve")); return; }
+    const request = transport.request({ hostname: url.hostname, port: url.port || undefined, path: `${url.pathname}${url.search}`, method: "GET", headers: { accept: "text/html,application/xhtml+xml" }, signal: init.signal, lookup: (_hostname, _options, callback) => callback(null, address, isIP(address) as 4 | 6) }, (response) => {
+      const chunks: Buffer[] = []; let size = 0;
+      response.on("data", (chunk: Buffer) => { size += chunk.length; if (size <= MAX_BODY_BYTES) chunks.push(chunk); else request.destroy(new Error("response too large")); });
+      response.on("end", () => resolve({ status: response.statusCode ?? 0, headers: Object.fromEntries(Object.entries(response.headers).map(([key, value]) => [key, Array.isArray(value) ? value[0] ?? "" : value ?? ""])), url: rawUrl, body: () => Buffer.concat(chunks) }));
+      response.on("error", reject);
+    });
+    request.once("error", reject); request.end();
+  }) };
+  return createUrlSource({ resolver, client });
+}
 
 function hostnameForResolve(url: URL): string {
   return url.hostname.replace(/^\[/, "").replace(/\]$/, "");

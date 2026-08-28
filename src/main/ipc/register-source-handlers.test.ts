@@ -43,4 +43,11 @@ describe("source IPC handlers", () => {
     await expect(bus.handlers.get(SOURCE_CHANNELS.list)!({}, { projectId })).resolves.toMatchObject({ ok: false, error: { code: "INTERNAL" } });
     await expect(bus.handlers.get(SOURCE_CHANNELS.listTasks)!({}, { projectId })).resolves.toMatchObject({ ok: false, error: { code: "INTERNAL" } });
   });
+
+  it("maps authoritative source safety failures without leaking paths", async () => {
+    const bus = ipc();
+    registerSourceHandlers(bus as any, { importFile: vi.fn(), importUrl: vi.fn(async () => { throw Object.assign(new Error("private address"), { code: "UNSAFE_INPUT" }); }), listSources: () => [], listTasks: () => [] } as any);
+    const result = await bus.handlers.get(SOURCE_CHANNELS.importUrl)!({}, { projectId, url: "https://example.com" });
+    expect(result).toEqual({ ok: false, error: { code: "UNSAFE_INPUT", messageKey: "errors.unsafeInput", recoverable: false } });
+  });
 });

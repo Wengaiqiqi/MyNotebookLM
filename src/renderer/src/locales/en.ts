@@ -129,9 +129,20 @@ const en = {
     noSourcesTitle: "No sources yet",
     noSourcesBody: "Imported sources and citations will appear here.",
     ask: "Ask about this project",
-    sourceImportUnavailable: "Source import will be available in a later step.",
+    sourceImportUnavailable: "Import files or web pages to start your research.",
     researchChatUnavailable: "Research chat will be available after source import.",
-    settingsUnavailable: "Settings will be available in a later step."
+    settingsUnavailable: "Settings will be available in a later step.",
+    chooseFiles: "Choose files",
+    importUrl: "Import URL",
+    webAddress: "Web address",
+    removeSource: "Remove",
+    indexed: "Indexed",
+    pending: "Pending",
+    selected: "Selected",
+    formats: "Supported: PDF, DOCX, PPTX, XLSX, TXT, Markdown, URL, CSV",
+    importing: "Importing…",
+    importError: "Import failed",
+    task: { cancel: "Cancel task", retry: "Retry task", remove: "Remove task", completed: "Completed", failed: "Failed", queued: "Queued", running: "In progress", cancelled: "Cancelled", validating: "Validating", staging: "Preparing", parsing: "Parsing", chunking: "Chunking", embedding: "Embedding", indexing: "Indexing", verifying: "Verifying", cleanup: "Cleaning up", finalizing: "Finalizing", preparing: "Preparing", generating: "Generating", saving: "Saving" }
   }
 } as const;
 
