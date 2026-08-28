@@ -13,36 +13,24 @@
 ## Global Constraints
 
 - Do not run `npm run package:win` before Task 10.
-- New screens cannot be implemented until Task 1 assets receive explicit user approval.
+- New screens use the existing Foundation UI visual baseline under the written Task 1 exemption dated 2026-08-28; each feature task still requires a real Electron screenshot and Gate F evidence.
 - All dialogs center over the whole viewport; backdrop covers sidebar and workspace; focus is trapped and restored.
 - Sidebar bottom centers Settings, `中文 | EN`, and `浅色 | 深色`; language/theme controls remain compact.
 - Visible actions either work or show a concrete repair action. No permanent disabled placeholder copy.
 - Every component state has identical zh-CN/en translation keys and correct light/dark variables.
 - Keep render-process Node access disabled and sanitize all generated/source Markdown.
 
-## Task 1: Mandatory High-Fidelity Visual Approval Gate
+## Task 1: Visual Baseline Decision and Evidence Gate
 
 **Files:**
-- Create: `docs/ui/complete/source-import.png`
-- Create: `docs/ui/complete/source-task-error.png`
-- Create: `docs/ui/complete/index-space.png`
-- Create: `docs/ui/complete/research-chat.png`
-- Create: `docs/ui/complete/notes.png`
-- Create: `docs/ui/complete/transformations.png`
-- Create: `docs/ui/complete/model-routing.png`
 - Create: `docs/ui/complete/README.md`
+- Use as visual baseline: `docs/ui/foundation/README.md` and its five approved PNGs.
 
-- [ ] Use the image-generation skill to create one separate 1600x1000 Windows desktop mockup for each file above, continuing the approved visual language, current sidebar and seamless native top-right controls.
-- [ ] `source-import.png`: file/URL choices, supported format copy, queue/progress/cancel and populated source list.
-- [ ] `source-task-error.png`: mathematically centered failure dialog with readable cause, retry, remove and settings/index repair actions.
-- [ ] `index-space.png`: active Space fingerprint, model download/build progress, health, optimize, rebuild and safe migration/rollback status.
-- [ ] `research-chat.png`: conversation list, cited streaming answer, source chips, citation detail panel, stop/copy/regenerate and model override.
-- [ ] `notes.png`: Markdown note editor, linked evidence, save state and explicit AI-title action.
-- [ ] `transformations.png`: summary/key points/Q&A/custom rules, run progress, insight result and convert-to-note.
-- [ ] `model-routing.png`: per-task preferred/fallback profiles, drag/order controls and visible fallback history.
-- [ ] Update README with exact approved states, geometry and interaction notes.
-- [ ] Present all seven images separately to the user and stop implementation. Record explicit approval in README only after the user approves or revise until approved.
-- [ ] Commit approved assets as `docs: approve complete product interface`.
+- [x] On 2026-08-28, the user gave written approval to waive the seven new generated mockups. Do not run imagegen and do not create the seven PNG files.
+- [x] Reuse the approved Foundation UI directly for feature pages; record the baseline, consistency rules, required feature states/actions, and the evidence handoff in `docs/ui/complete/README.md`.
+- [x] Defer final page-by-page visual proof to the owning feature tasks and Gate F: capture real Windows Electron screenshots in Chinese/light and English/dark where state differs.
+
+No new visual asset commit is created for this waived gate. The documentation changes remain uncommitted pending independent read-only acceptance and the main model's integration decision.
 
 ## Task 2: Refactor the Application Shell Without Changing Behavior
 
@@ -86,7 +74,7 @@
 - [ ] Write failing tests for file dialog/import URL, every allowed format, unsupported format error, progress stages, cancel, retry, delete, source selection and restart hydration.
 - [ ] Implement the approved source screens. File input is triggered only by the main-process chooser; URL dialog validates but main remains authoritative.
 - [ ] Show source locator/type, indexed revision, task status and concrete repair action. Keyboard/screen-reader live regions announce progress no more than once per second.
-- [ ] Add E2E screenshots matching `source-import.png` and `source-task-error.png`; correct visual differences.
+- [ ] Add real Electron screenshots for the source-import and source-task-error states under `docs/verification/screenshots/`; compare against `docs/ui/complete/README.md` and correct visual differences.
 - [ ] Review and commit `feat: complete source ingestion interface`.
 
 ## Task 4: Implement Approved Vector Health and Migration UI
@@ -101,7 +89,7 @@
 
 - [ ] Write failing tests for healthy/unavailable/corrupt/building/failed states, model download, optimize, rebuild, migrate, cancel and failed migration retaining old Space.
 - [ ] Implement the approved index settings view and centered confirmation/progress dialogs; disable only conflicting mutations while a task runs, never unrelated navigation.
-- [ ] Add an Electron screenshot matching `index-space.png`; correct differences.
+- [ ] Add a real Electron screenshot for the index-space states under `docs/verification/screenshots/`; compare against `docs/ui/complete/README.md` and correct differences.
 - [ ] Review and commit `feat: add complete vector management interface`.
 
 ## Task 5: Implement Approved Research Chat and Citations UI
@@ -119,7 +107,7 @@
 - [ ] Implement approved layout. Chat becomes available when at least one source revision is indexed and a generation route exists; otherwise show import/open-settings/rebuild actions.
 - [ ] Citation buttons open the in-app detail first, then an explicit original-file/URL action.
 - [ ] Preserve scroll position when reading history; auto-follow only if the user remains near the bottom.
-- [ ] Add screenshot matching `research-chat.png`; correct differences.
+- [ ] Add a real Electron screenshot for the research-chat states under `docs/verification/screenshots/`; compare against `docs/ui/complete/README.md` and correct differences.
 - [ ] Review and commit `feat: complete cited research chat interface`.
 
 ## Task 6: Implement Approved Notes and Transformations UI
@@ -137,7 +125,7 @@
 - [ ] Write failing tests for note CRUD/archive/restore/link/save conflict/AI title and for built-in/custom rule CRUD/run/cancel/retry/idempotent insight/convert-to-note.
 - [ ] Implement approved notes and transformation screens with plain-text Markdown editing plus sanitized preview.
 - [ ] Rule editor documents exactly four placeholders and rejects unknown syntax inline.
-- [ ] Add screenshots matching `notes.png` and `transformations.png`; correct differences.
+- [ ] Add real Electron screenshots for the notes and transformations states under `docs/verification/screenshots/`; compare against `docs/ui/complete/README.md` and correct differences.
 - [ ] Review and commit `feat: complete notes and transformations interface`.
 
 ## Task 7: Implement Approved Model Routing UI and Complete Settings
@@ -152,7 +140,7 @@
 - [ ] Write failing tests for per-task route editing, ordered fallback, capability filtering, duplicate prevention, embedding single-profile rule, save errors and fallback history.
 - [ ] Implement the approved routing view. Use accessible move-up/move-down buttons instead of pointer-only drag behavior; pointer reordering may be added only if it shares the same commands.
 - [ ] Confirm generation and embedding can both be changed from Settings and model discovery/manual input still work.
-- [ ] Add screenshot matching `model-routing.png`; correct differences.
+- [ ] Add a real Electron screenshot for the model-routing states under `docs/verification/screenshots/`; compare against `docs/ui/complete/README.md` and correct differences.
 - [ ] Review and commit `feat: complete model routing settings`.
 
 ## Task 8: Complete Localization, Themes, Accessibility and Recovery
