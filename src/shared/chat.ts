@@ -1,7 +1,10 @@
 import { z } from "zod";
+import { sourceLocatorSchema } from "./sources";
 export const messageStateSchema=z.enum(["streaming","completed","cancelled","failed"]);
 export const citationLabelSchema=z.string().regex(/^S(?:[1-9]|1[0-2])$/);
-export const citationLocatorSchema=z.object({kind:z.string(),page:z.number().int().positive().optional(),slide:z.number().int().positive().optional(),sheet:z.string().optional(),cell:z.string().optional(),start:z.number().int().nonnegative().optional(),end:z.number().int().nonnegative().optional()}).strict();
+// Chat citations persist the source chunk locator verbatim; validating against the
+// same schema that governs chunk locators prevents drift (real PDFs carry endPage).
+export const citationLocatorSchema=sourceLocatorSchema;
 const usageSchema=z.object({inputTokens:z.number().int().nonnegative(),outputTokens:z.number().int().nonnegative(),totalTokens:z.number().int().nonnegative()});
 export const conversationSchema=z.object({id:z.string(),projectId:z.string(),title:z.string(),createdAt:z.string(),updatedAt:z.string(),deletedAt:z.string().nullable(),archivedAt:z.string().nullable()});
 export const citationSchema=z.object({id:z.string(),label:citationLabelSchema,sourceId:z.string(),sourceChunkId:z.string().nullable(),sourceDisplayName:z.string(),sourceKind:z.string(),locator:citationLocatorSchema,quote:z.string().optional()});

@@ -15,6 +15,7 @@ export interface UseChatStreamResult {
   repairableMessageId: string | null;
   state: ChatStreamState;
   error: AppErrorDto | null;
+  fallback: Extract<ChatRequestEvent, { type: "fallback" }> | null;
   canSend: boolean;
   send(question: string): Promise<boolean>;
   stop(): Promise<boolean>;
@@ -32,12 +33,14 @@ export function useChatStream(
   chat: ChatApi,
   projectId: string,
   conversationId: string,
-  restoredMessages: MessageDto[] = []
+  restoredMessages: MessageDto[] = [],
+  generationProfileId?: string
 ): UseChatStreamResult {
   const [messages, setMessages] = useState<MessageDto[]>(restoredMessages);
   const [streamingMessageId, setStreamingMessageId] = useState<string | null>(null);
   const [state, setState] = useState<ChatStreamState>("idle");
   const [error, setError] = useState<AppErrorDto | null>(null);
+  const [fallback, setFallback] = useState<Extract<ChatRequestEvent, { type: "fallback" }> | null>(null);
   const [repairableMessageId, setRepairableMessageId] = useState<string | null>(null);
   // Optimistic user rows are keyed by request id so the completed reconciliation
   // can drop them once the persisted transcript arrives, preventing duplicates.
@@ -106,6 +109,9 @@ export function useChatStream(
         }
         setRepairableMessageId(event.messageId);
         break;
+      case "fallback":
+        setFallback(event);
+        break;
       default:
         break;
     }
@@ -160,6 +166,7 @@ export function useChatStream(
 
   const send = useCallback((question: string): Promise<boolean> => {
     setError(null);
+    setFallback(null);
     setRepairableMessageId(null);
     const localUserMessage = {
       id: "local-user-" + Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 8),
@@ -184,9 +191,9 @@ export function useChatStream(
     setMessages((prev) => [...prev, localUserMessage]);
     return runTurn((requestId) => {
       optimisticUserRef.current.set(requestId, localUserMessage.id);
-      return chat.send({ requestId, projectId, conversationId, question });
+      return chat.send({ requestId, projectId, conversationId, question, ...(generationProfileId ? { generationProfileId } : {}) });
     });
-  }, [runTurn, chat, projectId, conversationId]);
+  }, [runTurn, chat, projectId, conversationId, generationProfileId]);
 
   const regenerate = useCallback((messageId: string): Promise<boolean> => {
     setError(null);
@@ -219,10 +226,11 @@ export function useChatStream(
     repairableMessageId,
     state,
     error,
+    fallback,
     canSend,
     send,
     stop,
     regenerate,
     repair
-  }), [messages, streamingMessageId, repairableMessageId, state, error, canSend, send, stop, regenerate, repair]);
+  }), [messages, streamingMessageId, repairableMessageId, state, error, fallback, canSend, send, stop, regenerate, repair]);
 }

@@ -150,6 +150,10 @@ const en = {
     repair: {
       retry: "Retry answer",
       repair: "Repair answer"
+    },
+    ui: {
+      conversations: "Conversations", newConversation: "New conversation", rename: "Rename", archive: "Archive", remove: "Delete", saveTitle: "Save conversation title", noConversations: "No conversations yet.", conversationTitle: "Conversation title",
+      citationTitle: "Source citations", citationEmpty: "Citations from answers will appear here.", openOriginal: "Open original source", opened: "Opened {{kind}}", sourceLabel: "Sources", indexed: "indexed", research: "Research", researchChat: "Research chat", askPlaceholder: "Ask about your sources…", model: "Model", generationModel: "Generation model", noModel: "No model", send: "Send", stop: "Stop", copy: "Copy", regenerate: "Regenerate", answerFailed: "Answer failed.", retryAnswer: "Retry answer", fallbackBanner: "The primary model was unavailable. The answer continued with a fallback model.", unavailableTitle: "Research chat is unavailable until a source is indexed and a generation model is configured.", unavailableImport: "Import a source and rebuild the index after processing completes.", unavailableModel: "Configure a generation model in settings to ask questions.", importSources: "Import sources", openSettings: "Open settings", rebuildIndex: "Rebuild index", pending: "pending", ready: "ready", sourceProgress: "{{stage}} · {{progress}}%", page: "Page", slide: "Slide", sheet: "Sheet", cell: "Cell"
     }
   },
   research: {

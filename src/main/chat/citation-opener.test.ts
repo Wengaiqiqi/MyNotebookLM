@@ -54,6 +54,13 @@ describe("CitationOpener", () => {
     expect(openExternal).not.toHaveBeenCalled();
   });
 
+  it("opens a stored source target only after project ownership validation", async () => {
+    const result = await makeOpener().openSource({ projectId: PROJECT_ID, sourceId: PDF_SOURCE_ID });
+    expect(result).toMatchObject({ ok: true, value: { opened: "document" } });
+    expect(openPath).toHaveBeenCalledWith(String.raw`C:\managed\content`);
+    expect(await makeOpener().openSource({ projectId: "99999999-9999-4999-8999-999999999999", sourceId: PDF_SOURCE_ID })).toMatchObject({ ok: false, error: { code: "NOT_FOUND" } });
+  });
+
   it("revalidates and opens the stored authoritative URL, never model text", async () => {
     addCitation({ id: "c-url", sourceId: URL_SOURCE_ID, locator: { kind: "section", sectionPath: "root", url: "https://example.com/article" } });
     const result = await makeOpener().openCitation({ projectId: PROJECT_ID, citationId: "c-url" });

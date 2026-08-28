@@ -4,6 +4,7 @@ import { modelProfileInputSchema, modelRouteAttemptDtoSchema, modelRouteDtoSchem
 import { createTransformationInputSchema, insightDtoSchema } from "./transformations";
 import { appSettingsDtoSchema } from "./settings";
 import { sourceDtoSchema, sourceLocatorSchema } from "./sources";
+import { citationLocatorSchema } from "./chat";
 import { taskDtoSchema } from "./tasks";
 import { listNotesInputSchema } from "./notes";
 
@@ -134,5 +135,16 @@ describe("shared DTO schemas", () => {
       paragraph: 2,
       endParagraph: 1
     })).toThrow();
+  });
+
+  it("accepts persisted source-chunk locators as citation locators", () => {
+    // Real PDF citations reuse the chunk locator verbatim, including multi-page spans.
+    expect(citationLocatorSchema.parse({ kind: "page", page: 1, endPage: 2 })).toEqual({ kind: "page", page: 1, endPage: 2 });
+    expect(citationLocatorSchema.parse({ kind: "page", page: 3 })).toEqual({ kind: "page", page: 3 });
+    expect(citationLocatorSchema.parse({ kind: "heading", depth: 1, headingPath: "第二章" })).toEqual({ kind: "heading", depth: 1, headingPath: "第二章" });
+    expect(citationLocatorSchema.parse({ kind: "row", sheet: "Sheet1", startRow: 1, endRow: 3 })).toEqual({ kind: "row", sheet: "Sheet1", startRow: 1, endRow: 3 });
+    expect(() => citationLocatorSchema.parse({ kind: "page", page: 0 })).toThrow();
+    expect(() => citationLocatorSchema.parse({ kind: "page", page: 3, endPage: 2 })).toThrow();
+    expect(() => citationLocatorSchema.parse({ unexpected: true })).toThrow();
   });
 });

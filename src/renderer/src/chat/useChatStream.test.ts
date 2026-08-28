@@ -83,6 +83,13 @@ afterEach(() => {
 });
 
 describe("useChatStream", () => {
+  it("passes the selected generation profile as a per-request override", async () => {
+    const h = createApi();
+    h.send.mockResolvedValue(makeOk(REQUEST_ID, MESSAGE_ID));
+    const { result } = renderHook(() => useChatStream(h.api.chat, PROJECT_ID, CONVERSATION_ID, [], "profile-override"));
+    await act(async () => { await result.current.send("q"); });
+    expect(h.send).toHaveBeenCalledWith(expect.objectContaining({ generationProfileId: "profile-override" }));
+  });
   it("optimistically shows the sent question as a user message right after send", async () => {
     const h = createApi();
     h.send.mockResolvedValue(makeOk(REQUEST_ID, MESSAGE_ID));
@@ -183,7 +190,7 @@ describe("useChatStream", () => {
       makeMessage({ id: "a1", sequence: 2, content: "older a" }),
       makeMessage({ id: "u2", sequence: 3, role: "user", content: "newer q", provider: null, profileId: null, model: null }),
       makeMessage({ id: "a2", sequence: 4, content: "newer a", citations: [{
-        id: "a2:S1:9", label: "S1", sourceId: PROJECT_ID, sourceChunkId: "c", sourceDisplayName: "Doc", sourceKind: "pdf", locator: { kind: "page", page: 1, start: 9 }
+        id: "a2:S1:9", label: "S1", sourceId: PROJECT_ID, sourceChunkId: "c", sourceDisplayName: "Doc", sourceKind: "pdf", locator: { kind: "page", page: 1, endPage: 2 }
       }] })
     ];
     const { result, rerender } = renderHook(

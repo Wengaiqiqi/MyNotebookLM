@@ -350,6 +350,7 @@ test("preload bridge completes cited RAG with a fake OpenAI-compatible provider"
     const project = await bootstrap.page.evaluate(() => (
       (window as unknown as { myNotebook: any }).myNotebook.projects.create({ name: "Preload RAG" })
     ));
+    await bootstrap.page.getByRole("button", { name: "稍后配置模型" }).click();
     await closeElectron(bootstrap.app);
 
     const database = new Database(path.join(userDataDir, "data", "app.db"));
@@ -511,6 +512,29 @@ test("preload bridge completes cited RAG with a fake OpenAI-compatible provider"
     expect(persisted.citation).toMatchObject({ label: "S1", sourceDisplayName: "authoritative-alpha.txt" });
     expect(persisted.citation.locator).toMatchObject({ kind: "paragraph", start: 0, end: 45 });
     expect(persisted.opened).toMatchObject({ ok: true, value: { opened: "document" } });
+    await restarted.app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]?.setSize(1802, 1128));
+    await restarted.page.waitForFunction(() => window.innerWidth >= 1700 && window.innerHeight >= 1000);
+    await expect(restarted.page.getByRole("heading", { name: "Cited RAG" })).toBeVisible();
+    await expect(restarted.page.getByRole("complementary", { name: "来源引用" })).toBeVisible();
+    const geometry = await restarted.page.evaluate(() => {
+      const citation = document.querySelector<HTMLElement>(".citation-panel");
+      const composer = document.querySelector<HTMLElement>(".chat-composer");
+      const cards = document.querySelector<HTMLElement>(".citation-cards");
+      return { citationBottom: citation?.getBoundingClientRect().bottom ?? 0, composerBottom: composer?.getBoundingClientRect().bottom ?? 0, scrollable: Boolean(cards && cards.scrollHeight > cards.clientHeight) };
+    });
+    expect(Math.abs(geometry.citationBottom - geometry.composerBottom)).toBeLessThanOrEqual(1);
+    expect(geometry.scrollable).toBe(true);
+    await restarted.page.getByRole("button", { name: /Cited RAG|对话/ }).click();
+    await expect(restarted.page.locator(".conversation-items.open")).toBeVisible();
+    await restarted.page.screenshot({ path: path.resolve("docs/verification/screenshots/research-chat-zh-light.png"), scale: "css", clip: { x: 0, y: 0, width: 1803, height: 1128 } });
+    await restarted.page.keyboard.press("Escape");
+    await expect(restarted.page.locator(".conversation-items.open")).toBeHidden();
+    await restarted.page.getByRole("button", { name: "EN", exact: true }).click();
+    await restarted.page.getByRole("button", { name: "Dark", exact: true }).click();
+    await expect(restarted.page.locator("html")).toHaveAttribute("lang", "en");
+    await expect(restarted.page.locator("html")).toHaveAttribute("data-theme", "dark");
+    await expect(restarted.page.getByRole("complementary", { name: "Source citations" })).toBeVisible();
+    await restarted.page.screenshot({ path: path.resolve("docs/verification/screenshots/research-chat-en-dark.png"), scale: "css", clip: { x: 0, y: 0, width: 1803, height: 1128 } });
   } finally {
     await Promise.allSettled([
       app ? closeElectron(app) : Promise.resolve(),

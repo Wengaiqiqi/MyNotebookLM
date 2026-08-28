@@ -273,7 +273,7 @@ app.whenReady().then(async () => {
       importFile: sourceService.importFile.bind(sourceService), importUrl: sourceService.importUrl.bind(sourceService),
       removeSource: sourceService.removeSource.bind(sourceService), retryTask: sourceService.retryTask.bind(sourceService),
       cancelTask: sourceService.cancelTask.bind(sourceService), ownsSource: sourceService.ownsSource.bind(sourceService), ownsTask: sourceService.ownsTask.bind(sourceService)
-    });
+    }, undefined, (input) => new CitationOpener(appDatabase!.connection).openSource(input));
     cleanupVectorHandlers = registerVectorHandlers(ipcMain, vectorService);
   }
   const routeRepository = new RouteRepository(settingsRepository);

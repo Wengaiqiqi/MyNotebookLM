@@ -38,6 +38,25 @@ export class CitationOpener {
     }
   }
 
+  async openSource(input: { projectId: string; sourceId: string }): Promise<Result<{ opened: "document" | "url" }>> {
+    try {
+      const row = this.db.prepare("SELECT s.kind, sr.original_path, sr.stored_path FROM sources s JOIN source_revisions sr ON sr.source_id = s.id WHERE s.id = ? AND s.project_id = ? AND s.status <> 'deleted' AND sr.state = 'ready' ORDER BY CASE WHEN sr.id = s.current_revision_id THEN 0 ELSE 1 END, sr.created_at DESC LIMIT 1").get(input.sourceId, input.projectId) as { kind?: string; original_path?: string; stored_path?: string } | undefined;
+      if (!row) return this.failure("NOT_FOUND", "errors.notFound");
+      if (row.kind === "url") {
+        if (!row.original_path) return this.failure("NOT_FOUND", "errors.sourceUnavailable");
+        let parsed: URL;
+        try { parsed = parseSafeUrl(row.original_path); } catch { return this.failure("UNSAFE_INPUT", "errors.unsafeInput"); }
+        if (parsed.href !== row.original_path) return this.failure("UNSAFE_INPUT", "errors.unsafeInput");
+        await this.shell.openExternal(parsed.href);
+        return { ok: true, value: { opened: "url" } };
+      }
+      if (!row.stored_path) return this.failure("NOT_FOUND", "errors.sourceUnavailable");
+      const outcome = await this.shell.openPath(row.stored_path);
+      if (typeof outcome === "string" && outcome !== "") return this.failure("INTERNAL", "errors.citationOpenFailed");
+      return { ok: true, value: { opened: "document" } };
+    } catch { return this.failure("INTERNAL", "errors.citationOpenFailed"); }
+  }
+
   private rowFor(citationId: string, projectId: string): CitationRow | undefined {
     const byId = this.db.prepare(
       "SELECT mc.source_id, mc.locator_json FROM message_citations mc JOIN messages m ON m.id = mc.message_id JOIN conversations c ON c.id = m.conversation_id WHERE mc.id = ? AND c.project_id = ?"

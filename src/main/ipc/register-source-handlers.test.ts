@@ -15,6 +15,14 @@ describe("source IPC handlers", () => {
     expect(result.ok).toBe(false);
     expect(service.removeSource).not.toHaveBeenCalled();
   });
+  it("opens a source only through the validated main-process opener", async () => {
+    const bus = ipc();
+    const openSource = vi.fn().mockResolvedValue({ ok: true, value: { opened: "document" } });
+    const service = { listSources: () => [], listTasks: () => [], ownsSource: vi.fn(() => true) };
+    registerSourceHandlers(bus as any, service as any, undefined, openSource);
+    await expect(bus.handlers.get(SOURCE_CHANNELS.open)!({}, { projectId, sourceId: "22222222-2222-4222-8222-222222222222" })).resolves.toEqual({ ok: true, value: { opened: "document" } });
+    expect(openSource).toHaveBeenCalledWith({ projectId, sourceId: "22222222-2222-4222-8222-222222222222" });
+  });
   it("does not read Electron dialog while registering when file selection is unused", () => {
     expect(() => registerSourceHandlers(ipc() as any, { listSources: () => [], listTasks: () => [] } as any, undefined as any)).not.toThrow();
   });

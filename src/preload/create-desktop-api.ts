@@ -166,6 +166,7 @@ export function createDesktopApi(ipc: IpcInvoker): DesktopApi {
       importFile: (input) => invokeResult(ipc, SOURCE_CHANNELS.importFile, z.object({ projectId: z.uuid(), dialogToken: z.string().min(1) }).strict(), resultSchema(sourceDtoSchema), input),
       importUrl: (input) => invokeResult(ipc, SOURCE_CHANNELS.importUrl, z.object({ projectId: z.uuid(), url: z.url() }).strict(), resultSchema(sourceDtoSchema), input),
       list: async (input) => sourceDtoSchema.array().parse(unwrapResult(await ipc.invoke(SOURCE_CHANNELS.list, z.object({ projectId: z.uuid() }).strict().parse(input)))),
+      open: (input) => invokeResult(ipc, SOURCE_CHANNELS.open, z.object({ projectId: z.uuid(), sourceId: z.uuid() }).strict(), resultSchema(chatOpenedResultValueSchema), input),
       remove: (input) => invokeResult(ipc, SOURCE_CHANNELS.remove, z.object({ projectId: z.uuid(), sourceId: z.uuid() }).strict(), resultSchema(z.undefined()), input),
       retry: (input) => invokeResult(ipc, SOURCE_CHANNELS.retry, z.object({ projectId: z.uuid(), sourceId: z.uuid() }).strict(), resultSchema(taskDtoSchema), input)
     },

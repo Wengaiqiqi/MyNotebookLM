@@ -27,7 +27,7 @@ import type { ModelRouteDto, ModelRouteAttemptDto, ModelTaskKind } from "./model
 import type { TaskDto } from "./tasks";
 import type { RetrievalSearchInput, SearchHitDto, VectorHealthDto, VectorProfileInput, VectorSpaceInput, VectorTaskIdInput, VectorTaskInput } from "./vector";
 
-export const SOURCE_CHANNELS = { chooseFiles: "sources:v1:choose-files", importFile: "sources:v1:import-file", importUrl: "sources:v1:import-url", list: "sources:v1:list", remove: "sources:v1:remove", retry: "sources:v1:retry", cancel: "tasks:v1:cancel", listTasks: "tasks:v1:list", subscribe: "tasks:v1:subscribe", update: "tasks:v1:update" } as const;
+export const SOURCE_CHANNELS = { chooseFiles: "sources:v1:choose-files", importFile: "sources:v1:import-file", importUrl: "sources:v1:import-url", list: "sources:v1:list", open: "sources:v1:open", remove: "sources:v1:remove", retry: "sources:v1:retry", cancel: "tasks:v1:cancel", listTasks: "tasks:v1:list", subscribe: "tasks:v1:subscribe", update: "tasks:v1:update" } as const;
 
 export const PROJECT_CHANNELS = {
   list: "projects:list",
@@ -123,7 +123,7 @@ export const chatCreateConversationInputSchema = z.object({ projectId: z.uuid(),
 export const chatRenameConversationInputSchema = z.object({ projectId: z.uuid(), conversationId: z.uuid(), title: chatTitleSchema }).strict();
 export const chatConversationInputSchema = z.object({ projectId: z.uuid(), conversationId: z.uuid() }).strict();
 export const chatListMessagesInputSchema = z.object({ projectId: z.uuid(), conversationId: z.uuid() }).strict();
-export const chatSendInputSchema = z.object({ requestId: z.uuid(), projectId: z.uuid(), conversationId: z.uuid(), question: z.string().trim().min(1).max(20_000) }).strict();
+  export const chatSendInputSchema = z.object({ requestId: z.uuid(), projectId: z.uuid(), conversationId: z.uuid(), question: z.string().trim().min(1).max(20_000), generationProfileId: z.uuid().optional() }).strict();
 export const chatStopInputSchema = z.object({ projectId: z.uuid(), requestId: z.uuid() }).strict();
 export const chatRegenerateInputSchema = z.object({ requestId: z.uuid(), projectId: z.uuid(), conversationId: z.uuid(), messageId: z.string().min(1).max(128) }).strict();
 export const chatRequestIdInputSchema = z.object({ requestId: z.uuid() }).strict();
@@ -175,7 +175,7 @@ export type ChatRequestEvent =
 export interface DesktopApi {
   vector: { getHealth(input: VectorTaskInput): Promise<Result<VectorHealthDto>>; startMigration(input: VectorProfileInput): Promise<Result<TaskDto>>; rebuild(input: VectorSpaceInput): Promise<Result<TaskDto>>; optimize(input: VectorSpaceInput): Promise<Result<TaskDto>>; cancelTask(input: VectorTaskIdInput): Promise<Result<TaskDto>>; subscribe(projectId: string, listener: (task: TaskDto) => void): () => void; };
   retrieval: { search(input: RetrievalSearchInput): Promise<Result<SearchHitDto[]>> };
-  sources?: { chooseFiles(input: { projectId: string }): Promise<string[] | null>; importFile(input: { projectId: string; dialogToken: string }): Promise<Result<SourceDto>>; importUrl(input: { projectId: string; url: string }): Promise<Result<SourceDto>>; list(input: { projectId: string }): Promise<SourceDto[]>; remove(input: { projectId: string; sourceId: string }): Promise<Result<void>>; retry(input: { projectId: string; sourceId: string }): Promise<Result<TaskDto>>; };
+  sources?: { chooseFiles(input: { projectId: string }): Promise<string[] | null>; importFile(input: { projectId: string; dialogToken: string }): Promise<Result<SourceDto>>; importUrl(input: { projectId: string; url: string }): Promise<Result<SourceDto>>; list(input: { projectId: string }): Promise<SourceDto[]>; open(input: { projectId: string; sourceId: string }): Promise<Result<{ opened: "document" | "url" }>>; remove(input: { projectId: string; sourceId: string }): Promise<Result<void>>; retry(input: { projectId: string; sourceId: string }): Promise<Result<TaskDto>>; };
   tasks?: { list(input: { projectId: string }): Promise<TaskDto[]>; cancel(input: { projectId: string; taskId: string }): Promise<Result<TaskDto>>; subscribe(projectId: string, listener: (task: TaskDto) => void): () => void; };
   projects: {
     list(): Promise<ProjectDto[]>;
@@ -231,7 +231,7 @@ export interface DesktopApi {
     listMessages(input: { projectId: string; conversationId: string }): Promise<Result<MessageDto[]>>;
   };
   chat: {
-    send(input: { requestId: string; projectId: string; conversationId: string; question: string }): Promise<Result<ChatSendResultValue>>;
+    send(input: { requestId: string; projectId: string; conversationId: string; question: string; generationProfileId?: string }): Promise<Result<ChatSendResultValue>>;
     stop(input: { projectId: string; requestId: string }): Promise<Result<boolean>>;
     regenerate(input: { requestId: string; projectId: string; conversationId: string; messageId: string }): Promise<Result<ChatSendResultValue>>;
     subscribe(requestId: string, listener: (event: ChatRequestEvent) => void): () => void;

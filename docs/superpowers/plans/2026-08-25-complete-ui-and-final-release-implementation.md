@@ -139,11 +139,11 @@ No new visual asset commit is created for this waived gate. The documentation ch
 - Modify: `src/renderer/src/projects/ProjectView.tsx`
 - Modify: `src/renderer/src/styles.css`
 
-- [ ] Write failing tests for new/select/rename/archive/delete conversation, send, streamed text, stop, copy, regenerate, citations, fallback banner, model override and all repair states.
-- [ ] Implement the 2026-08-28 approved direction in `docs/ui/complete/README.md`: source cards/progress above the cited chat, fixed right citation cards, and a large rounded multiline composer whose right controls expose model selection, capability-gated reasoning strength, and send/stop. Omit the reference image's left plus and permission controls. Chat becomes available when at least one source revision is indexed and a generation route exists; otherwise show import/open-settings/rebuild actions.
-- [ ] Citation buttons open the in-app detail first, then an explicit original-file/URL action.
-- [ ] Preserve scroll position when reading history; auto-follow only if the user remains near the bottom.
-- [ ] Add a real Electron screenshot for the research-chat states under `docs/verification/screenshots/`; compare against `docs/ui/complete/README.md` and correct differences.
+- [x] Write failing tests for new/select/rename/archive/delete conversation, send, streamed text, stop, copy, regenerate, citations, fallback banner, model override and all repair states.
+- [x] Implement the 2026-08-28 approved direction in `docs/ui/complete/README.md`: source cards/progress above the cited chat, fixed right citation cards, and a large rounded multiline composer whose right controls expose model selection, capability-gated reasoning strength, and send/stop. Omit the reference image's left plus and permission controls. Chat becomes available when at least one source revision is indexed and a generation route exists; otherwise show import/open-settings/rebuild actions.
+- [x] Citation buttons open the in-app detail first, then an explicit original-file/URL action.
+- [x] Preserve scroll position when reading history; auto-follow only if the user remains near the bottom.
+- [x] Add a real Electron screenshot for the research-chat states under `docs/verification/screenshots/`; compare against `docs/ui/complete/README.md` and correct differences. Real-pipeline evidence (2026-08-29): three real PDFs ingested via doubao-embedding-vision-24101, real glm-5.3 streamed answer persisted (717 chars, 15 S1/S2 citations), real-window screenshots `research-chat-zh-light.png` / `research-chat-en-dark.png`. A citation-locator schema drift (`endPage` rejected) that blanked the chat on real PDFs was found via the real run and fixed (`citationLocatorSchema` now reuses `sourceLocatorSchema`); focused 165/165, typecheck passed. Independent read-only review PASS (pixel-diff confirmed distinct themes; DB 1 user + 1 assistant completed, 15 citations).
 - [ ] Review and commit `feat: complete cited research chat interface`.
 
 ## Task 6: Implement Approved Notes and Transformations UI
