@@ -1,7 +1,9 @@
 import type Database from "better-sqlite3";
 import type { ModelProfileDto } from "../../shared/models";
 import type { AppErrorDto, Result } from "../../shared/app-errors";
-import type { ChatTurn, GenerationEvent, ModelProvider } from "../models/provider";
+import type { ChatTurn, ModelProvider } from "../models/provider";
+import { ModelRouter } from "../models/model-router";
+import { generateRouted } from "../models/routed-generation";
 import type { ConversationDto, MessageDto } from "../../shared/chat";
 import type { RetrievedCitation } from "./citation-parser";
 import { CitationStreamBuffer, finalizeCitations } from "./citation-parser";
@@ -21,6 +23,7 @@ export type RetrievalFn = (input: { projectId: string; question: string }) => Pr
 export type ChatSendDeps = {
   db: Database.Database;
   generationProfile?: ModelProfileDto | undefined;
+  router?: Pick<ModelRouter, "resolve">;
   providerFactory: (profile: ModelProfileDto) => ModelProvider;
   retrieval: RetrievalFn;
   now?: () => Date;
@@ -36,6 +39,7 @@ type StreamEvent =
   | { type: "delta"; requestId: string; messageId: string; text: string }
   | { type: "completed"; requestId: string; messageId: string; message: MessageDto }
   | { type: "cancelled"; requestId: string; messageId: string; message: MessageDto }
+  | { type: "fallback"; requestId: string; attempted: { provider: string; model: string; profileId: string | null }; next: { provider: string; model: string; profileId: string | null }; errorCode: string }
   | { type: "failed"; requestId: string; messageId: string; error: { code: string; messageKey: string; recoverable: boolean } };
 
 function appError(code: AppErrorDto["code"], messageKey: string, recoverable = false): AppErrorDto {
@@ -117,7 +121,7 @@ export class ChatService {
     const owner: SessionOwner = { projectId: input.projectId, userId: SESSION_USER };
     try {
       const repo = this.repo();
-      const profile = this.generationProfile();
+      const profile = this.generationProfiles()[0];
       if (!profile) return { ok: false, error: appError("VALIDATION", "errors.generationProfileMissing") };
       // Ownership is validated inside the repository before anything is written.
       const conversation = repo.getConversation(input.projectId, input.conversationId);
@@ -144,7 +148,7 @@ export class ChatService {
     const owner: SessionOwner = { projectId: input.projectId, userId: SESSION_USER };
     try {
       const repo = this.repo();
-      const profile = this.generationProfile();
+      const profile = this.generationProfiles()[0];
       if (!profile) return { ok: false, error: appError("VALIDATION", "errors.generationProfileMissing") };
       const conversation = repo.getConversation(input.projectId, input.conversationId);
       if (!conversation || conversation.archivedAt) return { ok: false, error: appError("CONFLICT", "errors.chatArchived") };
@@ -203,7 +207,6 @@ export class ChatService {
       if (match) retrievalsByLabel[c.label] = match;
     }
 
-    const provider = this.deps.providerFactory(profile);
     const startedAt = this.clock().toISOString();
     const draftId = nextId();
     const assistant = supersedesMessageId
@@ -234,7 +237,7 @@ export class ChatService {
     this.inFlightConversations.add(turn.conversationId);
     emit({ type: "started", requestId, messageId: assistant.id });
 
-    const outcome = await this.runGeneration({ repo, turn, profile, provider, retrievals: retrievalsByLabel, contextMessages: context.messages, assistantId: assistant.id, requestId, signal, emit });
+    const outcome = await this.runGeneration({ repo, turn, profile, retrievals: retrievalsByLabel, contextMessages: context.messages, assistantId: assistant.id, requestId, signal, emit });
     this.registry.complete(requestId, owner);
     this.inFlightConversations.delete(turn.conversationId);
     return outcome;
@@ -244,7 +247,6 @@ export class ChatService {
     repo: ConversationRepository;
     turn: ConversationQuery;
     profile: ModelProfileDto;
-    provider: ModelProvider;
     retrievals: Record<string, RetrievedCitation>;
     contextMessages: ChatTurn[];
     assistantId: string;
@@ -252,7 +254,7 @@ export class ChatService {
     signal: AbortSignal;
     emit: (event: StreamEvent) => void;
   }): Promise<Result<{ requestId: string; assistantMessageId: string }>> {
-    const { repo, turn, profile, provider, retrievals, contextMessages, assistantId, requestId, signal, emit } = args;
+    const { repo, turn, profile, retrievals, contextMessages, assistantId, requestId, signal, emit } = args;
     const now = this.clock.bind(this);
     let fullText = "";
     let lastCheckpointAt = now().getTime();
@@ -261,6 +263,7 @@ export class ChatService {
     let finishReason = "stop";
     let sawDone = false;
     let failure: AppErrorDto | null = null;
+    let actualProfile: { provider: string; model: string; profileId: string | null } = { provider: profile.provider, model: profile.modelId, profileId: profile.id };
     const buffer = new CitationStreamBuffer();
 
     const checkpoint = (): void => {
@@ -275,7 +278,19 @@ export class ChatService {
     };
 
     try {
-      for await (const event of provider.generate({ model: profile.modelId, messages: contextMessages }, signal)) {
+      const routedRequest = { projectId: turn.projectId, operationId: requestId, model: profile.modelId, messages: contextMessages };
+      for await (const event of generateRouted(this.routedDeps(), "chat", routedRequest, undefined, signal)) {
+        if (event.type === "attempt-started") {
+          continue;
+        }
+        if (event.type === "fallback") {
+          emit({ type: "fallback", requestId, attempted: event.attempted, next: event.next, errorCode: event.errorCode });
+          continue;
+        }
+        if (event.type === "routed-complete") {
+          actualProfile = event.profile;
+          continue;
+        }
         if (event.type === "text-delta") {
           if (signal.aborted) break;
           const visible = buffer.push(event.text);
@@ -296,10 +311,12 @@ export class ChatService {
           if (event.finishReason) finishReason = event.finishReason;
         }
       }
-    } catch {
+    } catch (reason) {
       failure = signal.aborted
         ? appError("CANCELLED", "errors.chatCancelled", true)
-        : appError("PROVIDER", "errors.providerFailure");
+        : reason instanceof Error && "error" in reason && (reason as { error?: AppErrorDto }).error
+          ? (reason as { error: AppErrorDto }).error
+          : appError("PROVIDER", "errors.providerFailure");
     }
     fullText += buffer.flush();
 
@@ -346,6 +363,9 @@ export class ChatService {
       conversationId: turn.conversationId,
       id: assistantId,
       content: fullText,
+      provider: actualProfile.provider,
+      profileId: actualProfile.profileId ?? profile.id,
+      model: actualProfile.model,
       usage: usage ?? { inputTokens: 0, outputTokens: 0, totalTokens: 0 },
       completionReason: finishReason,
       updatedAt: now().toISOString()
@@ -362,9 +382,26 @@ export class ChatService {
     return (this.deps.now ?? (() => new Date()))();
   }
 
-  private generationProfile(): ModelProfileDto | undefined {
+  private generationProfiles(): readonly ModelProfileDto[] {
+    if (this.deps.router) return this.deps.router.resolve("chat");
     const profile = this.deps.generationProfile;
-    return profile && profile.enabled && profile.capability === "generation" ? profile : undefined;
+    return profile && profile.enabled && profile.capability === "generation" ? [profile] : [];
+  }
+
+  private routedDeps() {
+    const router = this.deps.router ?? {
+      resolve: (_task: "chat", _override?: string) => {
+        const profile = this.deps.generationProfile;
+        return profile && profile.enabled && profile.capability === "generation" ? [Object.freeze({ ...profile })] : [];
+      }
+    };
+    return {
+      db: this.deps.db,
+      router,
+      providerFactory: this.deps.providerFactory,
+      ...(this.deps.now ? { clock: this.deps.now } : {}),
+      id: () => crypto.randomUUID()
+    };
   }
 }
 

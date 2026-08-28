@@ -81,11 +81,13 @@ Evidence (2026-08-28): RED failed on missing route repository/router modules; re
 
 **Interfaces:** `generateRouted(taskKind, request, overrideProfileId?, signal)` yields `attempt-started`, `fallback`, normal generation events and final actual profile metadata.
 
-- [ ] Write failing tests for allowed timeout/network/429/5xx fallback; forbidden auth/404/context/validation/cancel fallback; all profiles exhausted; explicit override followed by configured fallbacks; attempt persistence.
-- [ ] Emit a localized-safe fallback DTO containing attempted provider/model, next provider/model and error code without response body/secret.
-- [ ] Persist each attempt start/end/error/latency and the actual completing profile. Integrate chat without changing citation or cancellation behavior.
-- [ ] Embedding service must assert it never calls this wrapper.
-- [ ] Run router/chat focused tests; review and commit `feat: add visible safe model fallback`.
+- [x] Write failing tests for allowed timeout/network/429/5xx fallback; forbidden auth/404/context/validation/cancel fallback; all profiles exhausted; explicit override followed by configured fallbacks; attempt persistence.
+- [x] Emit a localized-safe fallback DTO containing attempted provider/model, next provider/model and error code without response body/secret.
+- [x] Persist each attempt start/end/error/latency and the actual completing profile. Integrate chat without changing citation or cancellation behavior.
+- [x] Embedding service must assert it never calls this wrapper.
+- [x] Run router/chat focused tests; review and commit `feat: add visible safe model fallback`.
+
+Evidence (2026-08-28): RED covered fallback eligibility/terminal boundaries and caught the real per-attempt model forwarding defect. GREEN: router/chat focused 65/65, full suite 788/788, typecheck and build passed; independent fix-round-5 re-review PASS.
 
 ## Task 5: Implement AI Note Titles
 

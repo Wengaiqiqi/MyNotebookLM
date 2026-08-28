@@ -37,6 +37,8 @@ import { createModelProvider } from "./models/model-service";
 import { BUILT_IN_LOCAL_EMBEDDING_PROFILE, isBuiltInLocalEmbeddingProfile } from "./models/local-embedding-profile";
 import { createEmbeddingProvider } from "./vector/embedding-provider";
 import { RetrievalService } from "./retrieval/retrieval-service";
+import { ModelRouter } from "./models/model-router";
+import { RouteRepository } from "./models/route-repository";
 import type { Result } from "../shared/app-errors";
 import type { TaskDto } from "../shared/tasks";
 import type { SearchHitDto, VectorHealthDto } from "../shared/vector";
@@ -235,11 +237,8 @@ app.whenReady().then(async () => {
   }
   const chatService = new ChatService({
     db: appDatabase.connection,
-    // The generation route is resolved per turn so default-route changes apply live.
-    get generationProfile() {
-      const profileId = settingsRepository.getRoute("chat")[0]?.profileId;
-      return profileId ? settingsRepository.getProfile(profileId) : undefined;
-    },
+    // Resolve the immutable route snapshot per turn so route changes apply live.
+    router: new ModelRouter(new RouteRepository(settingsRepository)),
     providerFactory: (profile) => ({
       describe: () => {
         throw new Error("provider describe is not used for generation");

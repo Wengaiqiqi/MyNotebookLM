@@ -8,6 +8,11 @@ import { CitationOpener } from "./citation-opener";
 import type { CitationDto } from "../../shared/chat";
 import type { Result } from "../../shared/app-errors";
 import type { GenerationEvent } from "../models/provider";
+import { ProviderRequestError } from "../models/http-client";
+import { classifyProviderError } from "../models/provider-errors";
+import { SettingsRepository } from "../settings/settings-repository";
+import { RouteRepository } from "../models/route-repository";
+import { ModelRouter } from "../models/model-router";
 
 const PROJECT_ID = "11111111-1111-4111-8111-111111111111";
 const USER_ID = "44444444-4444-4444-8444-444444444444";
@@ -135,6 +140,59 @@ function expectOk(result: Result<{ requestId: string; assistantMessageId: string
       { role: "user", state: "completed" },
       { role: "assistant", state: "completed" }
     ]);
+  });
+
+  it("uses the real multi-profile route and writes the completing profile", async () => {
+    const primary = makeProfile();
+    const fallback = { ...makeProfile(), id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", name: "Fallback", modelId: "fallback" };
+    const routes = new RouteRepository(new SettingsRepository(world.database.connection));
+    for (const item of [primary, fallback]) routes.saveProfile({ id: item.id, name: item.name, provider: item.provider, capability: item.capability, baseUrl: item.baseUrl, modelId: item.modelId, enabled: item.enabled });
+    routes.replaceRoute("chat", [primary.id, fallback.id]);
+    const deps = baseDeps({
+      generationProfile: undefined,
+      router: new ModelRouter(routes),
+      providerFactory: (item) => item.id === primary.id
+        ? { ...fakeProvider(), async *generate() { throw new ProviderRequestError(classifyProviderError({ status: 503 })); } }
+        : fakeProvider(["Routed ", "[S1]"])
+    });
+    const { result, events } = await collectEvents(deps, { requestId: REQUEST_ID, projectId: PROJECT_ID, conversationId: world.conversationId, question: "route" });
+    expect(result.ok).toBe(true);
+    const fallbackEvent = events.find((event) => event.type === "fallback")!;
+    expect(Object.keys(fallbackEvent).sort()).toEqual(["attempted", "errorCode", "next", "requestId", "type"]);
+    expect(fallbackEvent).toMatchObject({ attempted: { profileId: primary.id }, next: { profileId: fallback.id } });
+    expect(events.at(-1)).toMatchObject({ type: "completed", message: { profileId: fallback.id, provider: fallback.provider, model: fallback.modelId, citations: [expect.objectContaining({ label: "S1" })] } });
+    expect(world.repository.listMessages(PROJECT_ID, world.conversationId).at(-1)?.citations).toHaveLength(1);
+  });
+
+  it("cancels a real routed attempt and chat draft on stop", async () => {
+    const primary = makeProfile();
+    const fallback = { ...makeProfile(), id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", modelId: "fallback" };
+    const routes = new RouteRepository(new SettingsRepository(world.database.connection));
+    for (const item of [primary, fallback]) routes.saveProfile({ id: item.id, name: item.name, provider: item.provider, capability: item.capability, baseUrl: item.baseUrl, modelId: item.modelId, enabled: item.enabled });
+    routes.replaceRoute("chat", [primary.id, fallback.id]);
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    const deps = baseDeps({ generationProfile: undefined, router: new ModelRouter(routes), providerFactory: () => ({ ...fakeProvider(), async *generate() { yield { type: "text-delta", text: "partial" }; await gate; } }) });
+    const service = new ChatService(deps);
+    const events: Array<Record<string, unknown>> = [];
+    const pending = service.send({ requestId: REQUEST_ID, projectId: PROJECT_ID, conversationId: world.conversationId, question: "cancel" }, (event) => events.push(event as Record<string, unknown>));
+    await vi.waitFor(() => expect(events.some((event) => event.type === "delta")).toBe(true));
+    expect(service.stopRequest(REQUEST_ID, { projectId: PROJECT_ID, userId: "owner" })).toBe(true);
+    release();
+    expect((await pending).ok).toBe(true);
+    expect(world.repository.listMessages(PROJECT_ID, world.conversationId).at(-1)?.state).toBe("cancelled");
+    expect(world.database.connection.prepare("SELECT attempt_order, profile_id, provider, model, state, error_code, started_at, completed_at, finished_at, latency_ms FROM model_route_attempts WHERE operation_id = ?").get(REQUEST_ID)).toEqual({
+      attempt_order: 0,
+      profile_id: primary.id,
+      provider: primary.provider,
+      model: primary.modelId,
+      state: "cancelled",
+      error_code: "CANCELLED",
+      started_at: AT,
+      completed_at: expect.any(String),
+      finished_at: expect.any(String),
+      latency_ms: expect.any(Number)
+    });
   });
 
   it("handles empty retrieval without changing the success path", async () => {
