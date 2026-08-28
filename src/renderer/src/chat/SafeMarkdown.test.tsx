@@ -153,6 +153,7 @@ describe("SafeMarkdown sanitization", () => {
     const buttons = [...container.querySelectorAll("button.citation-chip")];
     expect(buttons.length).toBe(1);
     expect(buttons[0]?.textContent).toBe("[S1]");
+    expect(buttons[0]?.classList.contains("citation-chip")).toBe(true);
     (buttons[0] as HTMLElement | null)?.click();
     expect(opened).toEqual([baseCitation.id]);
     // Unknown labels stay visible as plain text, never invented sources.

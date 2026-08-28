@@ -294,6 +294,14 @@ afterEach(async () => {
 });
 
 describe("App shell behavior", () => {
+  it("keeps the fallback status compact and centered below its answer", () => {
+    const fallbackRule = styles.match(/\.fallback-banner\s*\{([^}]*)\}/)?.[1] ?? "";
+    expect(fallbackRule).toMatch(/width:\s*fit-content/);
+    expect(fallbackRule).toMatch(/max-width:/);
+    expect(fallbackRule).toMatch(/margin:\s*[^;]*auto/);
+    expect(fallbackRule).toMatch(/text-align:\s*center/);
+  });
+
   it("gates project loading on persisted onboarding and opens first launch for a fresh profile", async () => {
     const pending = deferred<Awaited<ReturnType<DesktopApi["settings"]["get"]>>>();
     const { api, getSettings, list } = createApi([], false);

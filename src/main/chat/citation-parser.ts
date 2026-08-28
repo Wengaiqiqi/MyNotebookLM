@@ -10,6 +10,7 @@ export type RetrievedCitation = {
   sourceDisplayName: string;
   sourceKind: string;
   locator: Record<string, unknown>;
+  text?: string;
 };
 
 export type ParsedCitation = { label: string; start: number; end: number };

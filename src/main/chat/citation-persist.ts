@@ -3,6 +3,8 @@ import type { CitationDto } from "../../shared/chat";
 import type { ParsedCitations, RetrievedCitation } from "./citation-parser";
 import { ConversationRepository } from "./conversation-repository";
 
+const QUOTE_LIMIT = 240;
+
 // Persists parsed citation rows aligned with Task 1 message_citations / CitationDto.
 // ponytail: no batching/transaction wrapper beyond repo.addCitation, sizes are tiny.
 export function persistParsedCitations(
@@ -29,6 +31,7 @@ export function persistParsedCitations(
       sourceDisplayName: match.sourceDisplayName,
       sourceKind: match.sourceKind,
       locator: match.locator,
+      ...(match.text ? { quote: match.text.slice(0, QUOTE_LIMIT) } : {}),
       createdAt,
       start: c.start,
     });

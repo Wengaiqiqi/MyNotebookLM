@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import type { CitationDto } from "../../../shared/chat";
 import type { DesktopApi } from "../../../shared/ipc";
 import { useTranslation } from "react-i18next";
@@ -25,9 +25,21 @@ export default function CitationPanel({ citations, selected, projectId, openCita
   const { t: translate } = useTranslation();
   const t = (key: string, fallback: string, options?: Record<string, string>) => { const value = options ? translate(key, options) : translate(key); return value === key ? fallback : value; };
   const locatorLabel = (key: string, fallback: string) => { const value = translate(key); return value === key ? fallback : value; };
-  const [active, setActive] = useState<CitationDto | null>(selected ?? citations[0] ?? null);
+  const uniqueCitations = useMemo(() => {
+    const seen = new Set<string>();
+    return [selected, ...citations].filter((citation): citation is CitationDto => {
+      if (!citation || seen.has(citation.label)) return false;
+      seen.add(citation.label);
+      return true;
+    });
+  }, [citations, selected]);
+  const [activeLabel, setActiveLabel] = useState<string | null>(selected?.label ?? uniqueCitations[0]?.label ?? null);
+  const cardRefs = useRef<Record<string, HTMLElement | null>>({});
+  const mountedRef = useRef(false);
   const [status, setStatus] = useState<string | null>(null);
-  useEffect(() => { if (selected) setActive(selected); else if (!active || !citations.some((citation) => citation.id === active.id)) setActive(citations[0] ?? null); setStatus(null); }, [selected, citations, active]);
+  useEffect(() => { setActiveLabel(selected?.label ?? uniqueCitations[0]?.label ?? null); setStatus(null); }, [selected, uniqueCitations]);
+  useEffect(() => { if (!mountedRef.current) { mountedRef.current = true; return; } if (activeLabel) cardRefs.current[activeLabel]?.scrollIntoView?.({ block: "nearest" }); }, [activeLabel]);
+  const active = uniqueCitations.find((citation) => citation.label === activeLabel) ?? null;
   async function open(citation: CitationDto): Promise<void> {
     if (!openCitation) return;
     const result = await openCitation({ projectId, citationId: citation.id });
@@ -36,8 +48,7 @@ export default function CitationPanel({ citations, selected, projectId, openCita
   return <aside className="citation-panel" aria-label={t("chat.ui.citationTitle", "Source citations")}>
     <header><h3>{t("chat.ui.citationTitle", "Source citations")}</h3></header>
     {citations.length === 0 ? <p className="citation-empty">{t("chat.ui.citationEmpty", "Citations from answers will appear here.")}</p> : <>
-      <div className="citation-index" role="list" aria-label={t("chat.ui.citationTitle", "Source citations")}>{citations.map((citation) => <button key={citation.id} type="button" className={active?.id === citation.id ? "selected" : ""} onClick={() => setActive(citation)}>{citation.label}</button>)}</div>
-      <div className="citation-cards">{citations.map((citation) => <article className={`citation-detail${active?.id === citation.id ? " selected" : ""}`} key={citation.id} onClick={() => setActive(citation)}><strong>{citation.label}</strong><span>{citation.sourceDisplayName}</span><small>{citation.sourceKind} · {locatorText(citation, (key) => locatorLabel(key, key.split(".").pop() ?? key))}</small>{citation.quote ? <blockquote>{citation.quote}</blockquote> : null}<button type="button" onClick={() => void open(citation)}>{t("chat.ui.openOriginal", "Open original source")}</button>{status && active?.id === citation.id ? <p role="status">{status}</p> : null}</article>)}</div>
+      <div className="citation-cards">{uniqueCitations.map((citation) => <article ref={(node) => { cardRefs.current[citation.label] = node; }} className={`citation-detail${active?.label === citation.label ? " selected" : ""}`} key={citation.label} onClick={() => setActiveLabel(citation.label)}><div className="citation-source-heading"><strong className="citation-badge">{citation.label}</strong><div><span>{citation.sourceDisplayName}</span><small>{citation.sourceKind} · {locatorText(citation, (key) => locatorLabel(key, key.split(".").pop() ?? key))}</small></div></div>{citation.quote ? <blockquote>{citation.quote}</blockquote> : null}<button type="button" onClick={(event) => { event.stopPropagation(); void open(citation); }}>{t("chat.ui.openOriginal", "Open original source")}</button>{status && active?.label === citation.label ? <p role="status">{status}</p> : null}</article>)}</div>
     </>}
   </aside>;
 }

@@ -6,7 +6,7 @@ import { finalizeCitations, type RetrievedCitation } from "./citation-parser";
 import { persistParsedCitations } from "./citation-persist";
 
 const retrievals: Record<string, RetrievedCitation> = {
-  S1: { label: "S1", chunkId: "chunk-1", sourceId: "source-1", sourceDisplayName: "Doc", sourceKind: "pdf", locator: { kind: "page", page: 1 } },
+  S1: { label: "S1", chunkId: "chunk-1", sourceId: "source-1", sourceDisplayName: "Doc", sourceKind: "pdf", locator: { kind: "page", page: 1 }, text: "A reliable source excerpt." },
 };
 
 describe("persistParsedCitations", () => {
@@ -28,5 +28,13 @@ describe("persistParsedCitations", () => {
     const parsed = finalizeCitations("See [S1] and again [S1].", retrievals);
     const stored = persistParsedCitations(database.connection, { projectId: "p1", messageId: "m1", parsed, retrievals });
     expect(stored.map((c) => c.id)).toEqual(["m1:S1:4", "m1:S1:19"]);
+    expect(stored[0]?.quote).toBe("A reliable source excerpt.");
+  });
+
+  it("caps persisted source excerpts", () => {
+    const longText = "x".repeat(400);
+    const parsed = finalizeCitations("See [S1].", { S1: { ...retrievals.S1!, text: longText } });
+    const stored = persistParsedCitations(database.connection, { projectId: "p1", messageId: "m1", parsed, retrievals: { S1: { ...retrievals.S1!, text: longText } } });
+    expect(stored[0]?.quote).toHaveLength(240);
   });
 });
