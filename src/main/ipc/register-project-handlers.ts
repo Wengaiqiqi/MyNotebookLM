@@ -20,6 +20,14 @@ export function registerProjectHandlers(
     undefinedSchema.parse(input);
     return projectDtoSchema.array().parse(service.list());
   });
+  ipc.handle(PROJECT_CHANNELS.listArchived, (_event, input) => {
+    undefinedSchema.parse(input);
+    return projectDtoSchema.array().parse(service.listArchived());
+  });
+  ipc.handle(PROJECT_CHANNELS.listDeleteFailed, (_event, input) => {
+    undefinedSchema.parse(input);
+    return projectDtoSchema.array().parse(service.listDeleteFailed());
+  });
   ipc.handle(PROJECT_CHANNELS.create, (_event, input) =>
     projectDtoSchema.parse(service.create(createProjectInputSchema.parse(input)))
   );
@@ -30,7 +38,16 @@ export function registerProjectHandlers(
     projectDtoSchema.parse(service.archive(projectIdInputSchema.parse(input)))
   );
   ipc.handle(PROJECT_CHANNELS.remove, (_event, input) =>
-    undefinedSchema.parse(service.remove(projectIdInputSchema.parse(input)))
+    projectDtoSchema.parse(service.remove(projectIdInputSchema.parse(input)))
+  );
+  ipc.handle(PROJECT_CHANNELS.restore, (_event, input) =>
+    projectDtoSchema.parse(service.restore(projectIdInputSchema.parse(input)))
+  );
+  ipc.handle(PROJECT_CHANNELS.undo, (_event, input) =>
+    projectDtoSchema.parse(service.undo(projectIdInputSchema.parse(input)))
+  );
+  ipc.handle(PROJECT_CHANNELS.retryDelete, (_event, input) =>
+    projectDtoSchema.parse(service.retryDelete(projectIdInputSchema.parse(input)))
   );
 
   return () => {

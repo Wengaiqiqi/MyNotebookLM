@@ -18,6 +18,7 @@ import { ModelService } from "./models/model-service";
 import { getAppPaths } from "./platform/paths";
 import { ProjectRepository } from "./projects/project-repository";
 import { ProjectService } from "./projects/project-service";
+import { purgeOrphanProjectTrash, restoreProjectFiles, stageProjectFiles } from "./sources/managed-files";
 import { SettingsRepository } from "./settings/settings-repository";
 import { TaskRepository } from "./tasks/task-repository";
 import { TaskService } from "./tasks/task-service";
@@ -91,16 +92,44 @@ app.whenReady().then(async () => {
   }
   const projectRepository = new ProjectRepository(appDatabase.connection);
   const projectService = new ProjectService(projectRepository);
+  try {
+    const liveProjects = new Set((appDatabase.connection.prepare("SELECT id FROM projects").all() as Array<{ id: string }>).map((row) => row.id));
+    purgeOrphanProjectTrash(appPaths.files, liveProjects);
+  } catch { /* fail closed; deletion recovery remains authoritative */ }
   const settingsRepository = new SettingsRepository(appDatabase.connection);
   const credentialStore = new CredentialStore(appDatabase.connection, new SafeStorageAdapter());
   const modelService = new ModelService(settingsRepository, credentialStore);
   taskFanout = createTaskUpdateFanout(() => BrowserWindow.getAllWindows() as any);
   const taskRepository = new TaskRepository(appDatabase.connection, { onTransition: taskFanout });
-  const taskService = new TaskService(taskRepository, { now: () => new Date().toISOString(), random: Math.random, id: randomUUID });
+  const taskService = new TaskService(taskRepository, { now: () => new Date().toISOString(), random: Math.random, id: randomUUID, onTransition: (task) => taskFanout?.(task) });
   const pool = new WorkerPool();
   workerPool = pool;
   let ingestionService!: IngestionService;
   const lance = await LanceStore.open(path.join(appPaths.root, "vectors"));
+  projectService.configureCleanup?.({
+    autoStartDeletion: true,
+    managedFiles: async (projectId) => {
+      const rows = appDatabase!.connection.prepare("SELECT id FROM sources WHERE project_id = ?").all(projectId) as Array<{ id: string }>;
+      return stageProjectFiles(appPaths.files, projectId, rows.map((row) => row.id));
+    },
+    restoreProjectFiles: (projectId) => {
+      const rows = appDatabase!.connection.prepare("SELECT id FROM sources WHERE project_id = ?").all(projectId) as Array<{ id: string }>;
+      restoreProjectFiles(appPaths.files, projectId, rows.map((row) => row.id));
+    },
+    lanceRows: async (projectId) => {
+      const spaces = appDatabase!.connection.prepare("SELECT id, dimension FROM embedding_spaces WHERE project_id = ?").all(projectId) as Array<{ id: string; dimension: number }>;
+      for (const space of spaces) await lance.deleteProject(space, projectId);
+    },
+    invalidateEmbeddingSpaces: (projectId) => {
+      appDatabase!.connection.transaction(() => {
+        const now = new Date().toISOString();
+        appDatabase!.connection.prepare("UPDATE embedding_spaces SET state = 'failed', updated_at = ? WHERE project_id = ? AND state IN ('preparing','building','validating','active')").run(now, projectId);
+        appDatabase!.connection.prepare("DELETE FROM project_embedding_spaces WHERE project_id = ?").run(projectId);
+      })();
+    },
+    taskService
+  });
+  await projectService.recoverStaleDeletions?.();
   const spaces = new SpaceRepository(appDatabase.connection, undefined, undefined, lance);
   const spaceService = new SpaceService(spaces, { rebuild: async (raw: unknown) => { const input = raw as { space: { id: string; dimension: number }; spec: { projectId: string }; signal?: AbortSignal; revisionId?: string }; const revisions = input.revisionId ? [{ id: input.revisionId }] : appDatabase!.connection.prepare("SELECT current_revision_id AS id FROM sources WHERE project_id = ? AND status = 'active' AND current_revision_id IS NOT NULL").all(input.spec.projectId) as Array<{ id: string }>; for (const revision of revisions) await indexing.rebuild(input.signal ? { revisionId: revision.id, space: input.space, signal: input.signal } : { revisionId: revision.id, space: input.space }); }, optimize: async (raw: unknown) => { const value = raw as { taskId?: string; projectId?: string; space: { id: string; dimension: number }; signal?: AbortSignal }; const taskId = value.taskId ?? (value.projectId ? taskService.createTask({ projectId: value.projectId, sourceId: null, kind: "optimize" }).id : undefined); if (!taskId) throw new Error("optimize requires taskId or projectId"); taskService.start(taskId, "indexing"); try { taskService.advance(taskId, "indexing", 500); await lance.optimize(value.space, value.signal); taskService.complete(taskId); } catch (error) { if ((error as { code?: string }).code === "TASK_CANCELLED") { const current = taskService.getById(taskId); if (current?.state === "queued" || current?.state === "running") taskService.cancel(taskId); } else taskService.fail(taskId, { code: "INTERNAL", messageKey: "errors.internal", recoverable: false }); throw error; } } }, async () => backupDatabase(appDatabase!.connection, appPaths.database + ".space-backup-" + Date.now() + ".db"));
   await spaceService.recoverInterrupted();

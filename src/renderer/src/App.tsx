@@ -6,6 +6,11 @@ import type { DefaultModelRoutesDto } from "../../shared/models";
 import { changeLanguage, changeTheme, readTheme, type AppLanguage, type AppTheme } from "./i18n";
 import FirstLaunch, { type ModelSettingsData } from "./model-settings/FirstLaunch";
 import SettingsView from "./model-settings/SettingsView";
+import AppShell from "./app/AppShell";
+import AppRouter from "./app/AppRouter";
+import Sidebar from "./app/Sidebar";
+import ModalRoot from "./app/ModalRoot";
+import ProjectView from "./projects/ProjectView";
 
 type DialogState =
   | { kind: "create" }
@@ -17,7 +22,9 @@ type ErrorKey =
   | "error.createProject"
   | "error.renameProject"
   | "error.archiveProject"
-  | "error.removeProject";
+  | "error.removeProject"
+  | "error.restoreProject"
+  | "error.retryDeleteProject";
 
 type OpenMenu = {
   instanceId: number;
@@ -69,6 +76,9 @@ export default function App() {
   const [startupError, setStartupError] = useState(false);
   const [settingsLoadError, setSettingsLoadError] = useState(false);
   const [projects, setProjects] = useState<ProjectDto[]>([]);
+  const [archivedProjects, setArchivedProjects] = useState<ProjectDto[]>([]);
+  const [showArchived, setShowArchived] = useState(false);
+  const [deletingProject, setDeletingProject] = useState<ProjectDto>();
   const [selectedId, setSelectedId] = useState<string>();
   const [errorKey, setErrorKey] = useState<ErrorKey>();
   const [errorTarget, setErrorTarget] = useState<string>();
@@ -133,6 +143,13 @@ export default function App() {
       setErrorKey("error.loadProjects");
       setErrorTarget("load");
     }
+  }, []);
+
+  const refreshArchivedProjects = useCallback(async () => {
+    try {
+      const [archived, failed] = await Promise.all([window.myNotebook.projects.listArchived(), window.myNotebook.projects.listDeleteFailed()]);
+      setArchivedProjects([...archived, ...failed.filter((project) => !archived.some((item) => item.id === project.id))]);
+    } catch { setErrorKey("error.loadProjects"); setErrorTarget("load"); }
   }, []);
 
   const loadModelData = useCallback(async (): Promise<ModelSettingsData | undefined> => {
@@ -293,8 +310,9 @@ export default function App() {
     };
   }, [openMenu?.instanceId]);
 
-  const selectedProject = projects.find((project) => project.id === selectedId);
-  const openMenuProject = projects.find((project) => project.id === openMenu?.projectId);
+  const displayedProjects = showArchived ? archivedProjects : projects;
+  const selectedProject = [...projects, ...archivedProjects].find((project) => project.id === selectedId);
+  const openMenuProject = [...projects, ...archivedProjects].find((project) => project.id === openMenu?.projectId);
 
   function openCreateDialog(opener: HTMLElement): void {
     if (busyRef.current || dialogRef.current) return;
@@ -382,7 +400,8 @@ export default function App() {
     setErrorKey(undefined);
     setErrorTarget(undefined);
     try {
-      await window.myNotebook.projects.remove({ id: project.id });
+      const result = await window.myNotebook.projects.remove({ id: project.id });
+      if (result && result.status === "deleting") setDeletingProject(result);
       await refreshProjects();
       if (dialogRef.current === activeDialog) dialogOpener.current = undefined;
       setDialog((current) => current === activeDialog ? undefined : current);
@@ -396,6 +415,24 @@ export default function App() {
       busyRef.current = false;
       setBusy(false);
     }
+  }
+
+  async function undoProjectDeletion(): Promise<void> {
+    if (!deletingProject || !window.myNotebook.projects.undo) return;
+    try { await window.myNotebook.projects.undo({ id: deletingProject.id }); setDeletingProject(undefined); await refreshProjects(); }
+    catch { setErrorKey("error.restoreProject"); setErrorTarget("load"); }
+  }
+
+  async function restoreProject(project: ProjectDto): Promise<void> {
+    if (!window.myNotebook.projects.restore) return;
+    try { await window.myNotebook.projects.restore({ id: project.id }); await refreshProjects(); await refreshArchivedProjects(); }
+    catch { setErrorKey("error.restoreProject"); setErrorTarget(`project:${project.id}`); }
+  }
+
+  async function retryProjectDeletion(project: ProjectDto): Promise<void> {
+    if (!window.myNotebook.projects.retryDelete) return;
+    try { const result = await window.myNotebook.projects.retryDelete({ id: project.id }); setDeletingProject(result); await refreshArchivedProjects(); }
+    catch { setErrorKey("error.retryDeleteProject"); setErrorTarget(`project:${project.id}`); }
   }
 
   function selectTheme(next: AppTheme): void {
@@ -452,189 +489,22 @@ export default function App() {
 
   return (
     <>
-    <div className="app-shell" inert={dialog ? true : undefined} aria-hidden={dialog ? true : undefined}>
-      <aside className="sidebar">
-        <div className="brand title-drag-region">
-          <span className="brand-mark" aria-hidden="true">M</span>
-          <span>{t("app.name")}</span>
-        </div>
+    <AppShell dialogOpen={Boolean(dialog)}>
+      <Sidebar
+        brand={t("app.name")} projectTitle={t("project.title")} createLabel={t("project.create")} archivedLabel={t("project.archived")} settingsLabel={t("app.settings")} deletionPendingLabel={t("project.deletionPending")} undoLabel={t("project.undo")} settingsErrorLabel={t("settings.loadError")} retryLabel={t("common.retry")}
+        language={language} theme={theme} view={view} busy={busy} projects={projects} archivedProjects={archivedProjects} showArchived={showArchived} selectedId={selectedId} openMenuId={openMenu?.projectId} deletingProject={deletingProject} error={error} errorTarget={errorTarget} settingsLoadErrorRef={settingsLoadErrorRef}
+        onCreate={openCreateDialog} onRetryLoad={() => { if (!busyRef.current) void refreshProjects(); }} onToggleArchived={() => { const next = !showArchived; setShowArchived(next); if (next) void refreshArchivedProjects(); }} onUndo={() => void undoProjectDeletion()}
+        onSelect={(id) => { if (!busyRef.current) { setSelectedId(id); setOpenMenu(undefined); } }} onMenu={toggleProjectMenu} onSettings={() => void openSettings()} settingsLoadError={settingsLoadError} onRetrySettings={() => void openSettings()} onLanguage={selectLanguage} onTheme={selectTheme} formatDate={(value) => formatDate(value, language)} menuLabel={t("project.menu")}
+      />
+      <AppRouter view={view}
+        loading={<main className="workspace loading-workspace title-drag-region">{startupError && <p role="alert">{t("model.errors.request")}</p>}</main>}
+        onboarding={modelData ? <FirstLaunch data={modelData} theme={theme} onThemeChange={selectTheme} onComplete={finishOnboarding} onSkip={finishOnboarding} /> : null}
+        settings={modelData ? <SettingsView data={modelData} onCancel={() => setView(settingsReturnView.current)} onSaved={finishSettings} /> : null}
+        projects={<ProjectView appName={t("app.name")} project={selectedProject} routes={routes} busy={busy} workspaceTitle={t("research.workspaceTitle")} emptyTitle={t("project.emptyTitle")} emptyBody={t("project.emptyBody")} createLabel={t("project.create")} sourceImportUnavailable={t("research.sourceImportUnavailable")} importSources={t("research.importSources")} chatUnavailable={t("research.researchChatUnavailable")} sourcesLabel={t("research.sources")} noSourcesTitle={t("research.noSourcesTitle")} noSourcesBody={t("research.noSourcesBody")} askLabel={t("research.ask")} openSettingsLabel={t("common.openSettings")} onOpenSettings={() => void openSettings()} onCreate={openCreateDialog} />}
+      />
+    </AppShell>
 
-        <nav className="project-nav" aria-label={t("project.title")}>
-          <h1>{t("project.title")}</h1>
-          <button className="primary-button create-button title-no-drag" type="button" disabled={busy || view !== "projects"} onClick={(event) => openCreateDialog(event.currentTarget)}>
-            <span aria-hidden="true">＋</span>{t("project.create")}
-          </button>
-
-          {errorTarget === "load" && (
-            <div className="inline-error load-error" role="alert">
-              <span>{error}</span>
-              <button
-                type="button"
-                disabled={busy}
-                aria-label={t("error.loadProjects")}
-                onClick={() => { if (!busyRef.current) void refreshProjects(); }}
-              >↻</button>
-            </div>
-          )}
-
-          <div className="project-list">
-            {projects.map((project) => (
-              <div className={`project-row${project.id === selectedId ? " selected" : ""}`} key={project.id}>
-                <button
-                  className="project-select"
-                  type="button"
-                  aria-current={project.id === selectedId ? "page" : undefined}
-                  disabled={busy}
-                  onClick={() => {
-                    if (busyRef.current) return;
-                    setSelectedId(project.id);
-                    setOpenMenu(undefined);
-                  }}
-                >
-                  <span className="project-icon" aria-hidden="true">□</span>
-                  <span className="project-copy">
-                    <strong>{project.name}</strong>
-                    <small>{formatDate(project.updatedAt, language)}</small>
-                  </span>
-                </button>
-                <button
-                  className="menu-trigger"
-                  type="button"
-                  aria-label={`${project.name}: ${t("project.menu")}`}
-                  aria-expanded={openMenu?.projectId === project.id}
-                  aria-controls={openMenu?.projectId === project.id ? `project-actions-${project.id}` : undefined}
-                  disabled={busy}
-                  onClick={(event) => toggleProjectMenu(project.id, event.currentTarget)}
-                >
-                  •••
-                </button>
-              </div>
-            ))}
-          </div>
-        </nav>
-
-        <footer className="sidebar-footer">
-          <button className="settings-button" type="button" aria-current={view === "settings" ? "page" : undefined} disabled={view === "loading"} onClick={() => void openSettings()}>
-            <span aria-hidden="true">⚙</span>{t("app.settings")}
-          </button>
-          {settingsLoadError && (
-            <div
-              ref={settingsLoadErrorRef}
-              className="settings-load-error inline-error"
-              role="alert"
-              tabIndex={-1}
-            >
-              <span>{t("settings.loadError")}</span>
-              <button type="button" onClick={() => void openSettings()}>{t("common.retry")}</button>
-            </div>
-          )}
-          <div className="preference-row" role="group" aria-label={t("common.language")}>
-            <button type="button" aria-pressed={language === "zh-CN"} onClick={() => selectLanguage("zh-CN")}>中文</button>
-            <span aria-hidden="true">|</span>
-            <button type="button" aria-pressed={language === "en"} onClick={() => selectLanguage("en")}>EN</button>
-          </div>
-          <div className="preference-row" role="group" aria-label={t("common.theme")}>
-            <button type="button" aria-pressed={theme === "light"} onClick={() => selectTheme("light")}>{t("common.light")}</button>
-            <span aria-hidden="true">|</span>
-            <button type="button" aria-pressed={theme === "dark"} onClick={() => selectTheme("dark")}>{t("common.dark")}</button>
-          </div>
-        </footer>
-      </aside>
-
-      {view === "onboarding" && modelData ? (
-        <FirstLaunch
-          data={modelData}
-          theme={theme}
-          onThemeChange={selectTheme}
-          onComplete={finishOnboarding}
-          onSkip={finishOnboarding}
-        />
-      ) : view === "settings" && modelData ? (
-        <SettingsView
-          data={modelData}
-          onCancel={() => setView(settingsReturnView.current)}
-          onSaved={finishSettings}
-        />
-      ) : view === "loading" ? (
-        <main className="workspace loading-workspace title-drag-region">
-          {startupError && <p role="alert">{t("model.errors.request")}</p>}
-        </main>
-      ) : (
-      <main className="workspace">
-        <header className="workspace-header title-drag-region">
-          <div>
-            <span className="eyebrow">{t("app.name")}</span>
-            <h2>{selectedProject?.name ?? t("project.emptyTitle")}</h2>
-          </div>
-        </header>
-
-        <div className="workspace-grid">
-          <section className="research-canvas" aria-labelledby="workspace-title">
-            {selectedProject ? (
-              <>
-                <div className="workspace-empty">
-                  <h3 id="workspace-title">{t("research.workspaceTitle")}</h3>
-                  <div className="import-region" aria-label={t("research.importSources")}>
-                    <span className="document-icon" aria-hidden="true">◇</span>
-                    <p>{t("research.sourceImportUnavailable")}</p>
-                    {routes.embeddingProfileId ? (
-                      <button type="button" disabled title={t("research.sourceImportUnavailable")}>{t("research.importSources")}</button>
-                    ) : (
-                      <button type="button" onClick={() => void openSettings()}>{t("common.openSettings")}</button>
-                    )}
-                    <div className="format-grid">
-                      {["PDF", "DOCX", "PPTX", "XLSX", "TXT", "Markdown", "URL", "CSV"].map((format) => (
-                        <button className="format-choice" type="button" disabled key={format}>{format}</button>
-                      ))}
-                    </div>
-                  </div>
-                  <div className="guidance-card">
-                    <span aria-hidden="true">◎</span>
-                    <p>{t("research.researchChatUnavailable")}</p>
-                    {!routes.generationProfileId && <button type="button" onClick={() => void openSettings()}>{t("common.openSettings")}</button>}
-                  </div>
-                </div>
-                <div className="composer" aria-label={t("research.ask")}>
-                  <button className="model-pill" type="button" disabled={Boolean(routes.generationProfileId)} onClick={() => void openSettings()}>
-                    {routes.generationProfileId ? "NotebookLM⌄" : t("common.openSettings")}
-                  </button>
-                  <button className="ask-button" type="button" disabled={Boolean(routes.generationProfileId)} onClick={() => void openSettings()}>
-                    {routes.generationProfileId ? t("research.ask") : t("common.openSettings")}
-                  </button>
-                  <span>{t("research.researchChatUnavailable")}</span>
-                </div>
-              </>
-            ) : (
-              <div className="no-project">
-                <span className="empty-book" aria-hidden="true">M</span>
-                <h3 id="workspace-title">{t("project.emptyTitle")}</h3>
-                <p>{t("project.emptyBody")}</p>
-                <button className="primary-button" type="button" disabled={busy} onClick={(event) => openCreateDialog(event.currentTarget)}>{t("project.create")}</button>
-              </div>
-            )}
-          </section>
-
-          <aside className="sources-panel" aria-label={t("research.sources")}>
-            <header>
-              <h3>{t("research.sources")}</h3>
-              <button
-                type="button"
-                disabled={Boolean(routes.embeddingProfileId)}
-                aria-label={routes.embeddingProfileId ? t("research.importSources") : t("common.openSettings")}
-                onClick={() => void openSettings()}
-              >＋</button>
-            </header>
-            <div className="sources-empty">
-              <span aria-hidden="true">□＋</span>
-              <strong>{t("research.noSourcesTitle")}</strong>
-              <p>{t("research.noSourcesBody")}</p>
-            </div>
-          </aside>
-        </div>
-      </main>
-      )}
-    </div>
-
+      <ModalRoot>
       {openMenu && openMenuProject && !dialog && createPortal(
         <div
           ref={projectMenu}
@@ -647,10 +517,10 @@ export default function App() {
           <button type="button" disabled={busy} onClick={() => openRenameDialog(openMenuProject, openMenu.trigger)}>
             <span aria-hidden="true">✎</span>{t("project.rename")}
           </button>
-          <button type="button" disabled={busy} onClick={() => void archiveProject(openMenuProject)}>
+          {openMenuProject.status === "active" && !openMenuProject.archived && <button type="button" disabled={busy} onClick={() => void archiveProject(openMenuProject)}>
             <span aria-hidden="true">▣</span>{t("project.archive")}
-          </button>
-          <button
+          </button>}
+          {openMenuProject.status === "active" && !openMenuProject.archived && <button
             className="danger-action"
             type="button"
             disabled={busy}
@@ -664,7 +534,15 @@ export default function App() {
             }}
           >
             <span aria-hidden="true">⌫</span>{t("project.remove")}
-          </button>
+          </button>}
+          {openMenuProject.status === "delete_failed" ? (
+            <>
+              <button type="button" onClick={() => void retryProjectDeletion(openMenuProject)}>{t("project.retryDelete")}</button>
+              <button type="button" onClick={() => void restoreProject(openMenuProject)}>{t("project.restore")}</button>
+            </>
+          ) : openMenuProject.archived ? (
+            <button type="button" onClick={() => void restoreProject(openMenuProject)}>{t("project.restore")}</button>
+          ) : null}
           {errorTarget === `project:${openMenuProject.id}` && <p className="inline-error" role="alert">{error}</p>}
         </div>,
         document.body
@@ -725,6 +603,7 @@ export default function App() {
           </section>
         </div>
       , document.body)}
+      </ModalRoot>
     </>
   );
 }

@@ -33,9 +33,47 @@ vi.mock("node:fs", async () => {
     renameSync: (from: string, to: string) => { observeRename?.(from, to); return actual.renameSync(from, to); },
   };
 });
-import { stageFile } from "./managed-files";
+import { purgeOrphanProjectTrash, removeProjectFiles, restoreProjectFiles, stageFile, stageProjectFiles } from "./managed-files";
 
 describe("managed files", () => {
+  it("purges only trash for projects absent from the database", () => {
+    const root = mkdtempSync(path.join(tmpdir(), "managed-"));
+    const projectId = "11111111-1111-4111-8111-111111111111";
+    const liveId = "22222222-2222-4222-8222-222222222222";
+    stageProjectFiles(root, projectId, []);
+    stageProjectFiles(root, liveId, []);
+    purgeOrphanProjectTrash(root, new Set([liveId]));
+    expect(readdirSync(path.join(root, ".project-trash"))).toEqual([liveId]);
+  });
+  it("rolls back staged project files when the next cleanup step fails", () => {
+    const root = mkdtempSync(path.join(tmpdir(), "managed-"));
+    const sourceId = "11111111-1111-4111-8111-111111111111";
+    stageFile({ root, sourceId, revisionId: "revision-1", bytes: Buffer.from("keep") });
+    const staged = stageProjectFiles(root, "11111111-1111-4111-8111-111111111111", [sourceId]);
+    expect(() => { throw new Error("lance failed"); }).toThrow("lance failed");
+    staged.rollback();
+    expect(readFileSync(path.join(root, sourceId, "revision-1", "content"), "utf8")).toBe("keep");
+  });
+
+  it("reuses deterministic trash after a crash and restores it idempotently", () => {
+    const root = mkdtempSync(path.join(tmpdir(), "managed-"));
+    const projectId = "11111111-1111-4111-8111-111111111111";
+    const sourceId = "22222222-2222-4222-8222-222222222222";
+    stageFile({ root, sourceId, revisionId: "revision-1", bytes: Buffer.from("keep") });
+    stageProjectFiles(root, projectId, [sourceId]);
+    const resumed = stageProjectFiles(root, projectId, [sourceId]);
+    expect(() => resumed.rollback()).not.toThrow();
+    expect(() => restoreProjectFiles(root, projectId, [sourceId])).not.toThrow();
+    expect(readFileSync(path.join(root, sourceId, "revision-1", "content"), "utf8")).toBe("keep");
+  });
+
+  it("rejects a junction when removing project files", () => {
+    const root = mkdtempSync(path.join(tmpdir(), "managed-"));
+    const outside = mkdtempSync(path.join(tmpdir(), "outside-"));
+    const sourceId = "11111111-1111-4111-8111-111111111111";
+    symlinkSync(outside, path.join(root, sourceId), "junction");
+    expect(() => removeProjectFiles(root, [sourceId])).toThrow(/reparse|symbolic link|symlink/i);
+  });
   it("revalidates a directory after a concurrent create wins", () => {
     const root = mkdtempSync(path.join(tmpdir(), "managed-"));
     failMkdirWithEexistOnce = true;

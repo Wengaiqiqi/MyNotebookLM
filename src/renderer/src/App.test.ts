@@ -18,6 +18,8 @@ const projectA: ProjectDto = {
   id: "11111111-1111-4111-8111-111111111111",
   name: "First project",
   archived: false,
+  status: "active" as const,
+  deletedAt: null,
   createdAt: "2026-08-24T00:00:00.000Z",
   updatedAt: "2026-08-24T00:00:00.000Z"
 };
@@ -76,6 +78,8 @@ function createApi(projects: ProjectDto[] = [], onboardingCompleted = true): Api
   const create = vi.fn<DesktopApi["projects"]["create"]>().mockResolvedValue(projectA);
   const rename = vi.fn<DesktopApi["projects"]["rename"]>().mockResolvedValue(projectA);
   const archive = vi.fn<DesktopApi["projects"]["archive"]>().mockResolvedValue(projectA);
+  const listArchived = vi.fn<DesktopApi["projects"]["listArchived"]>().mockResolvedValue([]);
+  const listDeleteFailed = vi.fn<DesktopApi["projects"]["listDeleteFailed"]>().mockResolvedValue([]);
   const setTitleOverlayTheme = vi.fn<DesktopApi["titleOverlay"]["setTheme"]>().mockResolvedValue({
     ok: true,
     value: undefined
@@ -134,10 +138,15 @@ function createApi(projects: ProjectDto[] = [], onboardingCompleted = true): Api
     api: {
       projects: {
         list,
+        listArchived,
+        listDeleteFailed,
         create,
         rename,
         archive,
-        remove: vi.fn<DesktopApi["projects"]["remove"]>().mockResolvedValue(undefined)
+        remove: vi.fn<DesktopApi["projects"]["remove"]>().mockResolvedValue(projectA),
+        restore: vi.fn<DesktopApi["projects"]["restore"]>().mockResolvedValue(projectA),
+        undo: vi.fn<DesktopApi["projects"]["undo"]>().mockResolvedValue(projectA),
+        retryDelete: vi.fn<DesktopApi["projects"]["retryDelete"]>().mockResolvedValue(projectA)
       },
       settings: {
         get: getSettings,

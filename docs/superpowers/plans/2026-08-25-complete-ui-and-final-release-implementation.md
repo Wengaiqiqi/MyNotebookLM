@@ -41,23 +41,28 @@ No new visual asset commit is created for this waived gate. The documentation ch
 - Create: `src/renderer/src/app/ModalRoot.tsx`
 - Create: `src/renderer/src/app/ModalRoot.test.tsx`
 - Create: `src/renderer/src/projects/ProjectView.tsx`
-- Create: `src/main/db/migrations/007_project_deletion.sql`
+- Create: `src/main/db/migrations/012_project_deletion.sql` (forward migration; 001–011 are immutable)
+- Create: `src/main/projects/project-deletion.test.ts`
 - Modify: `src/main/projects/project-repository.ts`
 - Modify: `src/main/projects/project-repository.test.ts`
 - Modify: `src/main/projects/project-service.ts`
 - Modify: `src/main/projects/project-service.test.ts`
 - Modify: `src/main/ipc/register-project-handlers.ts`
+- Modify: `src/main/index.ts`, `src/main/sources/managed-files.ts`
 - Modify: `src/shared/projects.ts`
+- Modify: `src/shared/ipc.ts`, `src/preload/create-desktop-api.ts`
 - Modify: `src/renderer/src/App.tsx`
 - Modify: `src/renderer/src/App.test.ts`
+- Create: `src/preload/project-lifecycle.test.ts`
 
-- [ ] Add characterization tests for existing project CRUD, menu focus, dialog focus/geometry, onboarding/settings routing and preference persistence before moving code.
-- [ ] Extract only the four named responsibilities; keep `App.tsx` as composition entry and avoid a global store/router dependency.
-- [ ] Add failing repository/service tests and migration fields for `active|deleting|delete_failed`, `deleted_at` and restore. Replace the old immediate hard delete with a durable project-cleanup task.
-- [ ] Project deletion first enters a 30-second undo grace state. Restore cancels queued cleanup. After cleanup starts, delete sources/files, Lance rows, conversations, notes, insights and tasks through their owning services, then hard-delete the project in one final SQLite transaction. A failure leaves `delete_failed` with retry/restore actions.
-- [ ] Add archived project list/restore and deletion undo/retry/restore UI so both archive and delete remain usable and recoverable.
-- [ ] Re-run characterization tests after every extraction; output/behavior must remain identical.
-- [ ] Review and commit `refactor: split desktop application shell`.
+- [x] Add characterization tests for existing project CRUD, menu focus, dialog focus/geometry, onboarding/settings routing and preference persistence before moving code.
+- [x] Extract only the four named responsibilities; keep `App.tsx` as composition entry and avoid a global store/router dependency.
+- [x] Add failing repository/service tests and migration fields for `active|deleting|delete_failed`, `deleted_at` and restore. Use forward migration `012_project_deletion.sql`; reuse task `kind='delete'` and stages `cleanup/finalizing`. Replace the old immediate hard delete with a durable project-cleanup task.
+- [x] Project deletion first enters a 30-second undo grace state. Restore cancels queued cleanup. After cleanup starts, delete sources/files, Lance rows, conversations, notes, insights and tasks through their owning services, then hard-delete the project in one final SQLite transaction. A failure leaves `delete_failed` with retry/restore actions.
+- [x] Add archived project list/restore and deletion undo/retry/restore UI so both archive and delete remain usable and recoverable.
+- [x] Re-run characterization tests after every extraction; output/behavior must remain identical.
+- [x] Independent read-only review PASS. Main-model evidence: focused `11 files / 150 tests`, full `92 files / 877 tests`, `npm run typecheck`, `npm run build`, and `git diff --check` all passed on 2026-08-28.
+- [x] Review and commit `refactor: split desktop application shell`.
 
 ## Task 3: Implement Approved Source Import and Task UI
 

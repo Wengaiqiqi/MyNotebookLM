@@ -4,6 +4,8 @@ export const projectDtoSchema = z.object({
   id: z.uuid(),
   name: z.string().min(1).max(80),
   archived: z.boolean(),
+  status: z.enum(["active", "deleting", "delete_failed"]),
+  deletedAt: z.iso.datetime().nullable(),
   createdAt: z.iso.datetime(),
   updatedAt: z.iso.datetime()
 });

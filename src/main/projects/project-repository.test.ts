@@ -48,7 +48,8 @@ describe("ProjectRepository", () => {
     expect(repository.list()).toEqual([]);
     expect(repository.list({ includeArchived: true })).toHaveLength(1);
 
-    repository.remove(PROJECT_ID);
+    repository.requestDeletion(PROJECT_ID);
+    repository.finishDeletion(PROJECT_ID);
     expect(repository.list({ includeArchived: true })).toEqual([]);
   });
 

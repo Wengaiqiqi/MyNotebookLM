@@ -64,6 +64,15 @@ describe("TaskService", () => {
     expect(completed.state).toBe("completed");
   });
 
+  it("publishes one post-commit completion for a deletion task", () => {
+    const updates: TaskDto[] = [];
+    const fanoutService = new TaskService(repository, { now: () => clock.value, random: () => 0, id: () => TASK_ID, onTransition: (task) => updates.push(task) });
+    fanoutService.createTask({ projectId: PROJECT_ID, sourceId: null, kind: "delete" });
+    fanoutService.start(TASK_ID, "cleanup");
+    fanoutService.publishCompleted(TASK_ID);
+    expect(updates.map((task) => task.state)).toEqual(["completed"]);
+  });
+
   it("completes transformation tasks at saving and retries cancelled work", () => {
     service.createTask({ projectId: PROJECT_ID, sourceId: null, kind: "transformation", idempotencyKey: "transform-1" });
     service.start(TASK_ID, "preparing");

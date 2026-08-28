@@ -86,7 +86,6 @@ type IpcInvoker = {
   removeListener?: (channel: string, listener: (...args: unknown[]) => void) => void;
 };
 
-const removeProjectResponseSchema = z.undefined();
 const settingsResultSchema = resultSchema(appSettingsDtoSchema);
 const profileListResultSchema = resultSchema(modelProfileListDtoSchema);
 const defaultRoutesResultSchema = resultSchema(defaultModelRoutesDtoSchema);
@@ -112,6 +111,7 @@ const titleOverlayInputSchema = z.object({ theme: appThemeSchema }).strict();
 const titleOverlayResultSchema = resultSchema(z.undefined());
 const chatRequestEventSchemaList = Object.values(chatRequestEventSchemas);
 const chatRequestEventSchema = z.union(chatRequestEventSchemaList as unknown as [z.ZodType, z.ZodType, ...z.ZodType[]]);
+const projectResponse = (raw: unknown) => projectDtoSchema.parse(raw && typeof raw === "object" && "ok" in raw && (raw as { ok?: unknown }).ok === true && "value" in raw ? (raw as { value: unknown }).value : raw);
 
 async function invokeResult<I, O>(
   ipc: IpcInvoker,
@@ -175,15 +175,18 @@ export function createDesktopApi(ipc: IpcInvoker): DesktopApi {
     },
     projects: {
       list: async () => projectDtoSchema.array().parse(await ipc.invoke(PROJECT_CHANNELS.list)),
+      listArchived: async () => projectDtoSchema.array().parse(await ipc.invoke(PROJECT_CHANNELS.listArchived)),
+      listDeleteFailed: async () => projectDtoSchema.array().parse(await ipc.invoke(PROJECT_CHANNELS.listDeleteFailed)),
       create: async (input) =>
         projectDtoSchema.parse(await ipc.invoke(PROJECT_CHANNELS.create, createProjectInputSchema.parse(input))),
       rename: async (input) =>
         projectDtoSchema.parse(await ipc.invoke(PROJECT_CHANNELS.rename, renameProjectInputSchema.parse(input))),
       archive: async (input) =>
         projectDtoSchema.parse(await ipc.invoke(PROJECT_CHANNELS.archive, projectIdInputSchema.parse(input))),
-      remove: async (input) => {
-        removeProjectResponseSchema.parse(await ipc.invoke(PROJECT_CHANNELS.remove, projectIdInputSchema.parse(input)));
-      }
+      remove: async (input) => projectResponse(await ipc.invoke(PROJECT_CHANNELS.remove, projectIdInputSchema.parse(input))),
+      restore: async (input) => projectResponse(await ipc.invoke(PROJECT_CHANNELS.restore, projectIdInputSchema.parse(input))),
+      undo: async (input) => projectResponse(await ipc.invoke(PROJECT_CHANNELS.undo, projectIdInputSchema.parse(input))),
+      retryDelete: async (input) => projectResponse(await ipc.invoke(PROJECT_CHANNELS.retryDelete, projectIdInputSchema.parse(input)))
     },
     settings: {
       get: () => invokeResult(ipc, SETTINGS_CHANNELS.get, z.undefined(), settingsResultSchema),

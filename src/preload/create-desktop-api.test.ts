@@ -16,6 +16,8 @@ const project = {
   id: "6db5e7a1-6f22-4a0d-afdf-6a6e4b8df44d",
   name: "Research",
   archived: false,
+  status: "active" as const,
+  deletedAt: null,
   createdAt: "2026-08-24T00:00:00.000Z",
   updatedAt: "2026-08-24T00:00:00.000Z"
 };
@@ -61,7 +63,7 @@ describe("createDesktopApi", () => {
     expect(Object.keys(api)).toEqual(["vector", "retrieval", "sources", "tasks", "projects", "settings", "models", "credentials", "titleOverlay", "conversations", "chat", "citations", "notes", "transformations"]);
     expect(Object.keys(api.vector)).toEqual(["getHealth", "startMigration", "rebuild", "optimize", "cancelTask", "subscribe"]);
     expect(Object.keys(api.retrieval)).toEqual(["search"]);
-    expect(Object.keys(api.projects)).toEqual(["list", "create", "rename", "archive", "remove"]);
+    expect(Object.keys(api.projects)).toEqual(["list", "listArchived", "listDeleteFailed", "create", "rename", "archive", "remove", "restore", "undo", "retryDelete"]);
     expect(Object.keys(api.settings)).toEqual(["get", "update"]);
     expect(Object.keys(api.models)).toEqual([
       "listProfiles",
@@ -295,14 +297,14 @@ describe("createDesktopApi", () => {
       .mockResolvedValueOnce(project)
       .mockResolvedValueOnce(project)
       .mockResolvedValueOnce(project)
-      .mockResolvedValueOnce(undefined);
+      .mockResolvedValueOnce(project);
     const api = createDesktopApi({ invoke });
 
     await api.projects.list();
     await api.projects.create({ name: "Notebook" });
     await api.projects.rename({ ...projectId, name: "Renamed" });
     await api.projects.archive(projectId);
-    await expect(api.projects.remove(projectId)).resolves.toBeUndefined();
+    await expect(api.projects.remove(projectId)).resolves.toEqual(project);
 
     expect(invoke).toHaveBeenNthCalledWith(1, PROJECT_CHANNELS.list);
     expect(invoke).toHaveBeenNthCalledWith(2, PROJECT_CHANNELS.create, { name: "Notebook" });

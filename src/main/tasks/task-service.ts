@@ -6,6 +6,7 @@ export type TaskServiceDeps = {
   now: () => string;
   random: () => number;
   id: () => string;
+  onTransition?: (task: TaskDto) => void;
 };
 
 const INTERRUPTED_ERROR: TaskErrorSummaryDto = {
@@ -15,6 +16,7 @@ const INTERRUPTED_ERROR: TaskErrorSummaryDto = {
 };
 
 export class TaskService {
+  private readonly deletionStarts = new Map<string, TaskDto>();
   constructor(
     private readonly repository: TaskRepository,
     private readonly deps: TaskServiceDeps
@@ -41,7 +43,7 @@ export class TaskService {
   start(taskId: string, stage: TaskStage): TaskDto {
     const current = this.repository.findById(taskId);
     if (!current) throw new Error(`Task not found: ${taskId}`);
-    return this.repository.transition({
+    const next = this.repository.transition({
       id: taskId,
       expectedState: "queued",
       nextState: "running",
@@ -49,6 +51,18 @@ export class TaskService {
       attempt: current.attempt,
       updatedAt: this.deps.now()
     });
+    if (next.kind === "delete") this.deletionStarts.set(taskId, next);
+    return next;
+  }
+
+  /** Publish completion after an owning cascade transaction has committed. */
+  publishCompleted(taskId: string): TaskDto {
+    const started = this.deletionStarts.get(taskId);
+    if (!started) throw new Error(`Task not found: ${taskId}`);
+    const completed = { ...started, state: "completed" as const, stage: "finalizing" as const, progress: 1000, updatedAt: this.deps.now() };
+    this.deps.onTransition?.(completed);
+    this.deletionStarts.delete(taskId);
+    return completed;
   }
 
   retry(taskId: string, stage: TaskStage): TaskDto {
@@ -79,6 +93,7 @@ export class TaskService {
   }
 
   fail(taskId: string, error: TaskErrorSummaryDto, autoRetry = true): TaskDto {
+    this.deletionStarts.delete(taskId);
     const current = this.repository.findById(taskId);
     if (!current) throw new Error(`Task not found: ${taskId}`);
     const retryable = isRetryableCode(error.code);
@@ -112,6 +127,7 @@ export class TaskService {
   }
 
   cancel(taskId: string): TaskDto {
+    this.deletionStarts.delete(taskId);
     return this.repository.requestCancellation(taskId, this.deps.now());
   }
 

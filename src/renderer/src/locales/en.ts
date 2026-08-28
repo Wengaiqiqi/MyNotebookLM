@@ -13,7 +13,12 @@ const en = {
     emptyBody: "Create a project to organize sources, notes, and future research in one place.",
     nameLabel: "Project name",
     menu: "Project actions",
-    removeConfirm: "This permanently deletes the selected project and cannot be undone."
+    removeConfirm: "This starts a recoverable deletion. You have 30 seconds to undo it.",
+    archived: "Archived projects",
+    restore: "Restore",
+    undo: "Undo deletion",
+    retryDelete: "Retry deletion",
+    deletionPending: "Project deletion is waiting for cleanup."
   },
   common: {
     cancel: "Cancel",
@@ -101,7 +106,9 @@ const en = {
     createProject: "Could not create the project.",
     renameProject: "Could not rename the project.",
     archiveProject: "Could not archive the project.",
-    removeProject: "Could not delete the project."
+    removeProject: "Could not delete the project.",
+    restoreProject: "Could not restore the project.",
+    retryDeleteProject: "Could not retry project deletion."
   },
   chat: {
     message: {

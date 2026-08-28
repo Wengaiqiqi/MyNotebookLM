@@ -8,6 +8,8 @@ const project = {
   id: "6db5e7a1-6f22-4a0d-afdf-6a6e4b8df44d",
   name: "研究",
   archived: false,
+  status: "active" as const,
+  deletedAt: null,
   createdAt: "2026-08-24T00:00:00.000Z",
   updatedAt: "2026-08-24T00:00:00.000Z"
 };
@@ -32,7 +34,12 @@ function createService() {
     create: vi.fn(() => project),
     rename: vi.fn(() => project),
     archive: vi.fn(() => project),
-    remove: vi.fn()
+    remove: vi.fn(() => project),
+    listArchived: vi.fn(() => [project]),
+    listDeleteFailed: vi.fn(() => [project]),
+    restore: vi.fn(() => project),
+    undo: vi.fn(() => project),
+    retryDelete: vi.fn(() => project)
   };
 }
 
@@ -91,7 +98,7 @@ describe("registerProjectHandlers", () => {
       invoke(ipc, PROJECT_CHANNELS.rename, { id: project.id, name: "Renamed" })
     ).toEqual(project);
     expect(invoke(ipc, PROJECT_CHANNELS.archive, { id: project.id })).toEqual(project);
-    expect(invoke(ipc, PROJECT_CHANNELS.remove, { id: project.id })).toBeUndefined();
+    expect(invoke(ipc, PROJECT_CHANNELS.remove, { id: project.id })).toEqual(project);
     expect(service.list).toHaveBeenCalledOnce();
     expect(service.create).toHaveBeenCalledWith({ name: "研究" });
     expect(service.rename).toHaveBeenCalledWith({ id: project.id, name: "Renamed" });

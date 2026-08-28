@@ -13,7 +13,12 @@ const zhCN = {
     emptyBody: "创建项目，在一处整理资料、笔记与后续研究。",
     nameLabel: "项目名称",
     menu: "项目操作",
-    removeConfirm: "这将永久删除所选项目，且无法撤销。"
+    removeConfirm: "项目将进入可恢复删除状态，你有 30 秒可以撤销。",
+    archived: "已归档项目",
+    restore: "恢复",
+    undo: "撤销删除",
+    retryDelete: "重试删除",
+    deletionPending: "项目删除正在等待清理。"
   },
   common: {
     cancel: "取消",
@@ -101,7 +106,9 @@ const zhCN = {
     createProject: "无法创建项目。",
     renameProject: "无法重命名项目。",
     archiveProject: "无法归档项目。",
-    removeProject: "无法删除项目。"
+    removeProject: "无法删除项目。",
+    restoreProject: "无法恢复项目。",
+    retryDeleteProject: "无法重试删除项目。"
   },
   chat: {
     message: {

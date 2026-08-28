@@ -31,10 +31,15 @@ export const SOURCE_CHANNELS = { chooseFiles: "sources:v1:choose-files", importF
 
 export const PROJECT_CHANNELS = {
   list: "projects:list",
+  listArchived: "projects:list-archived",
+  listDeleteFailed: "projects:list-delete-failed",
   create: "projects:create",
   rename: "projects:rename",
   archive: "projects:archive",
-  remove: "projects:remove"
+  remove: "projects:remove",
+  restore: "projects:restore",
+  undo: "projects:undo",
+  retryDelete: "projects:retry-delete"
 } as const;
 
 export const SETTINGS_CHANNELS = {
@@ -174,10 +179,15 @@ export interface DesktopApi {
   tasks?: { list(input: { projectId: string }): Promise<TaskDto[]>; cancel(input: { projectId: string; taskId: string }): Promise<Result<TaskDto>>; subscribe(projectId: string, listener: (task: TaskDto) => void): () => void; };
   projects: {
     list(): Promise<ProjectDto[]>;
+    listArchived(): Promise<ProjectDto[]>;
+    listDeleteFailed(): Promise<ProjectDto[]>;
     create(input: CreateProjectInput): Promise<ProjectDto>;
     rename(input: RenameProjectInput): Promise<ProjectDto>;
     archive(input: ProjectIdInput): Promise<ProjectDto>;
-    remove(input: ProjectIdInput): Promise<void>;
+    remove(input: ProjectIdInput): Promise<ProjectDto>;
+    restore(input: ProjectIdInput): Promise<ProjectDto>;
+    undo(input: ProjectIdInput): Promise<ProjectDto>;
+    retryDelete(input: ProjectIdInput): Promise<ProjectDto>;
   };
   settings: {
     get(): Promise<Result<AppSettingsDto>>;
