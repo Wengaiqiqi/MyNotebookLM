@@ -42,7 +42,7 @@ export type TransformationServiceDeps = Readonly<{
   db: Database.Database;
   tasks: Pick<TaskService, "createTask" | "start" | "advance" | "complete" | "fail" | "retry" | "retryCancelled" | "cancel"> & Partial<Pick<TaskService, "recoverStaleRunning">>;
   taskRepository: Pick<TaskRepository, "findByIdempotencyKey" | "findById">;
-  transformations: Pick<TransformationRepository, "get">;
+  transformations: Pick<TransformationRepository, "get" | "list" | "create" | "update" | "remove">;
   notes: Pick<NoteRepository, "get" | "create">;
   generation: Pick<RoutedGeneration, "generateRouted">;
   router: { resolve: (taskKind: "summary" | "key-points" | "qa" | "custom-transformation", profileId?: string) => readonly ModelProfileSnapshot[] };
@@ -52,6 +52,18 @@ export type TransformationServiceDeps = Readonly<{
 
 export class TransformationInProgressError extends Error {
   constructor(readonly taskId: string) { super(`Transformation already running: ${taskId}`); this.name = "TransformationInProgressError"; }
+}
+export class TransformationTaskNotFoundError extends Error {
+  constructor(taskId: string) { super(`Transformation task not found: ${taskId}`); this.name = "TransformationTaskNotFoundError"; }
+}
+export class TransformationInsightNotFoundError extends Error {
+  constructor(insightId: string) { super(`Transformation insight not found: ${insightId}`); this.name = "TransformationInsightNotFoundError"; }
+}
+
+type TaskOwnership = { taskId: string; owned: boolean };
+function oneShotOwnership(callback?: (ownership: TaskOwnership) => void): (ownership: TaskOwnership) => void {
+  let sent = false;
+  return (ownership) => { if (!sent) { sent = true; callback?.(ownership); } };
 }
 
 function stable(value: unknown): string {
@@ -143,6 +155,46 @@ function resolveRule(input: TransformationRunRequest, deps: TransformationServic
 export class TransformationService {
   constructor(private readonly deps: TransformationServiceDeps) {}
 
+  listRules(input: { projectId: string }): ReturnType<TransformationRepository["list"]> { return this.deps.transformations.list(input.projectId); }
+  createRule(input: Omit<Parameters<TransformationRepository["create"]>[0], "id">): ReturnType<TransformationRepository["create"]> {
+    return this.deps.transformations.create({ ...input, id: this.deps.id?.() ?? randomUUID() });
+  }
+  updateRule(input: Parameters<TransformationRepository["update"]>[0]): ReturnType<TransformationRepository["update"]> { return this.deps.transformations.update(input); }
+  deleteRule(input: { projectId: string; id: string; version: number }): void { this.deps.transformations.remove(input.projectId, input.id, input.version); }
+
+  listInsights(input: { projectId: string; limit?: number; offset?: number }): InsightDto[] {
+    const limit = Math.min(100, Math.max(1, input.limit ?? 50));
+    const offset = Math.max(0, input.offset ?? 0);
+    const rows = this.deps.db.prepare("SELECT * FROM insights WHERE project_id = ? ORDER BY created_at DESC, id ASC LIMIT ? OFFSET ?").all(input.projectId, limit, offset) as any[];
+    return rows.map(rowInsight);
+  }
+
+  /** Main-process-only facade: claim/create the durable task and continue in the background. */
+  startTask(input: TransformationRunRequest, signal?: AbortSignal, onFinished?: () => void, onOwnership?: (ownership: { taskId: string; owned: boolean }) => void): TaskDto {
+    let taskId: string | undefined;
+    const notifyOwnership = oneShotOwnership((ownership) => { taskId = ownership.taskId; onOwnership?.(ownership); });
+    const promise = this.run({ ...input, ...(signal === undefined ? {} : { signal }) }, notifyOwnership);
+    void promise.finally(onFinished).catch(() => undefined);
+    if (!taskId) throw new Error("Transformation task was not created");
+    const task = this.deps.taskRepository.findById(taskId);
+    if (!task) throw new Error("Transformation task was not created");
+    return task;
+  }
+
+  cancelTask(input: { projectId: string; taskId: string }): TaskDto {
+    const current = this.deps.taskRepository.findById(input.taskId);
+    if (!current || current.projectId !== input.projectId || current.kind !== "transformation") throw new TransformationTaskNotFoundError(input.taskId);
+    return this.deps.tasks.cancel(input.taskId);
+  }
+
+  retryTask(input: { projectId: string; taskId: string }, signal?: AbortSignal, onFinished?: () => void, onOwnership?: (ownership: { taskId: string; owned: boolean }) => void): TaskDto {
+    const current = this.deps.taskRepository.findById(input.taskId);
+    if (!current || current.projectId !== input.projectId || current.kind !== "transformation") throw new TransformationTaskNotFoundError(input.taskId);
+    const promise = this.resume(input.taskId, signal, oneShotOwnership(onOwnership));
+    void promise.finally(onFinished).catch(() => undefined);
+    return this.deps.taskRepository.findById(input.taskId)!;
+  }
+
   private completedInsight(taskId: string, idempotencyKey?: string | null): InsightDto {
     const row = this.deps.db.prepare("SELECT * FROM insights WHERE task_id = ? OR (? IS NOT NULL AND idempotency_key = ?)").get(taskId, idempotencyKey ?? null, idempotencyKey ?? null) as any;
     if (!row) throw new Error("Completed transformation insight not found");
@@ -184,7 +236,9 @@ export class TransformationService {
     }
   }
 
-  async run(input: TransformationRunRequest): Promise<InsightDto> {
+  async run(input: TransformationRunRequest, onTaskOwnership?: (ownership: { taskId: string; owned: boolean }) => void): Promise<InsightDto> {
+    const notifyOwnership = oneShotOwnership(onTaskOwnership);
+    const notifyTaskOwnership = (taskId: string, owned: boolean) => notifyOwnership({ taskId, owned });
     if (!this.deps.router) throw new Error("Transformation router is required");
     const rule = resolveRule(input, this.deps);
     const target = targetSnapshot(this.deps.db, input);
@@ -199,10 +253,11 @@ export class TransformationService {
     const idempotencyKey = input.force ? sha256(`${baseKey}:force:${randomUUID()}`) : baseKey;
     const existing = this.deps.taskRepository.findByIdempotencyKey(idempotencyKey);
     if (existing?.state === "completed") {
+      notifyTaskOwnership(existing.id, false);
       const row = this.deps.db.prepare("SELECT * FROM insights WHERE task_id = ? OR idempotency_key = ?").get(existing.id, idempotencyKey) as any;
       if (row) return rowInsight(row);
     }
-    if (existing?.state === "running") throw new TransformationInProgressError(existing.id);
+    if (existing?.state === "running") { notifyTaskOwnership(existing.id, false); throw new TransformationInProgressError(existing.id); }
     let task: TaskDto;
     if (existing?.state === "queued" || existing?.state === "failed" || existing?.state === "cancelled") task = existing;
     else {
@@ -210,11 +265,14 @@ export class TransformationService {
       catch (error) {
         const raced = this.deps.taskRepository.findByIdempotencyKey(idempotencyKey);
         if (raced?.state === "completed") {
+          notifyTaskOwnership(raced.id, false);
           const row = this.deps.db.prepare("SELECT * FROM insights WHERE task_id = ? OR idempotency_key = ?").get(raced.id, idempotencyKey) as any;
           if (row) return rowInsight(row);
         }
-        if (raced?.state === "running") throw new TransformationInProgressError(raced.id);
-        if (raced?.state === "queued") throw new TransformationInProgressError(raced.id);
+        if (raced?.state === "running" || raced?.state === "queued") {
+          notifyTaskOwnership(raced.id, false);
+          throw new TransformationInProgressError(raced.id);
+        }
         if (raced?.state === "failed") task = this.deps.tasks.retry(raced.id, "preparing");
         else if (raced?.state === "cancelled") task = this.deps.tasks.retryCancelled(raced.id, "preparing");
         else throw error;
@@ -225,8 +283,17 @@ export class TransformationService {
     const snapshotExists = this.deps.db.prepare("SELECT 1 FROM transformation_task_snapshots WHERE task_id = ?").get(task.id);
     if (!snapshotExists) this.deps.db.prepare(`INSERT INTO transformation_task_snapshots(task_id, project_id, input_kind, input_snapshot_json, input_hash, rule_id, transformation_id, rule_version, rendered_prompt_version, rendered_prompt, route_snapshot_json, request_json, idempotency_key, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
       .run(task.id, input.projectId, target.kind, JSON.stringify({ ...target.target, content: bounded.content, truncated: bounded.truncated, hashes: target.hashes }), inputHash, rule.id, rule.transformationId, rule.version, RENDERED_PROMPT_VERSION, rendered, JSON.stringify({ taskKind: rule.taskKind, profileId: input.profileId ?? null, routes }), JSON.stringify(request), idempotencyKey, now, now);
-    const claimed = this.claim(task.id, "preparing");
-    if (claimed.insight) return claimed.insight;
+    let claimed: ReturnType<TransformationService["claim"]>;
+    try { claimed = this.claim(task.id, "preparing"); }
+    catch (error) {
+      const current = this.deps.taskRepository.findById(task.id);
+      if (current?.state === "completed" || current?.state === "running" || current?.state === "queued") notifyTaskOwnership(task.id, false);
+      throw error;
+    }
+    if (claimed.insight) {
+      notifyTaskOwnership(task.id, false);
+      return claimed.insight;
+    }
     task = claimed.task!;
     this.deps.tasks.advance(task.id, "generating", 200);
     let content = "";
@@ -234,9 +301,11 @@ export class TransformationService {
     let actual: { provider: any; model: string; profileId: string | null } | undefined;
     try {
       if (input.signal?.aborted) {
+        notifyTaskOwnership(task.id, false);
         this.deps.tasks.cancel(task.id);
         throw new RoutedGenerationError({ code: "CANCELLED", messageKey: "errors.cancelled", recoverable: false });
       }
+      notifyTaskOwnership(task.id, true);
       for await (const event of this.deps.generation.generateRouted(rule.taskKind, request, input.profileId, input.signal)) {
         if (event.type === "text-delta") content += event.text;
         else if (event.type === "usage") {
@@ -268,9 +337,13 @@ export class TransformationService {
     }
   }
 
-  convertToNote(projectId: string, insightId: string): ReturnType<NoteRepository["create"]> {
+  convertToNote(input: { projectId: string; insightId: string }): ReturnType<NoteRepository["create"]>;
+  convertToNote(projectId: string, insightId: string): ReturnType<NoteRepository["create"]>;
+  convertToNote(projectOrInput: string | { projectId: string; insightId: string }, insightIdArg?: string): ReturnType<NoteRepository["create"]> {
+    const projectId = typeof projectOrInput === "string" ? projectOrInput : projectOrInput.projectId;
+    const insightId = typeof projectOrInput === "string" ? insightIdArg! : projectOrInput.insightId;
     const row = this.deps.db.prepare("SELECT * FROM insights WHERE id = ? AND project_id = ?").get(insightId, projectId) as any;
-    if (!row) throw new Error("Insight not found");
+    if (!row) throw new TransformationInsightNotFoundError(insightId);
     const content = outputText(row.content);
     const title = content.split("\n")[0]?.replace(/^#+\s*/, "").trim() || "Transformation result";
     return this.deps.notes.create({ id: this.deps.id?.() ?? randomUUID(), projectId, title: title.slice(0, 200), body: content });
@@ -278,18 +351,29 @@ export class TransformationService {
 
   retry(taskId: string, signal?: AbortSignal): Promise<InsightDto> { return this.resume(taskId, signal); }
 
-  async resume(taskId: string, signal?: AbortSignal): Promise<InsightDto> {
+  async resume(taskId: string, signal?: AbortSignal, onTaskOwnership?: (ownership: { taskId: string; owned: boolean }) => void): Promise<InsightDto> {
+    const notifyOwnership = oneShotOwnership(onTaskOwnership);
     const task = this.deps.taskRepository.findById(taskId);
     const snapshot = this.deps.db.prepare("SELECT * FROM transformation_task_snapshots WHERE task_id = ?").get(taskId) as any;
-    if (!task || !snapshot) throw new Error("Transformation snapshot not found");
-    if (task.state === "running") throw new TransformationInProgressError(taskId);
+    if (!task || !snapshot) throw new TransformationTaskNotFoundError(taskId);
+    if (task.state === "running") { notifyOwnership({ taskId, owned: false }); throw new TransformationInProgressError(taskId); }
     if (task.state === "completed") {
+      notifyOwnership({ taskId, owned: false });
       const row = this.deps.db.prepare("SELECT * FROM insights WHERE task_id = ?").get(taskId) as any;
       if (row) return rowInsight(row);
       throw new Error("Completed transformation insight not found");
     }
-    const claimed = this.claim(taskId, "preparing");
-    if (claimed.insight) return claimed.insight;
+    let claimed: ReturnType<TransformationService["claim"]>;
+    try { claimed = this.claim(taskId, "preparing"); }
+    catch (error) {
+      const current = this.deps.taskRepository.findById(taskId);
+      if (current?.state === "completed" || current?.state === "running" || current?.state === "queued") notifyOwnership({ taskId, owned: false });
+      throw error;
+    }
+    if (claimed.insight) {
+      notifyOwnership({ taskId, owned: false });
+      return claimed.insight;
+    }
     const persistedRoute = JSON.parse(snapshot.route_snapshot_json) as { taskKind?: string; profileId?: string | null; routes?: readonly RoutedProfile[] } | readonly RoutedProfile[];
     const routeObject = Array.isArray(persistedRoute) ? undefined : persistedRoute as { taskKind?: string; profileId?: string | null; routes?: readonly RoutedProfile[] };
     const taskKind = routeObject?.taskKind ? routeObject.taskKind as "summary" | "key-points" | "qa" | "custom-transformation" : "custom-transformation";
@@ -297,9 +381,16 @@ export class TransformationService {
     const persistedRoutes = routeObject ? routeObject.routes ?? [] : persistedRoute;
     const currentRoutes = this.deps.router.resolve(taskKind, persistedRouteProfileId).map((profile) => ({ profileId: profile.id, provider: profile.provider, model: profile.modelId }));
     if (stable(currentRoutes) !== stable(persistedRoutes)) {
+      notifyOwnership({ taskId, owned: false });
       this.deps.tasks.fail(taskId, { code: "VALIDATION", messageKey: "errors.validation", recoverable: false }, false);
       throw new RoutedGenerationError({ code: "VALIDATION", messageKey: "errors.validation", recoverable: false });
     }
+    if (signal?.aborted) {
+      try { this.deps.tasks.cancel(taskId); } catch {}
+      notifyOwnership({ taskId, owned: false });
+      throw new RoutedGenerationError({ code: "CANCELLED", messageKey: "errors.cancelled", recoverable: false });
+    }
+    notifyOwnership({ taskId, owned: true });
     const request = JSON.parse(snapshot.request_json) as RoutedGenerateRequest;
     let content = "";
     let usage: InsightUsage = { inputTokens: 0, outputTokens: 0, totalTokens: 0 };

@@ -38,6 +38,10 @@ export const updateTransformationInputSchema = createTransformationInputSchema.e
   enabled: z.boolean()
 }).strict();
 export const transformationIdInputSchema = z.object({ projectId: z.uuid(), id: z.uuid() }).strict();
+export const builtinTransformationDtoSchema = z.object({
+  key: z.enum(["summary", "key-points", "qa"]), language: z.enum(["zh-CN", "en"]), name: z.string().trim().min(1).max(100),
+  appliesTo: transformationAppliesToSchema, prompt: z.string().trim().min(1)
+}).strict();
 
 export const insightUsageSchema = z.object({
   inputTokens: z.number().int().nonnegative(),
@@ -64,12 +68,32 @@ export const insightDtoSchema = z.object({
 
 export const transformationRunInputSchema = z.object({
   projectId: z.uuid(),
-  transformationId: z.uuid(),
+  transformationId: z.uuid().optional(),
+  builtinKey: z.enum(["summary", "key-points", "qa"]).optional(),
+  language: z.enum(["zh-CN", "en"]).optional(),
+  sourceRevisionId: z.uuid().optional(),
   sourceRevisionIds: z.array(z.uuid()).max(100).optional(),
   messageId: z.uuid().optional(),
+  answerMessageId: z.uuid().optional(),
   noteId: z.uuid().optional(),
-  profileId: z.uuid().optional()
-}).strict();
+  profileId: z.uuid().optional(),
+  force: z.boolean().optional()
+}).strict().superRefine((value, context) => {
+  if ((value.transformationId === undefined) === (value.builtinKey === undefined)) {
+    context.addIssue({ code: "custom", path: ["transformationId"], message: "Exactly one transformation rule is required" });
+  }
+  if (value.builtinKey !== undefined && value.language === undefined) {
+    context.addIssue({ code: "custom", path: ["language"], message: "Builtin transformation language is required" });
+  }
+  const targets = [
+    value.sourceRevisionId !== undefined || (value.sourceRevisionIds?.length ?? 0) > 0,
+    value.messageId !== undefined,
+    value.answerMessageId !== undefined,
+    value.noteId !== undefined
+  ].filter(Boolean).length;
+  if (targets !== 1) context.addIssue({ code: "custom", path: ["projectId"], message: "Exactly one transformation target is required" });
+  if (value.sourceRevisionId !== undefined && value.sourceRevisionIds !== undefined) context.addIssue({ code: "custom", path: ["sourceRevisionIds"], message: "Use one source target form" });
+})
 
 export type TransformationAppliesTo = z.infer<typeof transformationAppliesToSchema>;
 export type TransformationDto = z.infer<typeof transformationDtoSchema>;
@@ -79,3 +103,4 @@ export type TransformationIdInput = z.infer<typeof transformationIdInputSchema>;
 export type InsightUsage = z.infer<typeof insightUsageSchema>;
 export type InsightDto = z.infer<typeof insightDtoSchema>;
 export type TransformationRunInput = z.infer<typeof transformationRunInputSchema>;
+export type BuiltinTransformationDto = z.infer<typeof builtinTransformationDtoSchema>;

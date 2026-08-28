@@ -151,8 +151,17 @@ Evidence (2026-08-28): RED failed on the missing transformation service and unre
 - Create: `src/main/ipc/register-note-handlers.test.ts`
 - Create: `src/main/ipc/register-transformation-handlers.ts`
 - Create: `src/main/ipc/register-transformation-handlers.test.ts`
+- Create: `src/main/ipc/register-transformation-handlers.integration.test.ts`
+- Modify: `src/main/ipc/register-model-handlers.test.ts`
 - Modify: `src/main/ipc/register-model-handlers.ts`
+- Modify: `src/main/models/model-service.ts`
+- Modify: `src/main/models/route-repository.ts`
+- Modify: `src/main/settings/settings-repository.ts`
+- Modify: `src/main/notes/transformation-service.ts`
+- Modify: `src/main/notes/transformation-service.test.ts`
 - Modify: `src/shared/ipc.ts`
+- Modify: `src/shared/notes.ts`
+- Modify: `src/shared/transformations.ts`
 - Modify: `src/preload/create-desktop-api.ts`
 - Modify: `src/preload/create-desktop-api.test.ts`
 - Modify: `src/renderer/src/global.d.ts`
@@ -160,10 +169,12 @@ Evidence (2026-08-28): RED failed on the missing transformation service and unre
 
 **Desktop API additions:** note CRUD/link/title; rule CRUD/list built-ins; transform run/cancel/retry/list insights/convert; route get/save; route attempt history.
 
-- [ ] Write failing handler/preload tests for every command/result/event, ownership, stale versions, explicit profile override and event cleanup.
-- [ ] Implement narrow schemas; renderer cannot supply task state, idempotency keys, provider secrets or raw SQL.
-- [ ] Run focused tests, full unit suite, typecheck and build; run Gate E from the master plan.
-- [ ] Review and commit `feat: expose research notes and transformations`.
+- [x] Write failing handler/preload tests for every command/result/event, ownership, stale versions, explicit profile override and event cleanup.
+- [x] Implement narrow schemas; renderer cannot supply task state, idempotency keys, provider secrets or raw SQL.
+- [x] Run focused tests, full unit suite, typecheck and build; run Gate E from the master plan.
+- [x] Review and commit `feat: expose research notes and transformations`.
+
+Evidence (2026-08-28): RED failed on missing note/transformation handlers and public API contracts. GREEN: Task 8 focused 186/186; Gate E notes/transformation/idempotency/routing/fallback 299/299; full suite 854/854; typecheck and build passed. Independent review PASS after fix round 5 and evidence-based correction: conversation answers use authoritative `answerMessageId`, not renderer-supplied raw answer text.
 
 ## Completion Gate
 

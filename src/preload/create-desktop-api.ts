@@ -14,6 +14,17 @@ import {
   RETRIEVAL_CHANNELS,
   CHAT_CHANNELS,
   CITATION_CHANNELS,
+  NOTE_CHANNELS,
+  TRANSFORMATION_CHANNELS,
+  modelRoutesInputSchema,
+  saveModelRoutesInputSchema,
+  modelRouteAttemptsInputSchema,
+  noteListInputSchema,
+  transformationRulesInputSchema,
+  transformationBuiltinInputSchema,
+  transformationInsightsInputSchema,
+  transformationTaskInputSchema,
+  transformationConvertInputSchema,
   type ChatRequestEvent,
   VECTOR_CHANNELS,
   type DesktopApi
@@ -36,6 +47,8 @@ import {
   citationOpenInputSchema
 } from "../shared/ipc";
 import { sourceDtoSchema } from "../shared/sources";
+import { createNoteInputSchema, createNoteLinkInputSchema, deleteNoteLinkInputSchema, generateNoteTitleInputSchema, noteDtoSchema, noteIdInputSchema, noteLinkDtoSchema, noteStateInputSchema, updateNoteInputSchema } from "../shared/notes";
+import { builtinTransformationDtoSchema, createTransformationInputSchema, insightDtoSchema, transformationDtoSchema, transformationRunInputSchema, updateTransformationInputSchema } from "../shared/transformations";
 import { taskDtoSchema } from "../shared/tasks";
 import {
   credentialInputSchema,
@@ -47,6 +60,8 @@ import {
   modelDescriptorSchema,
   modelProfileDtoSchema,
   modelProfileListDtoSchema,
+  modelRouteDtoSchema,
+  modelRouteAttemptDtoSchema,
   modelTestResultDtoSchema,
   saveModelProfileInputSchema,
   setDefaultModelRoutesInputSchema,
@@ -80,6 +95,19 @@ const deleteProfileResultSchema = resultSchema(z.undefined());
 const discoveryResultSchema = resultSchema(modelDescriptorSchema.array());
 const modelTestResultSchema = resultSchema(modelTestResultDtoSchema);
 const credentialResultSchema = resultSchema(credentialStatusDtoSchema);
+const modelRoutesResultSchema = resultSchema(modelRouteDtoSchema.array());
+const modelAttemptsResultSchema = resultSchema(modelRouteAttemptDtoSchema.array());
+const noteResultSchema = resultSchema(noteDtoSchema);
+const nullableNoteResultSchema = resultSchema(noteDtoSchema.nullable());
+const notesResultSchema = resultSchema(noteDtoSchema.array());
+const noteLinkResultSchema = resultSchema(noteLinkDtoSchema);
+const noteLinksResultSchema = resultSchema(noteLinkDtoSchema.array());
+const transformationResultSchema = resultSchema(transformationDtoSchema);
+const transformationsResultSchema = resultSchema(transformationDtoSchema.array());
+const builtinResultSchema = resultSchema(builtinTransformationDtoSchema.array());
+const insightResultSchema = resultSchema(insightDtoSchema.array());
+const transformationTaskResultSchema = resultSchema(taskDtoSchema);
+const voidResultSchema = resultSchema(z.undefined());
 const titleOverlayInputSchema = z.object({ theme: appThemeSchema }).strict();
 const titleOverlayResultSchema = resultSchema(z.undefined());
 const chatRequestEventSchemaList = Object.values(chatRequestEventSchemas);
@@ -143,7 +171,7 @@ export function createDesktopApi(ipc: IpcInvoker): DesktopApi {
     tasks: {
       list: async (input) => taskDtoSchema.array().parse(await ipc.invoke(SOURCE_CHANNELS.listTasks, z.object({ projectId: z.uuid() }).strict().parse(input))),
       cancel: (input) => invokeResult(ipc, SOURCE_CHANNELS.cancel, z.object({ projectId: z.uuid(), taskId: z.uuid() }).strict(), resultSchema(taskDtoSchema), input),
-      subscribe: (projectId, listener) => { const channel = SOURCE_CHANNELS.update + ":" + projectId; const handler = (_event: unknown, raw: unknown) => { const parsed = taskDtoSchema.safeParse(raw); if (parsed.success) listener(parsed.data); }; ipc.on?.(channel, handler); return () => ipc.removeListener?.(channel, handler); }
+      subscribe: (projectId, listener) => { const parsedProject = z.uuid().safeParse(projectId); if (!parsedProject.success) return () => undefined; const channel = SOURCE_CHANNELS.update + ":" + parsedProject.data; const handler = (_event: unknown, raw: unknown) => { const parsed = taskDtoSchema.safeParse(raw); if (parsed.success && parsed.data.projectId === parsedProject.data) listener(parsed.data); }; ipc.on?.(channel, handler); return () => ipc.removeListener?.(channel, handler); }
     },
     projects: {
       list: async () => projectDtoSchema.array().parse(await ipc.invoke(PROJECT_CHANNELS.list)),
@@ -214,7 +242,10 @@ export function createDesktopApi(ipc: IpcInvoker): DesktopApi {
         testModelInputSchema,
         modelTestResultSchema,
         input
-      )
+      ),
+      getRoutes: (input) => invokeResult(ipc, MODEL_CHANNELS.getRoutes, modelRoutesInputSchema, modelRoutesResultSchema, input),
+      saveRoutes: (input) => invokeResult(ipc, MODEL_CHANNELS.saveRoutes, saveModelRoutesInputSchema, modelRoutesResultSchema, input),
+      listRouteAttempts: (input) => invokeResult(ipc, MODEL_CHANNELS.listRouteAttempts, modelRouteAttemptsInputSchema, modelAttemptsResultSchema, input)
     },
     credentials: {
       set: (input) => invokeResult(
@@ -290,6 +321,31 @@ export function createDesktopApi(ipc: IpcInvoker): DesktopApi {
     },
     citations: {
       open: (input) => invokeResult(ipc, CITATION_CHANNELS.open, citationOpenInputSchema, resultSchema(chatOpenedResultValueSchema), input)
+    },
+    notes: {
+      create: (input) => invokeResult(ipc, NOTE_CHANNELS.create, createNoteInputSchema, noteResultSchema, input),
+      get: (input) => invokeResult(ipc, NOTE_CHANNELS.get, noteIdInputSchema, nullableNoteResultSchema, input),
+      list: (input) => invokeResult(ipc, NOTE_CHANNELS.list, noteListInputSchema, notesResultSchema, input),
+      update: (input) => invokeResult(ipc, NOTE_CHANNELS.update, updateNoteInputSchema, noteResultSchema, input),
+      archive: (input) => invokeResult(ipc, NOTE_CHANNELS.archive, noteStateInputSchema, noteResultSchema, input),
+      restore: (input) => invokeResult(ipc, NOTE_CHANNELS.restore, noteStateInputSchema, noteResultSchema, input),
+      delete: (input) => invokeResult(ipc, NOTE_CHANNELS.delete, noteStateInputSchema, voidResultSchema, input),
+      createLink: (input) => invokeResult(ipc, NOTE_CHANNELS.createLink, createNoteLinkInputSchema, noteLinkResultSchema, input),
+      listLinks: (input) => invokeResult(ipc, NOTE_CHANNELS.listLinks, noteIdInputSchema, noteLinksResultSchema, input),
+      deleteLink: (input) => invokeResult(ipc, NOTE_CHANNELS.deleteLink, deleteNoteLinkInputSchema, voidResultSchema, input),
+      generateTitle: (input) => invokeResult(ipc, NOTE_CHANNELS.generateTitle, generateNoteTitleInputSchema, noteResultSchema, input)
+    },
+    transformations: {
+      listRules: (input) => invokeResult(ipc, TRANSFORMATION_CHANNELS.listRules, transformationRulesInputSchema, transformationsResultSchema, input),
+      createRule: (input) => invokeResult(ipc, TRANSFORMATION_CHANNELS.createRule, createTransformationInputSchema, transformationResultSchema, input),
+      updateRule: (input) => invokeResult(ipc, TRANSFORMATION_CHANNELS.updateRule, updateTransformationInputSchema, transformationResultSchema, input),
+      deleteRule: (input) => invokeResult(ipc, TRANSFORMATION_CHANNELS.deleteRule, updateTransformationInputSchema.pick({ projectId: true, id: true, version: true }), voidResultSchema, input),
+      listBuiltins: (input = {}) => invokeResult(ipc, TRANSFORMATION_CHANNELS.listBuiltins, transformationBuiltinInputSchema, builtinResultSchema, input),
+      run: (input) => invokeResult(ipc, TRANSFORMATION_CHANNELS.run, transformationRunInputSchema, transformationTaskResultSchema, input),
+      cancel: (input) => invokeResult(ipc, TRANSFORMATION_CHANNELS.cancel, transformationTaskInputSchema, transformationTaskResultSchema, input),
+      retry: (input) => invokeResult(ipc, TRANSFORMATION_CHANNELS.retry, transformationTaskInputSchema, transformationTaskResultSchema, input),
+      listInsights: (input) => invokeResult(ipc, TRANSFORMATION_CHANNELS.listInsights, transformationInsightsInputSchema, insightResultSchema, input),
+      convertToNote: (input) => invokeResult(ipc, TRANSFORMATION_CHANNELS.convertToNote, transformationConvertInputSchema, noteResultSchema, input)
     }
   };
 }

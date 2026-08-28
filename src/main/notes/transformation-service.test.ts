@@ -78,11 +78,65 @@ describe("TransformationService", () => {
     expect(calls).toBe(2);
   });
 
+  it("claims a durable task and returns immediately while completing in the background", async () => {
+    const ownership: Array<{ taskId: string; owned: boolean }> = [];
+    const task = service.startTask({ projectId: PROJECT, builtinKey: "summary", language: "en", sourceRevisionId: REVISION }, undefined, undefined, (value) => ownership.push(value));
+    expect(task.kind).toBe("transformation");
+    expect(ownership).toEqual([{ taskId: task.id, owned: true }]);
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(db.connection.prepare("SELECT state FROM tasks WHERE id = ?").get(task.id)).toEqual({ state: "completed" });
+  });
+
+  it("reports completed reuse as not owned", async () => {
+    const input = { projectId: PROJECT, builtinKey: "summary" as const, language: "en" as const, sourceRevisionId: REVISION };
+    const completed = await service.run(input);
+    const ownership: Array<{ taskId: string; owned: boolean }> = [];
+    const reused = service.startTask(input, undefined, undefined, (value) => ownership.push(value));
+    expect(reused.id).toBe(completed.taskId);
+    expect(ownership).toEqual([{ taskId: completed.taskId, owned: false }]);
+  });
+
+  it("keeps interleaved startTask controllers and task ids isolated", async () => {
+    const gates = new Map<string, { resolve: () => void }>();
+    const signals = new Map<string, AbortSignal>();
+    service = new TransformationService({ ...baseDeps, generation: {
+      generateRouted: async function* (_kind: any, request: any, _profile: any, signal: AbortSignal) {
+        let resolve!: () => void;
+        const gate = new Promise<void>((done) => { resolve = done; });
+        gates.set(request.operationId, { resolve }); signals.set(request.operationId, signal);
+        await gate;
+        if (signal.aborted) throw new Error("aborted");
+        yield* successful(request.operationId);
+      }
+    } });
+    const firstController = new AbortController(); const secondController = new AbortController();
+    const first = service.startTask({ projectId: PROJECT, builtinKey: "summary", language: "en", sourceRevisionId: REVISION, force: true }, firstController.signal);
+    const second = service.startTask({ projectId: PROJECT, builtinKey: "summary", language: "en", sourceRevisionId: REVISION, force: true }, secondController.signal);
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    firstController.abort();
+    service.cancelTask({ projectId: PROJECT, taskId: first.id });
+    gates.get(first.id)!.resolve(); gates.get(second.id)!.resolve();
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(firstController.signal.aborted).toBe(true);
+    expect(secondController.signal.aborted).toBe(false);
+    expect(db.connection.prepare("SELECT state FROM tasks WHERE id = ?").get(first.id)).toEqual({ state: "cancelled" });
+    expect(db.connection.prepare("SELECT state FROM tasks WHERE id = ?").get(second.id)).toEqual({ state: "completed" });
+  });
+
   it("converts an insight to a project-owned note without deleting the insight", async () => {
     const insight = await service.run({ projectId: PROJECT, builtinKey: "summary", language: "en", sourceRevisionId: REVISION });
     const note = service.convertToNote(PROJECT, insight.id);
     expect(note).toMatchObject({ projectId: PROJECT, title: "Result", body: "# Result" });
     expect(db.connection.prepare("SELECT id FROM insights WHERE id = ?").get(insight.id)).toEqual({ id: insight.id });
+  });
+
+  it("rejects missing and cross-project cancellation without changing the task", () => {
+    const otherProject = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+    db.connection.prepare("INSERT INTO projects(id, name) VALUES (?, ?)").run(otherProject, "Other");
+    const task = baseDeps.tasks.createTask({ projectId: PROJECT, sourceId: null, kind: "transformation", idempotencyKey: "cancel-owner" });
+    expect(() => service.cancelTask({ projectId: PROJECT, taskId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb" })).toThrow("Transformation task not found");
+    expect(() => service.cancelTask({ projectId: otherProject, taskId: task.id })).toThrow("Transformation task not found");
+    expect(db.connection.prepare("SELECT state, attempt FROM tasks WHERE id = ?").get(task.id)).toEqual({ state: "queued", attempt: 0 });
   });
 
   it("accepts note input and includes a visible budget marker", async () => {
@@ -251,6 +305,21 @@ describe("TransformationService", () => {
     expect(db.connection.prepare("SELECT state FROM tasks").get()).toEqual({ state: "failed" });
   });
 
+  it("reports route drift as nonowned before failing and never calls the provider", async () => {
+    let drifted = false;
+    const profile = (modelId: string) => ({ id: "router-profile", name: "router", provider: "openai" as const, capability: "generation" as const, baseUrl: "https://example.test", modelId, enabled: true, createdAt: "2026-01-01T00:00:00.000Z", updatedAt: "2026-01-01T00:00:00.000Z" });
+    const router = { resolve: () => [profile(drifted ? "changed-model" : "router-model")] };
+    service = new TransformationService({ ...baseDeps, router, generation: { generateRouted: async function* () { calls += 1; throw new Error("provider must not run"); } } });
+    const input = { projectId: PROJECT, builtinKey: "summary" as const, language: "en" as const, sourceRevisionId: REVISION };
+    await expect(service.run(input)).rejects.toThrow("provider must not run");
+    const task = db.connection.prepare("SELECT id FROM tasks").get() as { id: string };
+    drifted = true;
+    const ownership: Array<{ taskId: string; owned: boolean }> = [];
+    await expect(service.resume(task.id, undefined, (value) => ownership.push(value))).rejects.toThrow(/validation/i);
+    expect(ownership).toEqual([{ taskId: task.id, owned: false }]);
+    expect(calls).toBe(1);
+  });
+
   it("returns a completed winner when idempotent task creation races", async () => {
     const winnerTask = "99999999-9999-4999-8999-999999999990";
     const winnerInsight = "99999999-9999-4999-8999-999999999991";
@@ -264,6 +333,34 @@ describe("TransformationService", () => {
     const insight = await racing.run({ projectId: PROJECT, builtinKey: "summary", language: "en", sourceRevisionId: REVISION });
     expect(insight.content).toBe("winner insight");
     expect(calls).toBe(0);
+  });
+
+  it.each(["queued", "running"] as const)("notifies the %s winner before returning from a creation race", async (state) => {
+    const winnerTask = state === "queued"
+      ? "99999999-9999-4999-8999-999999999980"
+      : "99999999-9999-4999-8999-999999999981";
+    const callbacks: Array<{ taskId: string; owned: boolean }> = [];
+    const tasks = baseDeps.tasks;
+    const racingTasks = { ...tasks, createTask: (input: any) => {
+      db.connection.prepare("INSERT INTO tasks(id, project_id, source_id, kind, state, stage, progress_1000, idempotency_key) VALUES (?, ?, NULL, 'transformation', ?, 'preparing', 0, ?)").run(winnerTask, input.projectId, state, input.idempotencyKey);
+      throw new Error("UNIQUE constraint failed: tasks.idempotency_key");
+    } };
+    const racing = new TransformationService({ ...baseDeps, tasks: racingTasks });
+    await expect(racing.run({ projectId: PROJECT, builtinKey: "summary", language: "en", sourceRevisionId: REVISION }, (ownership) => callbacks.push(ownership)))
+      .rejects.toThrow("Transformation already running");
+    expect(callbacks).toEqual([{ taskId: winnerTask, owned: false }]);
+    expect(baseDeps.taskRepository.findById(winnerTask)?.id).toBe(winnerTask);
+    expect(calls).toBe(0);
+  });
+
+  it.each(["queued", "running"] as const)("returns the %s winner from startTask after a creation race", (state) => {
+    const winnerTask = state === "queued" ? "99999999-9999-4999-8999-999999999970" : "99999999-9999-4999-8999-999999999971";
+    const racingTasks = { ...baseDeps.tasks, createTask: (input: any) => {
+      db.connection.prepare("INSERT INTO tasks(id, project_id, source_id, kind, state, stage, progress_1000, idempotency_key) VALUES (?, ?, NULL, 'transformation', ?, 'preparing', 0, ?)").run(winnerTask, input.projectId, state, input.idempotencyKey);
+      throw new Error("UNIQUE constraint failed: tasks.idempotency_key");
+    } };
+    const racing = new TransformationService({ ...baseDeps, tasks: racingTasks });
+    expect(racing.startTask({ projectId: PROJECT, builtinKey: "summary", language: "en", sourceRevisionId: REVISION }).id).toBe(winnerTask);
   });
 
   it("does not fail the winner when a queued claim loses its CAS race", async () => {

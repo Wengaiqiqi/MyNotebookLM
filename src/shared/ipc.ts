@@ -21,6 +21,9 @@ import type {
 import type { AppSettingsDto, UpdateAppSettingsInput } from "./settings";
 import type { AppTheme } from "./settings";
 import type { SourceDto } from "./sources";
+import type { NoteDto, NoteLinkDto, CreateNoteInput, UpdateNoteInput, NoteStateInput, NoteIdInput, CreateNoteLinkInput, DeleteNoteLinkInput, GenerateNoteTitleInput } from "./notes";
+import type { TransformationDto, CreateTransformationInput, UpdateTransformationInput, InsightDto, TransformationRunInput, BuiltinTransformationDto } from "./transformations";
+import type { ModelRouteDto, ModelRouteAttemptDto, ModelTaskKind } from "./models";
 import type { TaskDto } from "./tasks";
 import type { RetrievalSearchInput, SearchHitDto, VectorHealthDto, VectorProfileInput, VectorSpaceInput, VectorTaskIdInput, VectorTaskInput } from "./vector";
 
@@ -46,8 +49,34 @@ export const MODEL_CHANNELS = {
   saveProfile: "models:v1:save-profile",
   deleteProfile: "models:v1:delete-profile",
   discover: "models:v1:discover",
-  test: "models:v1:test"
+  test: "models:v1:test",
+  getRoutes: "models:v1:get-routes",
+  saveRoutes: "models:v1:save-routes",
+  listRouteAttempts: "models:v1:list-route-attempts"
 } as const;
+
+export const NOTE_CHANNELS = {
+  create: "notes:v1:create", get: "notes:v1:get", list: "notes:v1:list", update: "notes:v1:update",
+  archive: "notes:v1:archive", restore: "notes:v1:restore", delete: "notes:v1:delete",
+  createLink: "notes:v1:create-link", listLinks: "notes:v1:list-links", deleteLink: "notes:v1:delete-link", generateTitle: "notes:v1:generate-title"
+} as const;
+
+export const TRANSFORMATION_CHANNELS = {
+  listRules: "transformations:v1:list-rules", createRule: "transformations:v1:create-rule", updateRule: "transformations:v1:update-rule", deleteRule: "transformations:v1:delete-rule",
+  listBuiltins: "transformations:v1:list-builtins", run: "transformations:v1:run", cancel: "transformations:v1:cancel", retry: "transformations:v1:retry",
+  listInsights: "transformations:v1:list-insights", convertToNote: "transformations:v1:convert-to-note"
+} as const;
+
+export const modelRoutesInputSchema = z.object({ taskKind: z.enum(["chat", "note-title", "summary", "key-points", "qa", "custom-transformation", "embedding"]) }).strict();
+export const saveModelRoutesInputSchema = z.object({ taskKind: z.enum(["chat", "note-title", "summary", "key-points", "qa", "custom-transformation", "embedding"]), profileIds: z.array(z.uuid()).min(1).max(16) }).strict();
+export const modelRouteAttemptsInputSchema = z.object({ projectId: z.uuid(), taskKind: z.enum(["chat", "note-title", "summary", "key-points", "qa", "custom-transformation", "embedding"]).optional(), limit: z.number().int().positive().max(100).optional(), offset: z.number().int().nonnegative().max(100_000).optional() }).strict();
+export const noteListInputSchema = z.object({ projectId: z.uuid(), includeArchived: z.boolean().optional() }).strict();
+export const noteGenerateTitleInputSchema = z.object({ projectId: z.uuid(), noteId: z.uuid(), locale: z.enum(["zh-CN", "en"]), profileId: z.uuid().optional() }).strict();
+export const transformationRulesInputSchema = z.object({ projectId: z.uuid() }).strict();
+export const transformationBuiltinInputSchema = z.object({ language: z.enum(["zh-CN", "en"]).optional() }).strict();
+export const transformationInsightsInputSchema = z.object({ projectId: z.uuid(), limit: z.number().int().positive().max(100).optional(), offset: z.number().int().nonnegative().max(100_000).optional() }).strict();
+export const transformationTaskInputSchema = z.object({ projectId: z.uuid(), taskId: z.uuid() }).strict();
+export const transformationConvertInputSchema = z.object({ projectId: z.uuid(), insightId: z.uuid() }).strict();
 
 export const CREDENTIAL_CHANNELS = {
   set: "credentials:v1:set",
@@ -162,6 +191,19 @@ export interface DesktopApi {
     deleteProfile(input: DeleteModelProfileInput): Promise<Result<void>>;
     discover(input: DiscoverModelsInput): Promise<Result<ModelDescriptorDto[]>>;
     test(input: TestModelInput): Promise<Result<ModelTestResultDto>>;
+    getRoutes?(input: { taskKind: ModelTaskKind }): Promise<Result<ModelRouteDto[]>>;
+    saveRoutes?(input: { taskKind: ModelTaskKind; profileIds: string[] }): Promise<Result<ModelRouteDto[]>>;
+    listRouteAttempts?(input: { projectId: string; taskKind?: ModelTaskKind; limit?: number; offset?: number }): Promise<Result<ModelRouteAttemptDto[]>>;
+  };
+  notes?: {
+    create(input: CreateNoteInput): Promise<Result<NoteDto>>; get(input: NoteIdInput): Promise<Result<NoteDto | null>>; list(input: { projectId: string; includeArchived?: boolean }): Promise<Result<NoteDto[]>>;
+    update(input: UpdateNoteInput): Promise<Result<NoteDto>>; archive(input: NoteStateInput): Promise<Result<NoteDto>>; restore(input: NoteStateInput): Promise<Result<NoteDto>>; delete(input: NoteStateInput): Promise<Result<void>>;
+    createLink(input: CreateNoteLinkInput): Promise<Result<NoteLinkDto>>; listLinks(input: NoteIdInput): Promise<Result<NoteLinkDto[]>>; deleteLink(input: DeleteNoteLinkInput): Promise<Result<void>>; generateTitle(input: GenerateNoteTitleInput): Promise<Result<NoteDto>>;
+  };
+  transformations?: {
+    listRules(input: { projectId: string }): Promise<Result<TransformationDto[]>>; createRule(input: CreateTransformationInput): Promise<Result<TransformationDto>>; updateRule(input: UpdateTransformationInput): Promise<Result<TransformationDto>>; deleteRule(input: { projectId: string; id: string; version: number }): Promise<Result<void>>;
+    listBuiltins(input?: { language?: "zh-CN" | "en" }): Promise<Result<BuiltinTransformationDto[]>>; run(input: TransformationRunInput): Promise<Result<TaskDto>>; cancel(input: { projectId: string; taskId: string }): Promise<Result<TaskDto>>; retry(input: { projectId: string; taskId: string }): Promise<Result<TaskDto>>;
+    listInsights(input: { projectId: string; limit?: number; offset?: number }): Promise<Result<InsightDto[]>>; convertToNote(input: { projectId: string; insightId: string }): Promise<Result<NoteDto>>;
   };
   credentials: {
     set(input: CredentialInput): Promise<Result<CredentialStatusDto>>;

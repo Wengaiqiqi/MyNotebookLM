@@ -1,4 +1,4 @@
-import { ZodError } from "zod";
+import { ZodError, z } from "zod";
 import type { AppErrorDto, Result } from "../../shared/app-errors";
 import {
   credentialInputSchema,
@@ -7,6 +7,7 @@ import {
   deleteModelProfileInputSchema,
   discoverModelsInputSchema,
   modelDescriptorSchema,
+  modelTaskKindSchema,
   builtInModelProfileDtoSchema,
   modelProfileInputSchema,
   saveModelProfileInputSchema,
@@ -21,6 +22,9 @@ import {
   type ModelCapability,
   type ModelDescriptorDto,
   type ModelProfileDto,
+  type ModelRouteDto,
+  type ModelRouteAttemptDto,
+  type ModelTaskKind,
   type ModelProfileListDto,
   type ModelTestResultDto,
   type ProviderKind,
@@ -222,6 +226,31 @@ export class ModelService {
     } catch (reason) {
       return resultFromError(reason);
     }
+  }
+
+  async getRoutes(input: { taskKind: ModelTaskKind }): Promise<Result<ModelRouteDto[]>> {
+    try { return { ok: true, value: this.settings.getRoute(modelTaskKindSchema.parse(input.taskKind)) }; }
+    catch (reason) { return resultFromError(reason); }
+  }
+
+  async saveRoutes(input: { taskKind: ModelTaskKind; profileIds: readonly string[] }): Promise<Result<ModelRouteDto[]>> {
+    try {
+      const taskKind = modelTaskKindSchema.parse(input.taskKind);
+      if (!Array.isArray(input.profileIds) || input.profileIds.length === 0 || input.profileIds.some((id) => !z.uuid().safeParse(id).success)) return errorResult(appError("VALIDATION", "errors.validation"));
+      if (new Set(input.profileIds).size !== input.profileIds.length) return errorResult(appError("VALIDATION", "errors.validation"));
+      if (taskKind === "embedding" && input.profileIds.length !== 1) return errorResult(appError("VALIDATION", "errors.modelRouteInconsistent"));
+      const profiles = input.profileIds.map((id) => this.settings.getProfile(id));
+      if (profiles.some((profile) => !profile)) return notFound();
+      if (profiles.some((profile) => !profile!.enabled)) return errorResult(appError("VALIDATION", "errors.validation", true));
+      const capability = taskKind === "embedding" ? "embedding" : "generation";
+      if (profiles.some((profile) => profile!.capability !== capability)) return capabilityError();
+      return { ok: true, value: this.settings.replaceRoute(taskKind, input.profileIds) };
+    } catch (reason) { return resultFromError(reason); }
+  }
+
+  async listRouteAttempts(input: { projectId: string; taskKind?: ModelTaskKind; limit?: number; offset?: number }): Promise<Result<ModelRouteAttemptDto[]>> {
+    try { return { ok: true, value: this.settings.listRouteAttempts(input) }; }
+    catch (reason) { return resultFromError(reason); }
   }
 
   async setDefaultRoutes(

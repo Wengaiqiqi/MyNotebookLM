@@ -58,7 +58,7 @@ describe("createDesktopApi", () => {
   it("preserves project commands while exposing only the named model settings groups", () => {
     const api = createDesktopApi({ invoke: vi.fn() });
 
-    expect(Object.keys(api)).toEqual(["vector", "retrieval", "sources", "tasks", "projects", "settings", "models", "credentials", "titleOverlay", "conversations", "chat", "citations"]);
+    expect(Object.keys(api)).toEqual(["vector", "retrieval", "sources", "tasks", "projects", "settings", "models", "credentials", "titleOverlay", "conversations", "chat", "citations", "notes", "transformations"]);
     expect(Object.keys(api.vector)).toEqual(["getHealth", "startMigration", "rebuild", "optimize", "cancelTask", "subscribe"]);
     expect(Object.keys(api.retrieval)).toEqual(["search"]);
     expect(Object.keys(api.projects)).toEqual(["list", "create", "rename", "archive", "remove"]);
@@ -70,7 +70,10 @@ describe("createDesktopApi", () => {
       "saveProfile",
       "deleteProfile",
       "discover",
-      "test"
+      "test",
+      "getRoutes",
+      "saveRoutes",
+      "listRouteAttempts"
     ]);
     expect(Object.keys(api.credentials)).toEqual(["set", "remove"]);
     expect(Object.keys((api as unknown as { titleOverlay: object }).titleOverlay)).toEqual(["setTheme"]);
@@ -450,5 +453,40 @@ describe("createDesktopApi", () => {
     release(ok(undefined));
     await send;
     expect(invoke).toHaveBeenNthCalledWith(2, CHAT_CHANNELS.send, { requestId: chatRequestId, projectId: chatProjectId, conversationId: chatConversationId, question: "Hi" });
+  });
+
+  it("routes notes, transformation tasks and ordered model routes through validated IPC", async () => {
+    const note = { id: "44444444-4444-4444-8444-444444444444", projectId: project.id, title: "N", body: "B", version: 1, archivedAt: null, deletedAt: null, createdAt: "2026-08-28T00:00:00.000Z", updatedAt: "2026-08-28T00:00:00.000Z" };
+    const task = { id: "55555555-5555-4555-8555-555555555555", projectId: project.id, sourceId: null, kind: "transformation" as const, state: "queued" as const, stage: "preparing" as const, progress: 0, attempt: 0, error: null, idempotencyKey: null, createdAt: note.createdAt, updatedAt: note.updatedAt };
+    const route = { taskKind: "summary" as const, position: 0, profileId: profile.id };
+    const invoke = vi.fn().mockResolvedValue(ok(note));
+    const api = createDesktopApi({ invoke });
+    await api.notes?.create({ projectId: project.id, title: "N", body: "B" });
+    invoke.mockResolvedValueOnce(ok(task));
+    await api.transformations?.run({ projectId: project.id, builtinKey: "summary", language: "en", sourceRevisionId: note.id });
+    invoke.mockResolvedValueOnce(ok([route]));
+    await api.models.getRoutes?.({ taskKind: "summary" });
+    expect(invoke).toHaveBeenNthCalledWith(1, "notes:v1:create", { projectId: project.id, title: "N", body: "B" });
+    expect(invoke).toHaveBeenNthCalledWith(2, "transformations:v1:run", { projectId: project.id, builtinKey: "summary", language: "en", sourceRevisionId: note.id });
+    expect(invoke).toHaveBeenNthCalledWith(3, "models:v1:get-routes", { taskKind: "summary" });
+  });
+
+  it("returns safe validation/internal failures for new API boundaries", async () => {
+    const invoke = vi.fn().mockResolvedValue({ ok: true, value: { leaked: true } });
+    const api = createDesktopApi({ invoke });
+    await expect(api.notes?.update({ projectId: project.id, id: "not-uuid", title: "N", body: "B", version: 1 } as never)).resolves.toEqual(validationFailure);
+    await expect(api.transformations?.run({ projectId: project.id, builtinKey: "summary", language: "en", sourceRevisionId: project.id, state: "completed" } as never)).resolves.toEqual(validationFailure);
+    await expect(api.models.listRouteAttempts?.({ projectId: project.id })).resolves.toEqual(internalFailure);
+  });
+
+  it("filters task subscriptions by the requested project and unregisters listeners", () => {
+    const on = vi.fn(); const removeListener = vi.fn(); const listener = vi.fn();
+    const api = createDesktopApi({ invoke: vi.fn(), on, removeListener });
+    const cleanup = api.tasks?.subscribe(project.id, listener);
+    const handler = on.mock.calls[0]?.[1] as (_e: unknown, raw: unknown) => void;
+    const task = { id: "55555555-5555-4555-8555-555555555555", projectId: project.id, sourceId: null, kind: "transformation" as const, state: "queued" as const, stage: "preparing" as const, progress: 0, attempt: 0, error: null, idempotencyKey: null, createdAt: "2026-08-28T00:00:00.000Z", updatedAt: "2026-08-28T00:00:00.000Z" };
+    handler({}, task); handler({}, { ...task, projectId: chatProjectId }); cleanup?.();
+    expect(listener).toHaveBeenCalledExactlyOnceWith(task);
+    expect(removeListener).toHaveBeenCalledWith("tasks:v1:update:" + project.id, handler);
   });
 });

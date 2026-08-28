@@ -88,6 +88,9 @@ function createService() {
       capability: profile.capability,
       verifiedBy: "discovery" as const
     })),
+    getRoutes: vi.fn(async () => ok([{ taskKind: "summary" as const, position: 0, profileId: PROFILE_ID }])),
+    saveRoutes: vi.fn(async () => ok([{ taskKind: "summary" as const, position: 0, profileId: PROFILE_ID }])),
+    listRouteAttempts: vi.fn(async () => ok([])),
     setCredential: vi.fn(async () => ok(credentialStatus)),
     removeCredential: vi.fn(async () => ok({
       profileId: PROFILE_ID,
@@ -133,6 +136,9 @@ describe("registerModelHandlers", () => {
     await invoke(ipc, MODEL_CHANNELS.deleteProfile, { id: PROFILE_ID });
     await invoke(ipc, MODEL_CHANNELS.discover, discoveryInput);
     await invoke(ipc, MODEL_CHANNELS.test, { profile });
+    await invoke(ipc, MODEL_CHANNELS.getRoutes, { taskKind: "summary" });
+    await invoke(ipc, MODEL_CHANNELS.saveRoutes, { taskKind: "summary", profileIds: [PROFILE_ID] });
+    await invoke(ipc, MODEL_CHANNELS.listRouteAttempts, { projectId: PROFILE_ID, limit: 10 });
     await invoke(ipc, CREDENTIAL_CHANNELS.set, { profileId: PROFILE_ID, apiKey: "secret" });
     await invoke(ipc, CREDENTIAL_CHANNELS.remove, { profileId: PROFILE_ID });
 
@@ -145,6 +151,9 @@ describe("registerModelHandlers", () => {
     expect(service.deleteProfile).toHaveBeenCalledWith({ id: PROFILE_ID });
     expect(service.discover).toHaveBeenCalledWith(discoveryInput);
     expect(service.test).toHaveBeenCalledWith({ profile });
+    expect(service.getRoutes).toHaveBeenCalledWith({ taskKind: "summary" });
+    expect(service.saveRoutes).toHaveBeenCalledWith({ taskKind: "summary", profileIds: [PROFILE_ID] });
+    expect(service.listRouteAttempts).toHaveBeenCalledWith({ projectId: PROFILE_ID, limit: 10 });
     expect(service.setCredential).toHaveBeenCalledWith({ profileId: PROFILE_ID, apiKey: "secret" });
     expect(service.removeCredential).toHaveBeenCalledWith({ profileId: PROFILE_ID });
   });

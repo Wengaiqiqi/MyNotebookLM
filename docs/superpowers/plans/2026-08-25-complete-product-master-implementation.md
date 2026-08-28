@@ -69,7 +69,9 @@ No `Error`, raw response, stack, filesystem root, secret or arbitrary provider p
 - [x] **Gate B — after Plan 2:** run all parser fixtures, task crash/recovery/cancel tests, URL security tests, full unit suite, typecheck and build.
 - [x] **Gate C — after Plan 3:** run real temporary LanceDB integration tests, local fake embedding contracts, Space migration/rollback/rebuild tests, full unit suite, typecheck and build.
 - [x] **Gate D — after Plan 4:** run streaming/cancel/citation persistence tests and an Electron RAG flow using fake providers and deterministic embeddings.
-- [ ] **Gate E — after Plan 5:** run notes/transformation/idempotency/routing/fallback tests and complete product unit suite.
+- [x] **Gate E — after Plan 5:** run notes/transformation/idempotency/routing/fallback tests and complete product unit suite.
+
+  Evidence (2026-08-28): focused 21 files / 299 tests, full 86 files / 854 tests, typecheck and production build passed; no packaging command was run.
 - [ ] **Gate F — before packaging:** every new visual has written approval and a recorded Electron screenshot in both languages and themes where state differs.
 - [ ] **Gate G — final release:** Plan 6's complete checks pass before `package:win`; the generated installer is then installed and tested without rebuilding; its SHA-256 remains identical to the delivered file.
 

@@ -8,6 +8,7 @@ import {
   type ModelProfileDto,
   type ModelProfileInput,
   type ModelRouteDto,
+  type ModelRouteAttemptDto,
   type ModelTaskKind
 } from "../../shared/models";
 import {
@@ -167,6 +168,18 @@ export class SettingsRepository {
       WHERE task_kind = ?
       ORDER BY position
     `).all(parsedTask) as RouteRow[]).map(toRoute);
+  }
+
+  listRouteAttempts(input: { projectId: string; operationId?: string; taskKind?: ModelTaskKind; limit?: number; offset?: number }): ModelRouteAttemptDto[] {
+    const limit = Math.min(100, Math.max(1, input.limit ?? 50));
+    const offset = Math.max(0, input.offset ?? 0);
+    const clauses = ["project_id = ?"];
+    const params: Array<string | number> = [input.projectId];
+    if (input.operationId !== undefined) { clauses.push("operation_id = ?"); params.push(input.operationId); }
+    if (input.taskKind !== undefined) { clauses.push("task_kind = ?"); params.push(modelTaskKindSchema.parse(input.taskKind)); }
+    params.push(limit, offset);
+    const rows = this.db.prepare(`SELECT id, project_id, operation_id, task_kind, attempt_order, profile_id, provider, model, state, error_code, latency_ms, started_at, completed_at, finished_at, created_at FROM model_route_attempts WHERE ${clauses.join(" AND ")} ORDER BY created_at DESC, attempt_order ASC, id ASC LIMIT ? OFFSET ?`).all(...params) as Array<Record<string, unknown>>;
+    return rows.map((row) => ({ id: row.id as string, projectId: row.project_id as string, operationId: row.operation_id as string, taskKind: row.task_kind as ModelTaskKind, attemptOrder: row.attempt_order as number, profileId: row.profile_id as string | null, provider: row.provider as ModelRouteAttemptDto["provider"], model: row.model as string, state: row.state as ModelRouteAttemptDto["state"], errorCode: row.error_code as string | null, latencyMs: row.latency_ms as number | null, startedAt: row.started_at as string, completedAt: row.completed_at as string | null, finishedAt: row.finished_at as string | null, createdAt: row.created_at as string }));
   }
 
   replaceRoute(taskKind: ModelTaskKind, profileIds: readonly string[]): ModelRouteDto[] {

@@ -2,6 +2,7 @@ import type {
   ModelProfileDto,
   ModelProfileInput,
   ModelRouteDto,
+  ModelRouteAttemptDto,
   ModelTaskKind
 } from "../../shared/models";
 import type { SettingsRepository } from "../settings/settings-repository";
@@ -10,7 +11,7 @@ import type { SettingsRepository } from "../settings/settings-repository";
 export class RouteRepository {
   constructor(
     private readonly settings: Pick<SettingsRepository,
-      "getProfile" | "listProfiles" | "saveProfile" | "getRoute" | "replaceRoute" | "replaceDefaultRoutes">
+      "getProfile" | "listProfiles" | "saveProfile" | "getRoute" | "replaceRoute" | "replaceDefaultRoutes"> & { listRouteAttempts?: (input: { projectId: string; operationId?: string; taskKind?: ModelTaskKind; limit?: number; offset?: number }) => ModelRouteAttemptDto[] }
   ) {}
 
   listProfiles(): ModelProfileDto[] {
@@ -35,5 +36,9 @@ export class RouteRepository {
 
   replaceDefaultRoutes(generationProfileId: string, embeddingProfileId: string): void {
     this.settings.replaceDefaultRoutes(generationProfileId, embeddingProfileId);
+  }
+
+  listRouteAttempts(input: { projectId: string; operationId?: string; taskKind?: ModelTaskKind; limit?: number; offset?: number }): ModelRouteAttemptDto[] {
+    return this.settings.listRouteAttempts?.(input) ?? [];
   }
 }

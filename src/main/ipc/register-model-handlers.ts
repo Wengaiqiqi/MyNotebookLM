@@ -8,7 +8,10 @@ import {
 import {
   CREDENTIAL_CHANNELS,
   MODEL_CHANNELS,
-  SETTINGS_CHANNELS
+  SETTINGS_CHANNELS,
+  modelRoutesInputSchema,
+  saveModelRoutesInputSchema,
+  modelRouteAttemptsInputSchema
 } from "../../shared/ipc";
 import {
   credentialInputSchema,
@@ -20,6 +23,8 @@ import {
   modelDescriptorSchema,
   modelProfileDtoSchema,
   modelProfileListDtoSchema,
+  modelRouteDtoSchema,
+  modelRouteAttemptDtoSchema,
   modelTestResultDtoSchema,
   saveModelProfileInputSchema,
   setDefaultModelRoutesInputSchema,
@@ -42,6 +47,8 @@ const deleteResultSchema = resultSchema(undefinedSchema);
 const discoveryResultSchema = resultSchema(modelDescriptorSchema.array());
 const testResultSchema = resultSchema(modelTestResultDtoSchema);
 const credentialResultSchema = resultSchema(credentialStatusDtoSchema);
+const routeResultSchema = resultSchema(modelRouteDtoSchema.array());
+const attemptsResultSchema = resultSchema(modelRouteAttemptDtoSchema.array());
 
 async function validatedCall<I>(
   inputSchema: z.ZodType<I>,
@@ -103,6 +110,15 @@ export function registerModelHandlers(
     validatedCall(testModelInputSchema, testResultSchema, input, (parsed) =>
       service.test(parsed)
     )
+  );
+  ipc.handle(MODEL_CHANNELS.getRoutes, (_event, input) =>
+    validatedCall(modelRoutesInputSchema, routeResultSchema, input, (parsed) => service.getRoutes(parsed as never))
+  );
+  ipc.handle(MODEL_CHANNELS.saveRoutes, (_event, input) =>
+    validatedCall(saveModelRoutesInputSchema, routeResultSchema, input, (parsed) => service.saveRoutes(parsed as never))
+  );
+  ipc.handle(MODEL_CHANNELS.listRouteAttempts, (_event, input) =>
+    validatedCall(modelRouteAttemptsInputSchema, attemptsResultSchema, input, (parsed) => service.listRouteAttempts(parsed as never))
   );
   ipc.handle(CREDENTIAL_CHANNELS.set, (_event, input) =>
     validatedCall(credentialInputSchema, credentialResultSchema, input, (parsed) =>

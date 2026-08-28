@@ -10,6 +10,8 @@ import { registerModelHandlers } from "./ipc/register-model-handlers";
 import { registerSourceHandlers } from "./ipc/register-source-handlers";
 import { registerVectorHandlers } from "./ipc/register-vector-handlers";
 import { registerChatHandlers } from "./ipc/register-chat-handlers";
+import { registerNoteHandlers } from "./ipc/register-note-handlers";
+import { registerTransformationHandlers } from "./ipc/register-transformation-handlers";
 import { ChatService, recoverInterruptedStreams, type RetrievableChunk } from "./chat/chat-service";
 import { CitationOpener } from "./chat/citation-opener";
 import { ModelService } from "./models/model-service";
@@ -39,6 +41,12 @@ import { createEmbeddingProvider } from "./vector/embedding-provider";
 import { RetrievalService } from "./retrieval/retrieval-service";
 import { ModelRouter } from "./models/model-router";
 import { RouteRepository } from "./models/route-repository";
+import { RoutedGeneration } from "./models/routed-generation";
+import { NoteRepository } from "./notes/note-repository";
+import { NoteService } from "./notes/note-service";
+import { TitleService } from "./notes/title-service";
+import { TransformationRepository } from "./notes/transformation-repository";
+import { TransformationService } from "./notes/transformation-service";
 import type { Result } from "../shared/app-errors";
 import type { TaskDto } from "../shared/tasks";
 import type { SearchHitDto, VectorHealthDto } from "../shared/vector";
@@ -50,6 +58,8 @@ let cleanupTitleOverlayHandler: (() => void) | undefined;
 let cleanupSourceHandlers: (() => void) | undefined;
 let cleanupVectorHandlers: (() => void) | undefined;
 let cleanupChatHandlers: (() => void) | undefined;
+let cleanupNoteHandlers: (() => void) | undefined;
+let cleanupTransformationHandlers: (() => void) | undefined;
 let workerPool: WorkerPool | undefined;
 let taskFanout: ReturnType<typeof createTaskUpdateFanout> | undefined;
 const taskRevisions = new Map<string, string>();
@@ -85,7 +95,8 @@ app.whenReady().then(async () => {
   const credentialStore = new CredentialStore(appDatabase.connection, new SafeStorageAdapter());
   const modelService = new ModelService(settingsRepository, credentialStore);
   taskFanout = createTaskUpdateFanout(() => BrowserWindow.getAllWindows() as any);
-  const taskService = new TaskService(new TaskRepository(appDatabase.connection, { onTransition: taskFanout }), { now: () => new Date().toISOString(), random: Math.random, id: randomUUID });
+  const taskRepository = new TaskRepository(appDatabase.connection, { onTransition: taskFanout });
+  const taskService = new TaskService(taskRepository, { now: () => new Date().toISOString(), random: Math.random, id: randomUUID });
   const pool = new WorkerPool();
   workerPool = pool;
   let ingestionService!: IngestionService;
@@ -235,29 +246,31 @@ app.whenReady().then(async () => {
     });
     cleanupVectorHandlers = registerVectorHandlers(ipcMain, vectorService);
   }
+  const routeRepository = new RouteRepository(settingsRepository);
+  const modelRouter = new ModelRouter(routeRepository);
+  const providerFactory = (profile: import("../shared/models").ModelProfileDto) => ({
+    describe: () => { throw new Error("provider describe is not used for generation"); },
+    discover: (signal: AbortSignal) => credentialStore.withSecret(profile.id, { provider: profile.provider, baseUrl: profile.baseUrl }, (apiKey) => createModelProvider(profile.provider, profile.baseUrl, apiKey).discover(signal)),
+    async *generate(request: import("./models/provider").GenerateRequest, signal: AbortSignal) {
+      const provider = await credentialStore.withSecret(profile.id, { provider: profile.provider, baseUrl: profile.baseUrl }, (apiKey) => Promise.resolve(createModelProvider(profile.provider, profile.baseUrl, apiKey)));
+      yield* provider.generate({ ...request, model: profile.modelId }, signal);
+    },
+    embed: (request: import("./models/provider").EmbeddingRequest, signal: AbortSignal) => credentialStore.withSecret(profile.id, { provider: profile.provider, baseUrl: profile.baseUrl }, (apiKey) => createModelProvider(profile.provider, profile.baseUrl, apiKey).embed({ ...request, model: profile.modelId }, signal))
+  });
+  const routedGeneration = new RoutedGeneration({ db: appDatabase.connection, router: modelRouter, providerFactory });
+  const noteRepository = new NoteRepository(appDatabase.connection);
+  const titleService = new TitleService(noteRepository, routedGeneration);
+  const noteService = new NoteService(noteRepository, randomUUID, titleService);
+  const transformationRepository = new TransformationRepository(appDatabase.connection);
+  const transformationService = new TransformationService({ db: appDatabase.connection, tasks: taskService, taskRepository, transformations: transformationRepository, notes: noteRepository, generation: routedGeneration, router: modelRouter });
+  void Promise.resolve(transformationService.recoverStale(60 * 60 * 1000)).catch(() => { /* stale recovery must not block startup */ });
+  cleanupNoteHandlers = registerNoteHandlers(ipcMain, noteService);
+  cleanupTransformationHandlers = registerTransformationHandlers(ipcMain, transformationService);
   const chatService = new ChatService({
     db: appDatabase.connection,
     // Resolve the immutable route snapshot per turn so route changes apply live.
-    router: new ModelRouter(new RouteRepository(settingsRepository)),
-    providerFactory: (profile) => ({
-      describe: () => {
-        throw new Error("provider describe is not used for generation");
-      },
-      discover: (signal) =>
-        credentialStore.withSecret(profile.id, { provider: profile.provider, baseUrl: profile.baseUrl }, (apiKey) =>
-          createModelProvider(profile.provider, profile.baseUrl, apiKey).discover(signal)),
-      async *generate(request, signal) {
-        const provider = await credentialStore.withSecret(
-          profile.id,
-          { provider: profile.provider, baseUrl: profile.baseUrl },
-          (apiKey) => Promise.resolve(createModelProvider(profile.provider, profile.baseUrl, apiKey))
-        );
-        yield* provider.generate(request, signal);
-      },
-      embed: (request, signal) =>
-        credentialStore.withSecret(profile.id, { provider: profile.provider, baseUrl: profile.baseUrl }, (apiKey) =>
-          createModelProvider(profile.provider, profile.baseUrl, apiKey).embed(request, signal))
-    }),
+    router: modelRouter,
+    providerFactory,
     retrieval: async ({ projectId, question }) => {
       const result = await retrieval.search({ projectId, query: question, limit: 12 });
       if (!result.ok) throw new Error(result.error.code);
@@ -321,6 +334,10 @@ app.on("before-quit", (event) => {
   cleanupVectorHandlers = undefined;
   cleanupChatHandlers?.();
   cleanupChatHandlers = undefined;
+  cleanupTransformationHandlers?.();
+  cleanupTransformationHandlers = undefined;
+  cleanupNoteHandlers?.();
+  cleanupNoteHandlers = undefined;
   cleanupTitleOverlayHandler = undefined;
   appDatabase?.close();
   appDatabase = undefined;
