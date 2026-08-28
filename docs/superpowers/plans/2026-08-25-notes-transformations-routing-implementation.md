@@ -113,10 +113,12 @@ Evidence (2026-08-28): RED covered missing title service, real SQLite concurrent
 - Create: `src/main/notes/builtin-transformations.ts`
 - Create: `src/main/notes/builtin-transformations.test.ts`
 
-- [ ] Write failing CRUD/version/enabled-state tests and exact built-in snapshot tests for zh-CN/en summary, key points and Q&A prompts.
-- [ ] Write renderer tests for the four allowed placeholders, missing values, unknown/malformed placeholders and untrusted content containing template syntax.
-- [ ] Store user rules as plain prompt strings and increment `version` on every semantic edit. Built-ins are code-owned immutable descriptors.
-- [ ] Run focused tests; review and commit `feat: add safe transformation rules`.
+- [x] Write failing CRUD/version/enabled-state tests and exact built-in snapshot tests for zh-CN/en summary, key points and Q&A prompts.
+- [x] Write renderer tests for the four allowed placeholders, missing values, unknown/malformed placeholders and untrusted content containing template syntax.
+- [x] Store user rules as plain prompt strings and increment `version` on every semantic edit. Built-ins are code-owned immutable descriptors.
+- [x] Run focused tests; review and commit `feat: add safe transformation rules`.
+
+Evidence (2026-08-28): RED failed on the three missing rule/repository/renderer modules. GREEN: Task 6 plus strict-schema focused 21/21, full suite 809/809, typecheck passed; independent review PASS with no Critical/Important findings.
 
 ## Task 7: Execute Transformations as Durable Idempotent Tasks
 

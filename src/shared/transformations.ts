@@ -4,7 +4,7 @@ import { modelTaskKindSchema, providerKindSchema } from "./models";
 export const transformationAppliesToSchema = z.enum(["source", "sources", "message", "answer", "note"]);
 export const transformationNameSchema = z.string().trim().min(1).max(100);
 const allowedPlaceholder = /\{\{(?:content|source_title|project_name|language)\}\}/g;
-const invalidTemplateSyntax = /\{\{|\}\}|\$\{|<%|%>|\{%|%\}/;
+const invalidTemplateSyntax = /\{\{|\}\}|\$\{|<%|%>|\{%|%\}|<\/?[a-z][^>]*>|javascript\s*:/i;
 export const transformationPromptSchema = z.string().trim().min(1).refine(
   (value) => new TextEncoder().encode(value).byteLength <= 20 * 1024,
   "Transformation prompt must be at most 20 KiB"
