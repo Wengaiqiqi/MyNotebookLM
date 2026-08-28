@@ -125,16 +125,24 @@ Evidence (2026-08-28): RED failed on the three missing rule/repository/renderer 
 **Files:**
 - Create: `src/main/notes/transformation-service.ts`
 - Create: `src/main/notes/transformation-service.test.ts`
+- Create: `src/main/db/migrations/011_transformation_tasks.sql`
+- Modify: `src/main/db/database.test.ts`
 - Modify: `src/main/tasks/task-service.ts`
+- Modify: `src/main/tasks/task-service.test.ts`
+- Modify: `src/main/tasks/task-repository.ts`
+- Modify: `src/main/tasks/task-repository.test.ts`
 - Modify: `src/shared/tasks.ts`
+- Modify: `src/workers/ingestion/chunker.ts`
 
 **Inputs:** one source revision, selected source revisions, message, conversation answer or note. **Idempotency:** SHA-256 of target snapshot hashes + rule ID/version + rendered prompt version + selected route snapshot.
 
-- [ ] Write failing tests for every input kind, budget truncation, idempotent reuse, force rerun, cancel, retry, routed fallback, crash recovery and insight-to-note conversion.
-- [ ] Snapshot authoritative input before model call. Run tasks through stages `preparing -> generating -> saving -> completed`.
-- [ ] Sanitize/validate output as Markdown text and persist insight with actual provider/model, usage and idempotency key.
-- [ ] Reusing an identical completed insight returns it immediately; failed/cancelled attempts do not block retry.
-- [ ] Run focused integration tests; review and commit `feat: run durable research transformations`.
+- [x] Write failing tests for every input kind, budget truncation, idempotent reuse, force rerun, cancel, retry, routed fallback, crash recovery and insight-to-note conversion.
+- [x] Snapshot authoritative input before model call. Run tasks through stages `preparing -> generating -> saving -> completed`.
+- [x] Sanitize/validate output as Markdown text and persist insight with actual provider/model, usage and idempotency key.
+- [x] Reusing an identical completed insight returns it immediately; failed/cancelled attempts do not block retry.
+- [x] Run focused integration tests; review and commit `feat: run durable research transformations`.
+
+Evidence (2026-08-28): RED failed on the missing transformation service and unrepresentable task kind/stages. GREEN: Task 7, migration, routing and chunking focused 130/130, full suite 832/832, typecheck and build passed; independent fix-round-4 re-review PASS with no Critical/Important findings.
 
 ## Task 8: Expose Notes, Transformations and Routes API
 

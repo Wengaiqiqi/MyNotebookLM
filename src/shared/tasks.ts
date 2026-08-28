@@ -5,7 +5,8 @@ export const taskKindSchema = z.enum([
   "validation",
   "ingest",
   "delete",
-  "optimize"
+  "optimize",
+  "transformation"
 ]);
 
 export const taskStateSchema = z.enum([
@@ -25,7 +26,10 @@ export const taskStageSchema = z.enum([
   "indexing",
   "verifying",
   "cleanup",
-  "finalizing"
+  "finalizing",
+  "preparing",
+  "generating",
+  "saving"
 ]);
 
 export const taskProgressSchema = z.number().int().min(0).max(1000);

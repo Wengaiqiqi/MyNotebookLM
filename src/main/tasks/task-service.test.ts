@@ -64,6 +64,18 @@ describe("TaskService", () => {
     expect(completed.state).toBe("completed");
   });
 
+  it("completes transformation tasks at saving and retries cancelled work", () => {
+    service.createTask({ projectId: PROJECT_ID, sourceId: null, kind: "transformation", idempotencyKey: "transform-1" });
+    service.start(TASK_ID, "preparing");
+    service.advance(TASK_ID, "generating", 200);
+    service.advance(TASK_ID, "saving", 900);
+    expect(service.complete(TASK_ID, "saving")).toMatchObject({ kind: "transformation", state: "completed", stage: "saving" });
+    const second = new TaskService(repository, { now: () => clock.value, random: () => 0, id: () => "77777777-7777-4777-8777-777777777772" });
+    second.createTask({ projectId: PROJECT_ID, sourceId: null, kind: "transformation", idempotencyKey: "transform-2" });
+    second.cancel("77777777-7777-4777-8777-777777777772");
+    expect(second.retryCancelled("77777777-7777-4777-8777-777777777772", "preparing")).toMatchObject({ state: "queued", stage: "preparing" });
+  });
+
   it("keeps a successful parsing task running for the awaiting_embedding stage", () => {
     service.createTask({
       projectId: PROJECT_ID,

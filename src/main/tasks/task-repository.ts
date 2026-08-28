@@ -60,7 +60,7 @@ export class StaleTaskStateError extends Error {
 
 export type TaskTransition = {
   id: string;
-  expectedState: "queued" | "running" | "failed";
+  expectedState: "queued" | "running" | "failed" | "cancelled";
   nextState: "queued" | "running" | "completed" | "failed" | "cancelled";
   stage: TaskStage;
   progress?: number;
@@ -70,7 +70,7 @@ export type TaskTransition = {
 };
 
 export type TaskRepositoryHooks = {
-  beforeTransitionWrite?: (id: string, expectedState: "queued" | "running" | "failed") => void;
+  beforeTransitionWrite?: (id: string, expectedState: "queued" | "running" | "failed" | "cancelled") => void;
   onTransition?: (task: TaskDto) => void;
 };
 
@@ -107,6 +107,13 @@ export class TaskRepository {
 
   findById(id: string): TaskDto | null {
     const row = this.db.prepare("SELECT * FROM tasks WHERE id = ?").get(id) as
+      | TaskRow
+      | undefined;
+    return row ? toTaskDto(row) : null;
+  }
+
+  findByIdempotencyKey(idempotencyKey: string): TaskDto | null {
+    const row = this.db.prepare("SELECT * FROM tasks WHERE idempotency_key = ?").get(idempotencyKey) as
       | TaskRow
       | undefined;
     return row ? toTaskDto(row) : null;

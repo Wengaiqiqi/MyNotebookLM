@@ -2,11 +2,13 @@ import Database from "better-sqlite3";
 import {
   mkdirSync,
   mkdtempSync,
+  readdirSync,
   existsSync,
   readFileSync,
   rmSync,
   unlinkSync,
-  writeFileSync
+  writeFileSync,
+  cpSync
 } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -805,5 +807,27 @@ describe("openAppDatabase", () => {
       expect(() => routeInsert.run("99999999-9999-4999-8999-999999999995", "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "op-5", "summary", 0, "openai", "x".repeat(201))).toThrow(/check/i);
       expect(db.connection.prepare("SELECT provider, model FROM model_route_attempts WHERE id = ?").get("99999999-9999-4999-8999-999999999999")).toEqual({ provider: "openai", model: "actual-model" });
     } finally { db.close(); }
+  });
+
+  it("upgrades 010 data through 011 without losing task insight links", () => {
+    const oldMigrations = mkdtempSync(path.join(tmpdir(), "mynotebooklm-migrations-"));
+    const dbPath = path.join(temporaryRoot, "upgrade-011.db");
+    try {
+      for (let version = 1; version <= 10; version += 1) {
+        const file = readdirSync(path.resolve("src/main/db/migrations")).find((name) => name.startsWith(`${String(version).padStart(3, "0")}_`));
+        if (!file) throw new Error(`missing migration ${version}`);
+        cpSync(path.resolve("src/main/db/migrations", file), path.join(oldMigrations, file));
+      }
+      const old = openAppDatabase(dbPath, oldMigrations);
+      old.connection.prepare("INSERT INTO projects(id, name) VALUES (?, ?)").run("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "P");
+      old.connection.prepare("INSERT INTO tasks(id, project_id, kind, state, stage) VALUES (?, ?, 'ingest', 'completed', 'finalizing')").run("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa");
+      old.connection.prepare("INSERT INTO insights(id, project_id, task_id, content, idempotency_key) VALUES (?, ?, ?, ?, ?)").run("cccccccc-cccc-4ccc-8ccc-cccccccccccc", "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", "body", "upgrade-key");
+      old.close();
+      const upgraded = openAppDatabase(dbPath, path.resolve("src/main/db/migrations"));
+      expect(upgraded.connection.prepare("SELECT task_id FROM insights WHERE id = ?").get("cccccccc-cccc-4ccc-8ccc-cccccccccccc")).toEqual({ task_id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb" });
+      expect(upgraded.connection.pragma("foreign_key_check")).toEqual([]);
+      expect(upgraded.connection.prepare("SELECT 1 FROM sqlite_master WHERE type = 'index' AND name = 'idx_insights_project_created'").get()).toEqual({ 1: 1 });
+      upgraded.close();
+    } finally { rmSync(oldMigrations, { recursive: true, force: true }); }
   });
 });

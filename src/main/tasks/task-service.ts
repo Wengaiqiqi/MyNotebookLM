@@ -68,22 +68,22 @@ export class TaskService {
     });
   }
 
-  complete(taskId: string): TaskDto {
+  complete(taskId: string, stage: TaskStage = "finalizing"): TaskDto {
     return this.repository.transition({
       id: taskId,
       expectedState: "running",
       nextState: "completed",
-      stage: "finalizing",
+      stage,
       updatedAt: this.deps.now()
     });
   }
 
-  fail(taskId: string, error: TaskErrorSummaryDto): TaskDto {
+  fail(taskId: string, error: TaskErrorSummaryDto, autoRetry = true): TaskDto {
     const current = this.repository.findById(taskId);
     if (!current) throw new Error(`Task not found: ${taskId}`);
     const retryable = isRetryableCode(error.code);
     const nextAttempt = retryable ? current.attempt + 1 : current.attempt;
-    if (retryable && canRetry(nextAttempt)) {
+    if (autoRetry && retryable && canRetry(nextAttempt)) {
       return this.repository.transition({
         id: taskId,
         expectedState: "running",
@@ -103,6 +103,12 @@ export class TaskService {
       error,
       updatedAt: this.deps.now()
     });
+  }
+
+  retryCancelled(taskId: string, stage: TaskStage): TaskDto {
+    const current = this.repository.findById(taskId);
+    if (!current) throw new Error(`Task not found: ${taskId}`);
+    return this.repository.transition({ id: taskId, expectedState: "cancelled", nextState: "queued", stage, attempt: current.attempt, updatedAt: this.deps.now() });
   }
 
   cancel(taskId: string): TaskDto {
@@ -145,6 +151,8 @@ export class TaskService {
       });
     });
   }
+
+  recoverStale(graceMs: number): TaskDto[] { return this.recoverStaleRunning(graceMs); }
 
   retryDelayFor(attempt: number): number {
     return retryDelayMs(attempt, this.deps.random);

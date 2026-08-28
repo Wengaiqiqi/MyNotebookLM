@@ -202,7 +202,7 @@ export function chunkBlocks(
     const prevFragments = lastChunkFragments.get(prevChunk) ?? [];
     const tail: Fragment[] = [];
     let tailTokens = 0;
-    const prefixTokens = activeHeading ? estimateTokens(activeHeading.text) : 0;
+    const prefixTokens = 0;
     const tailBudget = Math.min(overlapTokens, targetTokens - prefixTokens);
     for (let i = prevFragments.length - 1; i >= 0; i -= 1) {
       const f = prevFragments[i]!;

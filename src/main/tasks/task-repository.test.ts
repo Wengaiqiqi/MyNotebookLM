@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { copyFileSync, mkdtempSync, readdirSync, rmSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import Database from "better-sqlite3";
@@ -57,6 +57,37 @@ describe("TaskRepository", () => {
     expect(task.error).toBeNull();
     const row = repository.findById(TASK_ID);
     expect(row && row.state).toBe("queued");
+  });
+
+  it("accepts the transformation kind and preparing/generating/saving stages after migration", () => {
+    const task = createTask({ id: TASK_ID, kind: "transformation", idempotencyKey: "transform-repo" });
+    expect(task.kind).toBe("transformation");
+    expect(repository.findByIdempotencyKey("transform-repo")?.id).toBe(TASK_ID);
+    expect(repository.transition({ id: TASK_ID, expectedState: "queued", nextState: "running", stage: "preparing", updatedAt: "2026-08-25T00:00:00.001Z" }).stage).toBe("preparing");
+    expect(repository.transition({ id: TASK_ID, expectedState: "running", nextState: "running", stage: "generating", updatedAt: "2026-08-25T00:00:00.002Z" }).stage).toBe("generating");
+    expect(repository.transition({ id: TASK_ID, expectedState: "running", nextState: "running", stage: "saving", updatedAt: "2026-08-25T00:00:00.003Z" }).stage).toBe("saving");
+  });
+
+  it("upgrades a pre-011 database while retaining legacy tasks and foreign keys", () => {
+    const upgradeRoot = mkdtempSync(path.join(tmpdir(), "mynotebooklm-migration-011-"));
+    const legacyMigrations = path.join(upgradeRoot, "migrations");
+    mkdirSync(legacyMigrations);
+    for (const file of readdirSync(path.resolve("src/main/db/migrations"))) {
+      if (file < "011_transformation_tasks.sql") copyFileSync(path.resolve("src/main/db/migrations", file), path.join(legacyMigrations, file));
+    }
+    const databasePath = path.join(upgradeRoot, "app.db");
+    const legacy = openAppDatabase(databasePath, legacyMigrations);
+    legacy.connection.prepare("INSERT INTO projects(id, name) VALUES (?, ?)").run(PROJECT_ID, "Legacy");
+    legacy.connection.prepare("INSERT INTO tasks(id, project_id, kind, state, stage) VALUES (?, ?, 'ingest', 'queued', 'validating')").run(TASK_ID, PROJECT_ID);
+    legacy.close();
+    copyFileSync(path.resolve("src/main/db/migrations/011_transformation_tasks.sql"), path.join(legacyMigrations, "011_transformation_tasks.sql"));
+    const upgraded = openAppDatabase(databasePath, legacyMigrations);
+    expect(upgraded.connection.prepare("SELECT kind, stage FROM tasks WHERE id = ?").get(TASK_ID)).toEqual({ kind: "ingest", stage: "validating" });
+    upgraded.connection.prepare("INSERT INTO tasks(id, project_id, kind, stage) VALUES (?, ?, 'transformation', 'preparing')").run(OTHER_TASK_ID, PROJECT_ID);
+    expect(upgraded.connection.prepare("SELECT name FROM pragma_index_list('tasks')").pluck().all()).toEqual(expect.arrayContaining(["idx_tasks_project_state_created", "idx_tasks_source_created"]));
+    expect(() => upgraded.connection.prepare("INSERT INTO insights(id, project_id, task_id, content, idempotency_key) VALUES (?, ?, ?, 'x', 'migration-fk')").run("99999999-9999-4999-8999-999999999990", PROJECT_ID, OTHER_TASK_ID)).not.toThrow();
+    upgraded.close();
+    rmSync(upgradeRoot, { recursive: true, force: true });
   });
 
   it("throws TaskNotFoundError when creating/transitioning unknown IDs", () => {
