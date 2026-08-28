@@ -96,10 +96,12 @@ Evidence (2026-08-28): RED covered fallback eligibility/terminal boundaries and 
 - Create: `src/main/notes/title-service.test.ts`
 - Modify: `src/main/notes/note-service.ts`
 
-- [ ] Write failing tests for bilingual prompt, input truncation, explicit profile override, routed fallback, whitespace/quotes cleanup, 80-character cap, empty output and failure preserving original title/body.
-- [ ] Generate a title from a read snapshot, then update only if note version still matches; return conflict rather than overwrite a concurrent edit.
-- [ ] Store actual provider/model metadata in route attempts, not note body.
-- [ ] Run focused tests; review and commit `feat: generate safe note titles`.
+- [x] Write failing tests for bilingual prompt, input truncation, explicit profile override, routed fallback, whitespace/quotes cleanup, 80-character cap, empty output and failure preserving original title/body.
+- [x] Generate a title from a read snapshot, then update only if note version still matches; return conflict rather than overwrite a concurrent edit.
+- [x] Store actual provider/model metadata in route attempts, not note body.
+- [x] Run focused tests; review and commit `feat: generate safe note titles`.
+
+Evidence (2026-08-28): RED covered missing title service, real SQLite concurrent-update preservation and deleted-note preflight. GREEN: title/note focused 11/11, full suite 797/797, typecheck passed; independent fix re-review PASS with no findings.
 
 ## Task 6: Implement Built-In and Custom Transformation Rules
 

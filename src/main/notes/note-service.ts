@@ -17,6 +17,7 @@ import {
   type UpdateNoteInput
 } from "../../shared/notes";
 import type { NoteRepository } from "./note-repository";
+import type { GenerateTitleInput, TitleService } from "./title-service";
 
 function normalizeMarkdown(value: string): string {
   return value.replace(/\r\n?/g, "\n");
@@ -25,7 +26,8 @@ function normalizeMarkdown(value: string): string {
 export class NoteService {
   constructor(
     private readonly repository: NoteRepository,
-    private readonly createId: () => string = randomUUID
+    private readonly createId: () => string = randomUUID,
+    private readonly titleService?: Pick<TitleService, "generateTitle">
   ) {}
 
   createNote(input: CreateNoteInput): NoteDto {
@@ -52,6 +54,11 @@ export class NoteService {
   updateNote(input: UpdateNoteInput): NoteDto {
     const parsed = updateNoteInputSchema.parse(input);
     return noteDtoSchema.parse(this.repository.update({ ...parsed, body: normalizeMarkdown(parsed.body) }));
+  }
+
+  generateTitle(input: GenerateTitleInput): Promise<NoteDto> {
+    if (!this.titleService) throw new Error("Title service is not configured");
+    return this.titleService.generateTitle(input);
   }
 
   archiveNote(input: { projectId: string; id: string; version: number }): NoteDto {

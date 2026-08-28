@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { createNoteLinkInputSchema, listNotesInputSchema, noteLinkDtoSchema } from "../../shared/notes";
 import { NoteService } from "./note-service";
 
@@ -23,5 +23,14 @@ describe("NoteService", () => {
   it("strictly validates the complete listNotes input", () => {
     expect(listNotesInputSchema.parse({ projectId: PROJECT, includeArchived: true })).toEqual({ projectId: PROJECT, includeArchived: true });
     expect(() => listNotesInputSchema.parse({ projectId: PROJECT, unexpected: true })).toThrow();
+  });
+
+  it("delegates AI title generation to the title service", async () => {
+    const generated = { id: NOTE, projectId: PROJECT, title: "AI title", body: "Body", version: 2, archivedAt: null, deletedAt: null, createdAt: "2026-01-01T00:00:00.000Z", updatedAt: "2026-01-01T00:00:00.000Z" };
+    const titleService = { generateTitle: vi.fn(async () => generated) };
+    const service = new NoteService({} as any, () => NOTE, titleService);
+
+    await expect(service.generateTitle({ projectId: PROJECT, noteId: NOTE, locale: "en" })).resolves.toEqual(generated);
+    expect(titleService.generateTitle).toHaveBeenCalledWith({ projectId: PROJECT, noteId: NOTE, locale: "en" });
   });
 });
