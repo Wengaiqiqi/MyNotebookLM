@@ -143,7 +143,7 @@ Candidate 1 (359,802,370 bytes, SHA-256 `9522DB07D5540788E0254DBED35ACC5DCBB44FB
 
 | Command | Exit code | Result |
 | --- | --- | --- |
-| `npm test` | 0 | 109 files / 999 tests passed (includes the new regression test) |
+| `npm test` | 0 | 108 files / 997 tests passed (includes the new regression test) |
 | `npm run typecheck` | 0 | node + web tsc projects clean |
 | `npm run build` | 0 | electron-vite production build |
 | `npm run test:e2e` | 0 | 20/20 passed (1.6m) |
