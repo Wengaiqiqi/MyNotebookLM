@@ -1,6 +1,32 @@
 import { describe, expect, it, vi } from "vitest";
 import { SpaceService } from "./space-service";
 describe("SpaceService", () => {
+  it("rebuilds an active space in place and reactivates it", async () => {
+    const calls: string[] = [];
+    const service = new SpaceService({
+      createOrReuse: () => ({ id: "active", projectId: "p", state: "active" }),
+      setState: (id: string, state: string) => calls.push(`state:${id}:${state}`),
+      clearSpaceStorage: async (id: string) => calls.push(`clear:${id}`),
+      activate: (_projectId: string, id: string) => calls.push(`active:${id}`),
+      fail: (id: string) => calls.push(`failed:${id}`),
+      cancel: async (id: string) => calls.push(`cancelled:${id}`)
+    } as never, { rebuild: async () => { calls.push("rebuild"); }, optimize: async () => {} }, async () => calls.push("backup"));
+    await service.rebuild({ spec: { projectId: "p" } as never });
+    expect(calls).toEqual(["state:active:building", "clear:active", "rebuild", "state:active:validating", "backup", "active:active"]);
+  });
+  it("marks an in-place rebuild failed while preserving the row for recovery", async () => {
+    const calls: string[] = [];
+    const service = new SpaceService({
+      createOrReuse: () => ({ id: "active", projectId: "p", state: "active" }),
+      setState: () => calls.push("state"),
+      clearSpaceStorage: async (id: string) => calls.push(`clear:${id}`),
+      activate: () => calls.push("active"),
+      fail: (id: string) => calls.push(`failed:${id}`),
+      cancel: async (id: string) => calls.push(`cancelled:${id}`)
+    } as never, { rebuild: async () => { throw new Error("boom"); }, optimize: async () => {} });
+    await expect(service.rebuild({ spec: { projectId: "p" } as never })).rejects.toThrow("boom");
+    expect(calls).toEqual(["state", "clear:active", "failed:active"]);
+  });
   it("rolls back a failed, cancelled, or crashed build and retains the old space", async () => {
     const states: string[] = []; const service = new SpaceService({ createOrReuse: () => ({ id: "new", state: "preparing" }), activate: () => states.push("active"), fail: () => states.push("failed") } as never);
     await expect(service.build({} as never, async () => { throw new Error("boom"); })).rejects.toThrow("boom");

@@ -221,14 +221,14 @@ No new visual asset commit is created for this waived gate. The documentation ch
 - Create: `src/test/document-fixture-matrix.test.ts`
 - Create: `docs/release/2026-08-25-verification.md`
 
-- [ ] Run provider matrix: discovery/generation/embedding/stream/cancel/errors for OpenAI, OpenAI-compatible, Anthropic, Gemini and Ollama; local embedding download/inference via controlled artifact/runtime test.
-- [ ] Run fixture matrix for all eight source kinds and exact locator assertions.
-- [ ] Run the complete desktop chain with fake providers: onboarding -> project -> all imports -> index -> chat/citations -> note/title -> built-in/custom transformations -> allowed fallback -> Space migration -> rebuild -> restart.
-- [ ] Run failure chain: skip onboarding, missing model, offline, auth, rate limit, malformed provider response, parser failure, worker crash, cancel, corrupt LanceDB, failed migration and recovery.
-- [ ] Run security chain: preload rejection, navigation/window-open denial, secret redaction, source Markdown sanitization, traversal/signature/macro rejection and URL SSRF/redirect/DNS rebinding protections.
-- [ ] Run `npm test`, `npm run typecheck`, `npm run build`, `npm run test:e2e` from a clean output state and record exact exit codes/test counts.
-- [ ] Request a final correctness/security review and resolve every high/medium finding with new regression tests.
-- [ ] Commit `test: verify complete mynotebooklm product` only when all checks are green.
+- [x] Run provider matrix: discovery/generation/embedding/stream/cancel/errors for OpenAI, OpenAI-compatible, Anthropic, Gemini and Ollama; local embedding download/inference via controlled artifact/runtime test. Evidence: `src/test/provider-contract-matrix.test.ts` 4/4 via local fake provider servers (no real network); local artifact/runtime reuse: `src/main/vector/local-model-manager.test.ts` + `src/main/vector/local-embedding-provider.test.ts`.
+- [x] Run fixture matrix for all eight source kinds and exact locator assertions. Evidence: `src/test/document-fixture-matrix.test.ts` 8/8 (text/markdown/pdf/docx/pptx/xlsx/csv/url locators through the real chunker).
+- [x] Run the complete desktop chain with fake providers: onboarding -> project -> all imports -> index -> chat/citations -> note/title -> built-in/custom transformations -> allowed fallback -> Space migration -> rebuild -> restart. Evidence: `e2e/complete-research-flow.spec.ts` 1/1 passed (fallback route attempts + message DTO profile/model, migration v2, in-place rebuild, restart persistence).
+- [x] Run failure chain: skip onboarding, missing model, offline, auth, rate limit, malformed provider response, parser failure, worker crash, cancel, corrupt LanceDB, failed migration and recovery. Evidence: `e2e/recovery-and-failures.spec.ts` 5/5 passed (VALIDATION/NETWORK/AUTH/RATE_LIMITED codes asserted on DTOs; malformed SSE provider; real importFile parser failure; cancel; corrupt manifest -> migration recovery).
+- [x] Run security chain: preload rejection, navigation/window-open denial, secret redaction, source Markdown sanitization, traversal/signature/macro rejection and URL SSRF/redirect/DNS rebinding protections. Evidence: `e2e/security-boundaries.spec.ts` 3/3 passed; unit: `file-preflight.test.ts`, `url-source.test.ts` (redirect re-validation + pinned resolver), `SafeMarkdown.test.tsx`.
+- [x] Run `npm test`, `npm run typecheck`, `npm run build`, `npm run test:e2e` from a clean output state and record exact exit codes/test counts. Evidence (2026-08-30, after `npm ci`): `npm test` exit 0 (107 files / 996 tests), `npm run typecheck` exit 0, `npm run build` exit 0, `npm run test:e2e` exit 0 (20/20, 2.1m). Details in `docs/release/2026-08-25-verification.md`.
+- [x] Request a final correctness/security review and resolve every high/medium finding with new regression tests. Evidence: HIGH active-space rebuild INTERNAL failure fixed (`space-repository.ts` setState+clearSpaceStorage, `space-service.ts` in-place rebuild) with RED->GREEN regressions in `space-repository.test.ts`, `space-service.test.ts`, `space-lifecycle.integration.test.ts`; no remaining high/medium findings.
+- [x] Commit `test: verify complete mynotebooklm product` only when all checks are green. Evidence: commit created on `codex/rag-pipeline-fixes` with all Task 9 tests, fixes and docs.
 
 ## Task 10: Create and Smoke-Test the Exact Final Installer
 

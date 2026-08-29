@@ -4,6 +4,16 @@ import { SpaceRepository } from "./space-repository";
 
 function db() { const d = new Database(":memory:"); d.exec("CREATE TABLE embedding_spaces (id TEXT PRIMARY KEY, project_id TEXT, provider TEXT, model_id TEXT, model_revision TEXT, dimension INTEGER, distance TEXT, pooling TEXT, preprocess_version TEXT, chunking_version TEXT, fingerprint TEXT, state TEXT, progress_1000 INTEGER, created_at TEXT, updated_at TEXT); CREATE TABLE project_embedding_spaces (project_id TEXT PRIMARY KEY, space_id TEXT, updated_at TEXT);"); return d; }
 describe("SpaceRepository", () => {
+  it("allows rebuilding an active space in place via setState", () => {
+    const d = db(); const repo = new SpaceRepository(d as never, () => "now");
+    const spec = { projectId: "p", provider: "openai", modelId: "m", modelRevision: "r", dimension: 3, distance: "cosine" as const, pooling: "mean" as const, preprocessVersion: "1", chunkingVersion: "1", fingerprint: "fp" };
+    const active = repo.createOrReuse(spec); d.prepare("UPDATE embedding_spaces SET state='active' WHERE id=?").run(active.id); d.prepare("INSERT INTO project_embedding_spaces VALUES(?,?,?)").run("p", active.id, "now");
+    repo.setState(active.id, "building");
+    expect(repo.get(active.id)!.state).toBe("building");
+    repo.setState(active.id, "validating", 1000);
+    repo.activate("p", active.id);
+    expect(repo.get(active.id)!.state).toBe("active");
+  });
   it("reuses a fingerprint and atomically activates a shadow space", () => {
     const d = db(); const repo = new SpaceRepository(d as never, () => "now");
     const spec = { projectId: "p", provider: "openai", modelId: "m", modelRevision: "r", dimension: 3, distance: "cosine" as const, pooling: "mean" as const, preprocessVersion: "1", chunkingVersion: "1", fingerprint: "fp" };
