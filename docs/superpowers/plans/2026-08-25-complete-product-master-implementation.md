@@ -72,7 +72,7 @@ No `Error`, raw response, stack, filesystem root, secret or arbitrary provider p
 - [x] **Gate E — after Plan 5:** run notes/transformation/idempotency/routing/fallback tests and complete product unit suite.
 
   Evidence (2026-08-28): focused 21 files / 299 tests, full 86 files / 854 tests, typecheck and production build passed; no packaging command was run.
-- [ ] **Gate F — before packaging:** every new visual has written approval and a recorded Electron screenshot in both languages and themes where state differs.
+- [x] **Gate F — before packaging:** every new visual has written approval and a recorded Electron screenshot in both languages and themes where state differs. Evidence (2026-08-29): written user approval received for refreshed research-chat zh-light/en-dark (1802x1128) after citation-bottom alignment fix; full suite 105 files / 980 tests, typecheck, build, diff-check and Task 8 Electron E2E 1/1 passed; commit e21acbf.
 - [ ] **Gate G — final release:** Plan 6's complete checks pass before `package:win`; the generated installer is then installed and tested without rebuilding; its SHA-256 remains identical to the delivered file.
 
 ## Required Evidence Ledger
