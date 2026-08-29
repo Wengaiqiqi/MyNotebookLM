@@ -30,7 +30,7 @@ const zhCN = {
     save: "保存更改",
     saving: "正在保存…",
     openSettings: "打开设置",
-    retry: "重试", add: "添加", edit: "编辑", delete: "删除"
+    retry: "重试", add: "添加", edit: "编辑", delete: "删除", loading: "正在加载…"
   },
   model: {
     generation: { title: "生成模型", description: "用于对话、总结与内容生成" },
@@ -81,6 +81,29 @@ const zhCN = {
     modelServices: "模型服务",
     dataIndex: "数据与索引",
     loadError: "无法加载模型设置，请检查应用连接后重试。"
+  },
+  routing: {
+    title: "任务路由",
+    description: "为每类任务选择首选模型与有序回退链路。",
+    task: "任务",
+    orderedRoute: "有序模型路由",
+    fallbackRule: "优先使用第一个可用模型，仅在可恢复失败时使用后续配置。",
+    embeddingRule: "嵌入仅使用一个配置",
+    embeddingProfile: "嵌入配置",
+    chooseEmbeddingProfile: "选择嵌入配置",
+    emptyRoute: "尚未配置模型路由",
+    addFirstProfile: "添加首个配置",
+    addFallback: "添加回退",
+    fallbackProfile: "回退配置",
+    noAvailableProfiles: "没有可用配置",
+    saveRoute: "保存路由",
+    moveUp: "上移 {{name}}",
+    moveDown: "下移 {{name}}",
+    remove: "移除 {{name}}",
+    fallbackHistory: "回退历史",
+    noFallbacks: "尚无路由尝试记录。",
+    states: { started: "已开始", completed: "已完成", failed: "失败", cancelled: "已取消" },
+    tasks: { chat: "对话", "note-title": "笔记标题", summary: "总结", "key-points": "要点", qa: "问答", "custom-transformation": "自定义转换", embedding: "嵌入" }
   },
   vector: {
     eyebrow: "数据与索引",

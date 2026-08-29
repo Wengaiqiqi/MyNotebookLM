@@ -281,6 +281,22 @@ describe("ModelService", () => {
     expect(factory).not.toHaveBeenCalled();
   });
 
+  it("keeps default generation routes valid when chat has an ordered fallback", async () => {
+    const { service, repository } = setup();
+    repository.profiles.set(PROFILE_ID, dto(profile));
+    repository.profiles.set(OTHER_PROFILE_ID, dto({ ...profile, id: OTHER_PROFILE_ID, name: "Fallback" }));
+    await expect(service.setDefaultRoutes({
+      generationProfileId: PROFILE_ID,
+      embeddingProfileId: BUILT_IN_LOCAL_EMBEDDING_PROFILE_ID
+    })).resolves.toMatchObject({ ok: true });
+    repository.replaceRoute("chat", [PROFILE_ID, OTHER_PROFILE_ID]);
+
+    await expect(service.getDefaultRoutes()).resolves.toEqual({
+      ok: true,
+      value: { generationProfileId: PROFILE_ID, embeddingProfileId: BUILT_IN_LOCAL_EMBEDDING_PROFILE_ID }
+    });
+  });
+
   it("rejects missing and wrong-capability default route profiles", async () => {
     const { service, repository } = setup();
     repository.profiles.set(PROFILE_ID, dto(profile));

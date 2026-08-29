@@ -200,7 +200,7 @@ export class ModelService {
       if (configuredGenerationRoutes.length > 0) {
         const generationProfileId = generationRoutes[0]?.[0]?.profileId;
         const consistent = generationRoutes.every((route) =>
-          route.length === 1 && route[0]?.profileId === generationProfileId
+          route.length > 0 && route[0]?.profileId === generationProfileId
         );
         if (!consistent) {
           return errorResult(appError(

@@ -30,7 +30,7 @@ const en = {
     save: "Save changes",
     saving: "Saving…",
     openSettings: "Open settings",
-    retry: "Retry", add: "Add", edit: "Edit", delete: "Delete"
+    retry: "Retry", add: "Add", edit: "Edit", delete: "Delete", loading: "Loading…"
   },
   model: {
     generation: { title: "Generation model", description: "For chat, summaries, and writing" },
@@ -81,6 +81,29 @@ const en = {
     modelServices: "Model services",
     dataIndex: "Data & indexing",
     loadError: "Could not load model settings. Check the app connection and retry."
+  },
+  routing: {
+    title: "Task routing",
+    description: "Choose a preferred model and an ordered fallback chain for each task.",
+    task: "Task",
+    orderedRoute: "Ordered model route",
+    fallbackRule: "The first available model is preferred; later entries are used only for recoverable failures.",
+    embeddingRule: "Embedding uses exactly one profile",
+    embeddingProfile: "Embedding profile",
+    chooseEmbeddingProfile: "Choose an embedding profile",
+    emptyRoute: "No model route configured",
+    addFirstProfile: "Add first profile",
+    addFallback: "Add fallback",
+    fallbackProfile: "Fallback profile",
+    noAvailableProfiles: "No available profiles",
+    saveRoute: "Save route",
+    moveUp: "Move up {{name}}",
+    moveDown: "Move down {{name}}",
+    remove: "Remove {{name}}",
+    fallbackHistory: "Fallback history",
+    noFallbacks: "No route attempts recorded yet.",
+    states: { started: "Started", completed: "Completed", failed: "Failed", cancelled: "Cancelled" },
+    tasks: { chat: "Chat", "note-title": "Note titles", summary: "Summaries", "key-points": "Key points", qa: "Q&A", "custom-transformation": "Custom transformations", embedding: "Embedding" }
   },
   vector: {
     eyebrow: "Data & indexing",

@@ -177,14 +177,22 @@ No new visual asset commit is created for this waived gate. The documentation ch
 - Create: `src/renderer/src/model-settings/RouteSettings.tsx`
 - Create: `src/renderer/src/model-settings/RouteSettings.test.tsx`
 - Create: `src/renderer/src/model-settings/FallbackHistory.tsx`
+- Create: `docs/verification/screenshots/model-routing-en-dark.png`
+- Create: `docs/verification/screenshots/model-routing-embedding-en-dark.png`
+- Modify: `e2e/desktop.spec.ts`
+- Modify: `src/main/models/model-service.ts`
+- Modify: `src/main/models/model-service.test.ts`
+- Modify: `src/renderer/src/model-settings/SettingsView.test.tsx`
 - Modify: `src/renderer/src/model-settings/SettingsView.tsx`
+- Modify: `src/renderer/src/locales/en.ts`
+- Modify: `src/renderer/src/locales/zh-CN.ts`
 - Modify: `src/renderer/src/styles.css`
 
-- [ ] Write failing tests for per-task route editing, ordered fallback, capability filtering, duplicate prevention, embedding single-profile rule, save errors and fallback history.
-- [ ] Implement the approved routing view. Use accessible move-up/move-down buttons instead of pointer-only drag behavior; pointer reordering may be added only if it shares the same commands.
-- [ ] Confirm generation and embedding can both be changed from Settings and model discovery/manual input still work.
-- [ ] Add a real Electron screenshot for the model-routing states under `docs/verification/screenshots/`; compare against `docs/ui/complete/README.md` and correct differences.
-- [ ] Review and commit `feat: complete model routing settings`.
+- [x] Write failing tests for per-task route editing, ordered fallback, capability filtering, duplicate prevention, embedding single-profile rule, save errors and fallback history.
+- [x] Implement the approved routing view. Use accessible move-up/move-down buttons instead of pointer-only drag behavior; pointer reordering may be added only if it shares the same commands.
+- [x] Confirm generation and embedding can both be changed from Settings and model discovery/manual input still work. Embedding exposes exactly one selectable profile; no download action or download-related copy remains, and Data & indexing stays an independent tab.
+- [x] Add real Electron screenshots for the model-routing states under `docs/verification/screenshots/`; compare against `docs/ui/complete/README.md` and correct differences. Final evidence (2026-08-29): `model-routing-en-dark.png` shows the complete ordered Chat primary/fallback route and honest empty history; `model-routing-embedding-en-dark.png` shows the single-profile Embedding selector and route. Both are complete 1803x1128 real Electron views with masked fixture credentials.
+- [x] Independent read-only review PASS after three RED/GREEN repair rounds. Main-model evidence (2026-08-29): full suite `104 files / 960 tests`, `npm run typecheck`, `npm run build`, `git diff --check`, and the tracked real Electron Task 7 E2E `1/1` passed. The E2E saves ordered Chat fallbacks, changes the single Embedding profile through real IPC, captures both screenshots and verifies both routes after restart. `getDefaultRoutes` now accepts ordered fallbacks only when every generation task remains non-empty with the same primary. Review and commit `feat: complete model routing settings`.
 
 ## Task 8: Complete Localization, Themes, Accessibility and Recovery
 

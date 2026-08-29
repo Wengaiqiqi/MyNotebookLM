@@ -7,6 +7,7 @@ import { modelErrorText } from "./model-error-text";
 import IndexStatus, { type IndexHealth, type IndexTask } from "../vector/IndexStatus";
 import SpaceMigrationDialog from "../vector/SpaceMigrationDialog";
 import type { TaskDto } from "../../../shared/tasks";
+import RouteSettings from "./RouteSettings";
 
 export default function SettingsView({
   data,
@@ -151,6 +152,11 @@ export default function SettingsView({
               disabled={busy}
               onGenerationChange={setGeneration}
               onEmbeddingChange={setEmbedding}
+            />
+            <RouteSettings
+              profiles={data.profiles.profiles}
+              builtInProfiles={data.profiles.builtInProfiles}
+              {...(projectId ? { projectId } : {})}
             />
           </section>
         ) : (

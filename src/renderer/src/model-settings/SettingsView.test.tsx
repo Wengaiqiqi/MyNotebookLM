@@ -12,17 +12,38 @@ const data = { profiles: { profiles: [], builtInProfiles: [], credentials: [] },
 
 beforeEach(async () => {
   await changeLanguage("en");
+  const models = {
+    listProfiles: vi.fn(), getDefaultRoutes: vi.fn(), setDefaultRoutes: vi.fn(), saveProfile: vi.fn(),
+    deleteProfile: vi.fn(), discover: vi.fn(), test: vi.fn(),
+    getRoutes: vi.fn().mockResolvedValue({ ok: true, value: [] }),
+    saveRoutes: vi.fn(), listRouteAttempts: vi.fn().mockResolvedValue({ ok: true, value: [] })
+  } as unknown as DesktopApi["models"];
   window.myNotebook = {
     vector: {
       getHealth: vi.fn<DesktopApi["vector"]["getHealth"]>().mockResolvedValue({ ok: true, value: { spaceId: projectId, healthy: true, indexedCount: 3 } }),
       startMigration: vi.fn(), rebuild: vi.fn(), optimize: vi.fn(), cancelTask: vi.fn(), subscribe: vi.fn(() => vi.fn())
-    }
+    },
+    models
   } as unknown as DesktopApi;
 });
 
 afterEach(() => cleanup());
 
 describe("SettingsView vector management", () => {
+  it("keeps model services and task routing on the model tab while wiring real route reads", async () => {
+    const models = window.myNotebook.models;
+    render(<SettingsView data={data} projectId={projectId} onCancel={vi.fn()} onSaved={vi.fn()} />);
+    expect(screen.getByRole("heading", { name: "Generation model" })).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Embedding model" })).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Task routing" })).toBeTruthy();
+    await waitFor(() => expect(models.getRoutes).toHaveBeenCalledWith({ taskKind: "chat" }));
+    fireEvent.click(screen.getByRole("tab", { name: "Data & indexing" }));
+    expect(screen.queryByRole("heading", { name: "Task routing" })).toBeNull();
+    fireEvent.click(screen.getByRole("tab", { name: "Model services" }));
+    await waitFor(() => expect(screen.getByRole("heading", { name: "Task routing" })).toBeTruthy());
+    expect(models.getRoutes).toHaveBeenCalledWith({ taskKind: "chat" });
+  });
+
   it("loads and renders the selected project's index status", async () => {
     render(<SettingsView data={data} projectId={projectId} onCancel={vi.fn()} onSaved={vi.fn()} />);
     await waitFor(() => expect(window.myNotebook.vector.getHealth).toHaveBeenCalledWith({ projectId }));

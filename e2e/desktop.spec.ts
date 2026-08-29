@@ -44,6 +44,22 @@ async function closeElectron(app: ElectronApplication): Promise<void> {
   throw new Error(`Electron ${pid}: shutdown timeout`);
 }
 
+async function captureRoutingScreenshot(page: Page, filePath: string): Promise<void> {
+  await page.evaluate(() => { document.documentElement.style.zoom = "0.85"; });
+  const scroll = await page.locator(".settings-model-content").evaluate((element) => {
+    const route = element.querySelector<HTMLElement>(".route-settings");
+    if (route) {
+      element.scrollTop += route.getBoundingClientRect().top - element.getBoundingClientRect().top;
+    }
+    return { top: element.scrollTop, max: element.scrollHeight - element.clientHeight, routeTop: route?.getBoundingClientRect().top ?? 0, contentTop: element.getBoundingClientRect().top };
+  });
+  console.log(`Task7 screenshot scroll=${scroll.top} max=${scroll.max} routeTop=${scroll.routeTop} contentTop=${scroll.contentTop}`);
+  await page.screenshot({ path: filePath });
+  const image = await fs.readFile(filePath);
+  expect(image.readUInt32BE(16)).toBe(1803);
+  expect(image.readUInt32BE(20)).toBe(1128);
+}
+
 async function skipOnboarding(page: Page): Promise<void> {
   const skip = page.getByRole("button", { name: /稍后配置模型|Configure later/ });
   await page.waitForFunction(() => [...document.querySelectorAll("button")].some((candidate) => {
@@ -256,6 +272,97 @@ test("validated model save and routes survive restart and capture English dark s
     await expect(thirdEmbedding.getByLabel("Model")).toHaveValue("text-embedding-e2e");
   } finally {
     await third.app.close();
+  }
+});
+
+test("Task 7 model routing saves ordered fallbacks and a single embedding profile", async ({}, testInfo) => {
+  test.setTimeout(60_000);
+  const userDataDir = testInfo.outputPath("user-data");
+  await fs.mkdir(userDataDir, { recursive: true });
+  await fs.mkdir(path.resolve("docs/verification/screenshots"), { recursive: true });
+  const provider = await startFakeOpenAi();
+  const generationProfileId = "77777777-7777-4777-8777-777777777771";
+  const fallbackProfileId = "77777777-7777-4777-8777-777777777772";
+  const embeddingPrimaryId = "77777777-7777-4777-8777-777777777773";
+  const embeddingSecondaryId = "77777777-7777-4777-8777-777777777774";
+  let app: ElectronApplication | undefined;
+  try {
+    const launched = await launchWithUserData(userDataDir);
+    app = launched.app;
+    const page = launched.page;
+    await page.setViewportSize({ width: 1803, height: 1128 });
+    await skipOnboarding(page);
+    await page.getByRole("button", { name: "新建项目" }).first().click();
+    await page.getByLabel("项目名称").fill("Task 7 routing");
+    await page.getByRole("button", { name: "确认" }).click();
+    await expect(page.getByText("Task 7 routing").first()).toBeVisible();
+    const fixture = await page.evaluate(async ({ baseUrl, generationProfileId, fallbackProfileId, embeddingPrimaryId, embeddingSecondaryId }) => {
+      const api = (window as unknown as { myNotebook: any }).myNotebook;
+      const profiles = [
+        { id: generationProfileId, name: "Task7 Primary", capability: "generation", modelId: "gpt-e2e" },
+        { id: fallbackProfileId, name: "Task7 Fallback", capability: "generation", modelId: "gpt-e2e-fallback" },
+        { id: embeddingPrimaryId, name: "Task7 Embedding A", capability: "embedding", modelId: "text-embedding-e2e" },
+        { id: embeddingSecondaryId, name: "Task7 Embedding B", capability: "embedding", modelId: "text-embedding-e2e-secondary" }
+      ];
+      for (const profile of profiles) {
+        const saved = await api.models.saveProfile({
+          profile: { ...profile, provider: "openai-compatible", baseUrl, enabled: true },
+          apiKey: "task7-fixture-key"
+        });
+        if (!saved.ok) throw new Error(`profile save failed: ${saved.error.code}`);
+      }
+      const defaults = await api.models.setDefaultRoutes({ generationProfileId, embeddingProfileId: embeddingPrimaryId });
+      if (!defaults.ok) throw new Error(`default routes failed: ${defaults.error.code}`);
+      return { generationProfileId, fallbackProfileId, embeddingPrimaryId, embeddingSecondaryId };
+    }, { baseUrl: provider.baseUrl, generationProfileId, fallbackProfileId, embeddingPrimaryId, embeddingSecondaryId });
+
+    await page.getByRole("button", { name: "设置", exact: true }).click();
+    await expect(page.getByRole("heading", { name: "设置" })).toBeVisible();
+    await page.getByRole("button", { name: "EN", exact: true }).click();
+    await page.getByRole("button", { name: "Dark", exact: true }).click();
+    await expect(page.locator("html")).toHaveAttribute("lang", "en");
+    await expect(page.getByRole("heading", { name: "Task routing" })).toBeVisible();
+
+    await expect(page.getByRole("button", { name: "Add fallback" })).toBeEnabled();
+    await page.getByRole("button", { name: "Add fallback" }).click();
+    await expect(page.locator(".route-list li")).toHaveCount(2);
+    await page.getByRole("button", { name: "Save route" }).click();
+    const savedChat = await page.evaluate(async () => (window as unknown as { myNotebook: any }).myNotebook.models.getRoutes({ taskKind: "chat" }));
+    expect(savedChat).toMatchObject({ ok: true, value: [
+      { taskKind: "chat", position: 0, profileId: fixture.generationProfileId },
+      { taskKind: "chat", position: 1, profileId: fixture.fallbackProfileId }
+    ] });
+    await captureRoutingScreenshot(page, path.resolve("docs/verification/screenshots/model-routing-en-dark.png"));
+
+    await page.locator("#route-task").selectOption("embedding");
+    const embeddingSelector = page.getByLabel("Embedding profile");
+    await expect(embeddingSelector).toBeVisible();
+    await embeddingSelector.selectOption(fixture.embeddingSecondaryId);
+    await page.getByRole("button", { name: "Save route" }).click();
+    const savedEmbedding = await page.evaluate(async () => (window as unknown as { myNotebook: any }).myNotebook.models.getRoutes({ taskKind: "embedding" }));
+    expect(savedEmbedding).toMatchObject({ ok: true, value: [{ taskKind: "embedding", position: 0, profileId: fixture.embeddingSecondaryId }] });
+    await captureRoutingScreenshot(page, path.resolve("docs/verification/screenshots/model-routing-embedding-en-dark.png"));
+    await closeElectron(app);
+    app = undefined;
+
+    const restarted = await launchWithUserData(userDataDir);
+    app = restarted.app;
+    await restarted.page.getByRole("button", { name: /设置|Settings/, exact: true }).click();
+    await expect(restarted.page.getByRole("heading", { name: /任务路由|Task routing/ })).toBeVisible({ timeout: 15_000 });
+    await restarted.page.getByRole("button", { name: "EN", exact: true }).click();
+    await restarted.page.getByRole("button", { name: "Dark", exact: true }).click();
+    const persistedChat = await restarted.page.evaluate(async () => (window as unknown as { myNotebook: any }).myNotebook.models.getRoutes({ taskKind: "chat" }));
+    expect(persistedChat).toMatchObject({ ok: true, value: [
+      { taskKind: "chat", position: 0, profileId: fixture.generationProfileId },
+      { taskKind: "chat", position: 1, profileId: fixture.fallbackProfileId }
+    ] });
+    await restarted.page.locator("#route-task").selectOption("embedding");
+    await expect(restarted.page.getByLabel("Embedding profile")).toHaveValue(fixture.embeddingSecondaryId);
+    const persistedEmbedding = await restarted.page.evaluate(async () => (window as unknown as { myNotebook: any }).myNotebook.models.getRoutes({ taskKind: "embedding" }));
+    expect(persistedEmbedding).toMatchObject({ ok: true, value: [{ taskKind: "embedding", position: 0, profileId: fixture.embeddingSecondaryId }] });
+  } finally {
+    if (app) await closeElectron(app);
+    await provider.close();
   }
 });
 
