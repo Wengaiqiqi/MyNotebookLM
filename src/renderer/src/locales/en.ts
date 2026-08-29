@@ -10,7 +10,7 @@ const en = {
     archive: "Archive",
     remove: "Delete project",
     emptyTitle: "Start a new research project",
-    emptyBody: "Create a project to organize sources, notes, and future research in one place.",
+    emptyBody: "Create a project to organize sources, notes, and research in one place.",
     nameLabel: "Project name",
     menu: "Project actions",
     removeConfirm: "This starts a recoverable deletion. You have 30 seconds to undo it.",
@@ -30,7 +30,7 @@ const en = {
     save: "Save changes",
     saving: "Saving…",
     openSettings: "Open settings",
-    retry: "Retry", add: "Add", edit: "Edit", delete: "Delete", loading: "Loading…"
+    retry: "Retry", add: "Add", edit: "Edit", delete: "Delete", close: "Close", focusHint: "Use Tab to move focus", loading: "Loading…"
   },
   model: {
     generation: { title: "Generation model", description: "For chat, summaries, and writing" },
@@ -132,10 +132,13 @@ const en = {
     states: { healthy: "Healthy index", unavailable: "Index unavailable", corrupt: "Index needs repair", building: "Building index", failed: "Index build failed" }
   },
   errors: {
+    auth: "Authentication failed. Check the API key and provider permissions.",
     authentication: "Authentication failed. Check the API key and provider permissions.",
     authorization: "Access was denied. Check the API key permissions and provider account.",
     builtInModelImmutable: "The built-in embedding model cannot be edited. Select it as the embedding route.",
     cancelled: "The request was cancelled. Try again.",
+    interrupted: "An interrupted task was recovered after restart. Try again.",
+    conflict: "The data changed elsewhere. Reload and try again.",
     configuration: "Check the provider address, API key, and model configuration, then retry.",
     credentialBinding: "The saved key does not match this provider address. Re-enter the API key.",
     internal: "The model service could not complete the request. Try again.",
@@ -143,6 +146,17 @@ const en = {
     indexUnavailable: "The index is temporarily unavailable. Retry or rebuild it.",
     taskConflict: "An index task is already running. Try again shortly.",
     embeddingProfileUnavailable: "The embedding model is unavailable. Check model settings and retry.",
+    unsupportedFormat: "This file format is not supported. Choose PDF, DOCX, PPTX, XLSX, TXT, Markdown, or CSV.",
+    unsafeInput: "Source validation failed. Check the file or URL and try again.",
+    generationProfileMissing: "No generation model is configured. Open model services to fix it.",
+    chatArchived: "This conversation is archived. Create or restore a conversation.",
+    chatSendInFlight: "A reply is already generating. Wait for it to finish or stop it before retrying.",
+    chatRegenerateSuperseded: "This reply has been superseded and cannot be regenerated.",
+    chatCancelled: "The reply was stopped.",
+    providerFailure: "The model service request failed. Check its status and retry.",
+    providerIncomplete: "The model service did not finish the reply. Try again.",
+    citationOpenFailed: "The source could not be opened. Check the source file or URL.",
+    sourceUnavailable: "The source is unavailable. Re-import it or check its location.",
     notFound: "The requested resource could not be found. Reload settings.",
     modelCapability: "This provider or model does not support the required capability. Choose another model.",
     modelNotFound: "The model was not found. Fetch models again or enter a valid model name.",
@@ -175,8 +189,8 @@ const en = {
       repair: "Repair answer"
     },
     ui: {
-      conversations: "Conversations", newConversation: "New conversation", rename: "Rename", archive: "Archive", remove: "Delete", saveTitle: "Save conversation title", noConversations: "No conversations yet.", conversationTitle: "Conversation title",
-      citationTitle: "Source citations", citationEmpty: "Citations from answers will appear here.", openOriginal: "Open original source", opened: "Opened {{kind}}", sourceLabel: "Existing sources", indexed: "indexed", research: "Research", researchChat: "Research chat", askPlaceholder: "Ask about your sources…", model: "Model", generationModel: "Generation model", noModel: "No model", send: "Send", stop: "Stop", copy: "Copy", regenerate: "Regenerate", answerFailed: "Answer failed.", retryAnswer: "Retry answer", fallbackBanner: "The primary model was unavailable. The answer continued with a fallback model.", unavailableTitle: "Research chat is unavailable until a source is indexed and a generation model is configured.", unavailableImport: "Import a source and rebuild the index after processing completes.", unavailableModel: "Configure a generation model in settings to ask questions.", importSources: "Import sources", openSettings: "Open settings", rebuildIndex: "Rebuild index", pending: "pending", ready: "ready", sourceProgress: "{{stage}} · {{progress}}%", page: "Page", slide: "Slide", sheet: "Sheet", cell: "Cell"
+      conversations: "Conversations", rename: "Rename", remove: "Delete", saveTitle: "Save conversation title", noConversations: "No conversations yet.", conversationTitle: "Conversation title", viewDetails: "View details",
+      citationTitle: "Source citations", citationEmpty: "Citations from answers will appear here.", openOriginal: "Open original source", opened: "Opened {{kind}}", sourceLabel: "Existing sources", indexed: "indexed", indexedLabel: "Indexed", processingComplete: "Processing complete", research: "Research", researchChat: "Research chat", askPlaceholder: "Ask about your sources…", model: "Model", generationModel: "Generation model", noModel: "No model", send: "Send", stop: "Stop", copy: "Copy", regenerate: "Regenerate", answerFailed: "Answer failed.", retryAnswer: "Retry answer", fallbackBanner: "The primary model was unavailable. The answer continued with a fallback model.", unavailableTitle: "Research chat is unavailable until a source is indexed and a generation model is configured.", unavailableImport: "Import a source and rebuild the index after processing completes.", unavailableModel: "Configure a generation model in settings to ask questions.", importSources: "Import sources", openSettings: "Open settings", rebuildIndex: "Rebuild index", pending: "pending", ready: "ready", sourceProgress: "{{stage}} · {{progress}}%", page: "Page", slide: "Slide", sheet: "Sheet", cell: "Cell"
     }
   },
   research: {
@@ -187,8 +201,8 @@ const en = {
     noSourcesBody: "Imported sources and citations will appear here.",
     ask: "Ask about this project",
     sourceImportUnavailable: "Import files or web pages to start your research.",
-    researchChatUnavailable: "Research chat will be available after source import.",
-    settingsUnavailable: "Settings will be available in a later step.",
+    researchChatUnavailable: "Import a source to enable research chat.",
+    settingsUnavailable: "Open settings to configure model services.",
     chooseFiles: "Choose files",
     importUrl: "Import URL",
     webAddress: "Web address",

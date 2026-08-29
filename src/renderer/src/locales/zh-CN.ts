@@ -10,7 +10,7 @@ const zhCN = {
     archive: "归档",
     remove: "删除项目",
     emptyTitle: "开始新的研究项目",
-    emptyBody: "创建项目，在一处整理资料、笔记与后续研究。",
+    emptyBody: "创建项目，在一处整理资料、笔记与研究。",
     nameLabel: "项目名称",
     menu: "项目操作",
     removeConfirm: "项目将进入可恢复删除状态，你有 30 秒可以撤销。",
@@ -30,7 +30,7 @@ const zhCN = {
     save: "保存更改",
     saving: "正在保存…",
     openSettings: "打开设置",
-    retry: "重试", add: "添加", edit: "编辑", delete: "删除", loading: "正在加载…"
+    retry: "重试", add: "添加", edit: "编辑", delete: "删除", close: "关闭", focusHint: "使用 Tab 键移动焦点", loading: "正在加载…"
   },
   model: {
     generation: { title: "生成模型", description: "用于对话、总结与内容生成" },
@@ -87,7 +87,7 @@ const zhCN = {
     description: "为每类任务选择首选模型与有序回退链路。",
     task: "任务",
     orderedRoute: "有序模型路由",
-    fallbackRule: "优先使用第一个可用模型，仅在可恢复失败时使用后续配置。",
+    fallbackRule: "优先使用第一个可用模型，仅在可恢复失败时使用备用配置。",
     embeddingRule: "嵌入仅使用一个配置",
     embeddingProfile: "嵌入配置",
     chooseEmbeddingProfile: "选择嵌入配置",
@@ -132,10 +132,13 @@ const zhCN = {
     states: { healthy: "索引正常", unavailable: "索引不可用", corrupt: "索引需要修复", building: "正在建立索引", failed: "索引建立失败" }
   },
   errors: {
+    auth: "身份验证失败，请检查 API Key 和提供商权限。",
     authentication: "身份验证失败，请检查 API Key 和提供商权限。",
     authorization: "访问被拒绝，请检查 API Key 权限和提供商账户。",
     builtInModelImmutable: "内置嵌入模型不可编辑，请将它直接选为嵌入路由。",
     cancelled: "请求已取消，请重试。",
+    interrupted: "应用重启后恢复了中断任务，请重试。",
+    conflict: "数据已发生变化，请重新加载后重试。",
     configuration: "请检查提供商地址、API Key 和模型配置后重试。",
     credentialBinding: "已保存的密钥与当前提供商地址不匹配，请重新输入 API Key。",
     internal: "模型服务无法完成请求，请重试。",
@@ -143,6 +146,17 @@ const zhCN = {
     indexUnavailable: "索引暂时不可用，请重试或重建。",
     taskConflict: "已有索引任务正在运行，请稍后再试。",
     embeddingProfileUnavailable: "嵌入模型不可用，请检查模型设置后重试。",
+    unsupportedFormat: "不支持此文件格式，请选择 PDF、DOCX、PPTX、XLSX、TXT、Markdown 或 CSV。",
+    unsafeInput: "来源校验失败，请检查文件或网址后重试。",
+    generationProfileMissing: "尚未配置生成模型，请打开模型服务设置。",
+    chatArchived: "此对话已归档，请新建或恢复一个对话。",
+    chatSendInFlight: "已有回答正在生成，请等待完成或停止后重试。",
+    chatRegenerateSuperseded: "此回答已被更新，无法再次生成。",
+    chatCancelled: "回答已停止。",
+    providerFailure: "模型服务请求失败，请检查服务状态后重试。",
+    providerIncomplete: "模型服务未完成回答，请重试。",
+    citationOpenFailed: "无法打开来源，请检查来源文件或网址。",
+    sourceUnavailable: "来源不可用，请重新导入或检查来源。",
     notFound: "找不到请求的资源，请重新加载设置。",
     modelCapability: "此提供商或模型不支持所需能力，请选择其他模型。",
     modelNotFound: "未找到该模型，请重新获取模型或输入有效的模型名称。",
@@ -175,8 +189,8 @@ const zhCN = {
       repair: "修复回答"
     },
     ui: {
-      conversations: "对话", newConversation: "新建对话", rename: "重命名", archive: "归档", remove: "删除", saveTitle: "保存对话标题", noConversations: "暂无对话。", conversationTitle: "对话标题",
-      citationTitle: "来源引用", citationEmpty: "回答中的引用会显示在这里。", openOriginal: "打开原始来源", opened: "已打开{{kind}}", sourceLabel: "已有资料", indexed: "已建立索引", research: "研究", researchChat: "研究对话", askPlaceholder: "针对来源提问…", model: "模型", generationModel: "生成模型", noModel: "无模型", send: "发送", stop: "停止", copy: "复制", regenerate: "重新生成", answerFailed: "回答失败。", retryAnswer: "重试回答", fallbackBanner: "首选模型暂时不可用，回答已切换到回退模型。", unavailableTitle: "至少建立一个来源索引并配置生成模型后才能使用研究对话。", unavailableImport: "导入来源，并在处理完成后重建索引。", unavailableModel: "请在设置中配置生成模型后提问。", importSources: "导入来源", openSettings: "打开设置", rebuildIndex: "重建索引", pending: "待处理", ready: "已就绪", sourceProgress: "{{stage}} · {{progress}}%", page: "第", slide: "幻灯片", sheet: "工作表", cell: "单元格"
+      conversations: "对话", rename: "重命名", remove: "删除", saveTitle: "保存对话标题", noConversations: "暂无对话。", conversationTitle: "对话标题", viewDetails: "查看详细",
+      citationTitle: "来源引用", citationEmpty: "回答中的引用会显示在这里。", openOriginal: "打开原始来源", opened: "已打开{{kind}}", sourceLabel: "已有资料", indexed: "已建立索引", indexedLabel: "已建立索引", processingComplete: "资料处理完成", research: "研究", researchChat: "研究对话", askPlaceholder: "针对来源提问…", model: "模型", generationModel: "生成模型", noModel: "无模型", send: "发送", stop: "停止", copy: "复制", regenerate: "重新生成", answerFailed: "回答失败。", retryAnswer: "重试回答", fallbackBanner: "首选模型暂时不可用，回答已切换到回退模型。", unavailableTitle: "至少建立一个来源索引并配置生成模型后才能使用研究对话。", unavailableImport: "导入来源，并在处理完成后重建索引。", unavailableModel: "请在设置中配置生成模型后提问。", importSources: "导入来源", openSettings: "打开设置", rebuildIndex: "重建索引", pending: "待处理", ready: "已就绪", sourceProgress: "{{stage}} · {{progress}}%", page: "第", slide: "幻灯片", sheet: "工作表", cell: "单元格"
     }
   },
   research: {
@@ -187,8 +201,8 @@ const zhCN = {
     noSourcesBody: "导入的来源与引用内容将在这里显示。",
     ask: "针对这个项目提问",
     sourceImportUnavailable: "导入文件或网页，开始你的研究。",
-    researchChatUnavailable: "研究对话将在资料导入功能提供后可用。",
-    settingsUnavailable: "设置将在后续步骤中提供。",
+    researchChatUnavailable: "导入资料后即可使用研究对话。",
+    settingsUnavailable: "打开设置即可配置模型服务。",
     chooseFiles: "选择文件",
     importUrl: "导入网址",
     webAddress: "网页地址",

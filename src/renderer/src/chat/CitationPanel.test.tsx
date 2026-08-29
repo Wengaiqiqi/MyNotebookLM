@@ -17,7 +17,10 @@ describe("CitationPanel", () => {
     const card = view.container.querySelector(".citation-detail");
     expect(card?.classList.contains("selected")).toBe(true);
     expect(card?.querySelector(".citation-badge")?.textContent).toBe("S1");
-    fireEvent.click(screen.getByRole("button", { name: /Open original source|打开原始来源/ }));
+    expect(view.container.querySelector(".citation-kind-icon.source-kind-icon-pdf")).toBeTruthy();
+    expect(screen.getByText(/Page 4|第 4/)).toBeTruthy();
+    expect(screen.getByText("A useful finding.")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: /View details|查看详细/ }));
     await waitFor(() => expect(open).toHaveBeenCalledWith({ projectId: "project-1", citationId: "citation-1" }));
   });
 
@@ -27,7 +30,7 @@ describe("CitationPanel", () => {
     HTMLElement.prototype.scrollIntoView = scrollIntoView;
     const view = render(<CitationPanel citations={[citation, citationTwo, citationThree]} selected={citationThree} projectId="project-1" />);
     expect(view.container.querySelector('[role="list"]')).toBeNull();
-    expect(view.container.querySelectorAll("span")).toHaveLength(2);
+    expect(view.container.querySelectorAll(".citation-kind-icon")).toHaveLength(2);
     expect(view.container.querySelectorAll("article")).toHaveLength(2);
     fireEvent.click(view.container.querySelector(".citation-detail:not(.selected)")!);
     await waitFor(() => expect(scrollIntoView).toHaveBeenCalled());

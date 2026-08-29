@@ -114,6 +114,7 @@ export const sourceDtoSchema = z.object({
   updatedAt: z.iso.datetime(),
   deletedAt: z.iso.datetime().nullable()
   ,locator: z.string().trim().min(1).optional()
+  ,sizeBytes: nonNegativeInteger.optional()
   ,currentRevisionState: sourceRevisionStateSchema.optional()
 }).strict();
 

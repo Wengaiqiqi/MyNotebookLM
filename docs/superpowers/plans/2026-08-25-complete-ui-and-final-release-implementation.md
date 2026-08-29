@@ -204,12 +204,12 @@ No new visual asset commit is created for this waived gate. The documentation ch
 - Create: `src/renderer/src/accessibility.test.tsx`
 - Modify: `e2e/desktop.spec.ts`
 
-- [ ] Add a failing recursive locale-key/value-shape equality test covering every new view/error/stage/action.
-- [ ] Test keyboard traversal, visible focus, dialog trapping/restoration, escape behavior, aria labels/live regions, contrast variable pairs and 200% zoom without clipped primary actions.
-- [ ] Test restart recovery for onboarding, theme/language, selected project, in-progress tasks, conversations, notes and active Space.
-- [ ] Capture critical screens in zh-CN/light and en/dark. Store under `docs/verification/screenshots/` and list against approved images.
-- [ ] Remove every placeholder/disabled title from the old foundation and search for forbidden copy with `rg -n "后续|稍后提供|later step|Unavailable|disabled title" src` (the legitimate onboarding action `稍后配置模型` is the only reviewed exception).
-- [ ] Run Gate F from the master plan; review and commit `feat: finish bilingual accessible desktop ui`.
+- [x] Add a failing recursive locale-key/value-shape equality test covering every new view/error/stage/action. Evidence: `src/renderer/src/i18n.test.ts` recursive key/shape checks pass; focused i18n+accessibility 2 files / 10 tests.
+- [x] Test keyboard traversal, visible focus, dialog trapping/restoration, escape behavior, aria labels/live regions, contrast variable pairs and 200% zoom without clipped primary actions. Evidence: `src/renderer/src/accessibility.test.tsx` (modal inert/aria-hidden, focus trap, Escape, live regions, contrast variables, 200% zoom geometry) plus Electron E2E at 200% zoom.
+- [x] Test restart recovery for onboarding, theme/language, selected project, in-progress tasks, conversations, notes and active Space. Evidence: `App.test.ts` selected-project restore test and E2E "Task 8 restart recovery retains selected project, appearance, and notes".
+- [x] Capture critical screens in zh-CN/light and en/dark. Store under `docs/verification/screenshots/` and list against approved images. Evidence (2026-08-29): refreshed research-chat zh-light/en-dark at 1802x1128 after the citation-bottom alignment fix; citation/composer bottom delta <= 1px asserted in E2E.
+- [x] Remove every placeholder/disabled title from the old foundation and search for forbidden copy with `rg -n "后续|稍后提供|later step|Unavailable|disabled title" src` (the legitimate onboarding action `稍后配置模型` is the only reviewed exception). Evidence: 2026-08-29 rerun - remaining "Unavailable" hits are legitimate error/unavailable-state messages reviewed in Task 3-8; no placeholder/disabled titles remain.
+- [x] Run Gate F from the master plan; review and commit `feat: finish bilingual accessible desktop ui`. Evidence (2026-08-29): full suite 105 files / 980 tests, `npm run typecheck`, `npm run build`, `git diff --check`, Task 8 Electron E2E 1/1. Gate F written user approval received 2026-08-29 for the refreshed research-chat screenshots.
 
 ## Task 9: Full Functional, Security and Failure Test Matrix
 

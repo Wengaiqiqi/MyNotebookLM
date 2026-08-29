@@ -3,6 +3,7 @@ import type { CitationDto } from "../../../shared/chat";
 import type { DesktopApi } from "../../../shared/ipc";
 import { useTranslation } from "react-i18next";
 import "../i18n";
+import SourceKindIcon from "../sources/SourceKindIcon";
 
 type CitationApi = DesktopApi["citations"];
 export interface CitationPanelProps {
@@ -20,6 +21,8 @@ function locatorText(citation: CitationDto, translate: (key: string) => string):
   if (locator.kind === "cell") return `${translate("chat.ui.cell")} ${locator.cellRef}`;
   return locator.kind;
 }
+
+function citationIcon(kind: string): React.ReactNode { return <SourceKindIcon kind={kind as Parameters<typeof SourceKindIcon>[0]["kind"]} />; }
 
 export default function CitationPanel({ citations, selected, projectId, openCitation = typeof window === "undefined" ? undefined : window.myNotebook?.citations.open }: CitationPanelProps) {
   const { t: translate } = useTranslation();
@@ -48,7 +51,7 @@ export default function CitationPanel({ citations, selected, projectId, openCita
   return <aside className="citation-panel" aria-label={t("chat.ui.citationTitle", "Source citations")}>
     <header><h3>{t("chat.ui.citationTitle", "Source citations")}</h3></header>
     {citations.length === 0 ? <p className="citation-empty">{t("chat.ui.citationEmpty", "Citations from answers will appear here.")}</p> : <>
-      <div className="citation-cards">{uniqueCitations.map((citation) => <article ref={(node) => { cardRefs.current[citation.label] = node; }} className={`citation-detail${active?.label === citation.label ? " selected" : ""}`} key={citation.label} onClick={() => setActiveLabel(citation.label)}><div className="citation-source-heading"><strong className="citation-badge">{citation.label}</strong><div><span>{citation.sourceDisplayName}</span><small>{citation.sourceKind} · {locatorText(citation, (key) => locatorLabel(key, key.split(".").pop() ?? key))}</small></div></div>{citation.quote ? <blockquote>{citation.quote}</blockquote> : null}<button type="button" onClick={(event) => { event.stopPropagation(); void open(citation); }}>{t("chat.ui.openOriginal", "Open original source")}</button>{status && active?.label === citation.label ? <p role="status">{status}</p> : null}</article>)}</div>
+      <div className="citation-cards">{uniqueCitations.map((citation) => <article ref={(node) => { cardRefs.current[citation.label] = node; }} className={`citation-detail${active?.label === citation.label ? " selected" : ""}`} key={citation.label} onClick={() => setActiveLabel(citation.label)}><div className="citation-source-heading"><strong className="citation-badge">{citation.label}</strong><span className={`citation-kind-icon source-kind-icon-${citation.sourceKind}`} aria-hidden="true">{citationIcon(citation.sourceKind)}</span><div><span>{citation.sourceDisplayName}</span><small>{citation.sourceKind} · {locatorText(citation, (key) => locatorLabel(key, key.split(".").pop() ?? key))}</small></div></div>{citation.quote ? <blockquote>{citation.quote}</blockquote> : null}<button type="button" onClick={(event) => { event.stopPropagation(); void open(citation); }}>{t("chat.ui.viewDetails", "View details")}</button>{status && active?.label === citation.label ? <p role="status">{status}</p> : null}</article>)}</div>
     </>}
   </aside>;
 }

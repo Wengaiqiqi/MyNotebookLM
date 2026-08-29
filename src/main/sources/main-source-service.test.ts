@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { MainSourceService } from "./main-source-service";
@@ -140,5 +140,48 @@ describe("main source import orchestration", () => {
     const row = { id: "task", project_id: "project", source_id: null, kind: "ingest", state: "failed", stage: "parsing", progress_1000: 0, attempt: 0, error_code: "PROVIDER", error_message: "provider failed: api_key=SECRET", idempotency_key: null, created_at: "now", updated_at: "now" };
     const service = new MainSourceService({ prepare: vi.fn(() => ({ all: () => [row] })) } as any, {} as any, {} as any);
     expect(service.listTasks("project")[0]?.error).toEqual({ code: "PROVIDER", messageKey: "errors.provider", recoverable: true });
+  });
+
+  it("returns managed file size without exposing its stored path", () => {
+    const root = mkdtempSync(path.join(tmpdir(), "mynotebooklm-source-size-"));
+    const stored = path.join(root, "managed.bin");
+    writeFileSync(stored, "123456");
+    const row = { id: "22222222-2222-4222-8222-222222222222", project_id: "11111111-1111-4111-8111-111111111111", kind: "pdf", display_name: "Report.pdf", status: "active", current_revision_id: "33333333-3333-4333-8333-333333333333", created_at: "2026-01-01T00:00:00.000Z", updated_at: "2026-01-01T00:00:00.000Z", deleted_at: null, current_locator: "C:\\original\\Report.pdf", current_stored_path: stored, current_revision_state: "ready" };
+    try {
+      const db = { prepare: vi.fn(() => ({ all: () => [row] })) } as any;
+      const service = new MainSourceService(db, {} as any, {} as any, root);
+      const result = service.listSources(row.project_id)[0]!;
+      expect(result.sizeBytes).toBe(6);
+      expect(result).not.toHaveProperty("storedPath");
+      expect(result.locator).toBe("Report.pdf");
+    } finally { rmSync(root, { recursive: true, force: true }); }
+  });
+
+  it("omits size when the managed file is unavailable or the source is a URL", () => {
+    const rows = [
+      { id: "22222222-2222-4222-8222-222222222222", project_id: "project", kind: "pdf", display_name: "Missing.pdf", status: "active", current_revision_id: null, created_at: "2026-01-01T00:00:00.000Z", updated_at: "2026-01-01T00:00:00.000Z", deleted_at: null, current_locator: "C:\\original\\Missing.pdf", current_stored_path: "C:\\missing\\managed.pdf", current_revision_state: "ready" },
+      { id: "33333333-3333-4333-8333-333333333333", project_id: "project", kind: "url", display_name: "Public", status: "active", current_revision_id: null, created_at: "2026-01-01T00:00:00.000Z", updated_at: "2026-01-01T00:00:00.000Z", deleted_at: null, current_locator: "https://example.com/public", current_stored_path: "C:\\managed\\secret", current_revision_state: "ready" }
+    ];
+    const db = { prepare: vi.fn(() => ({ all: () => rows })) } as any;
+    const result = new MainSourceService(db, {} as any, {} as any).listSources("project");
+    expect(result[0]).not.toHaveProperty("sizeBytes");
+    expect(result[1]).not.toHaveProperty("sizeBytes");
+    expect(result[1]).not.toHaveProperty("storedPath");
+    expect(result[1]?.locator).toBe("https://example.com/public");
+  });
+
+  it("omits size for managed paths outside the storage root and intermediate symlinks", () => {
+    const root = mkdtempSync(path.join(tmpdir(), "mynotebooklm-source-boundary-"));
+    const outside = mkdtempSync(path.join(tmpdir(), "mynotebooklm-source-outside-"));
+    const file = path.join(outside, "outside.txt"); writeFileSync(file, "outside");
+    const linkDir = path.join(root, "link-dir");
+    try {
+      const row = (stored: string) => ({ id: "22222222-2222-4222-8222-222222222222", project_id: "project", kind: "text", display_name: "Note", status: "active", current_revision_id: "revision", created_at: "now", updated_at: "now", deleted_at: null, current_locator: "Note.txt", current_stored_path: stored, current_revision_state: "ready" });
+      const outsideResult = new MainSourceService({ prepare: vi.fn(() => ({ all: () => [row(file)] })) } as any, {} as any, {} as any, root).listSources("project");
+      expect(outsideResult[0]).not.toHaveProperty("sizeBytes");
+      symlinkSync(outside, linkDir, process.platform === "win32" ? "junction" : "dir");
+      const symlinkResult = new MainSourceService({ prepare: vi.fn(() => ({ all: () => [row(path.join(linkDir, "outside.txt"))] })) } as any, {} as any, {} as any, root).listSources("project");
+      expect(symlinkResult[0]).not.toHaveProperty("sizeBytes");
+    } finally { rmSync(root, { recursive: true, force: true }); rmSync(outside, { recursive: true, force: true }); }
   });
 });

@@ -60,6 +60,18 @@ async function captureRoutingScreenshot(page: Page, filePath: string): Promise<v
   expect(image.readUInt32BE(20)).toBe(1128);
 }
 
+async function expectReachableAtCurrentZoom(page: Page, locator: ReturnType<Page["locator"]>): Promise<void> {
+  await locator.evaluate((element) => element.scrollIntoView({ block: "center", inline: "nearest" }));
+  await expect(locator).toBeVisible();
+  const box = await locator.boundingBox();
+  const viewport = await page.evaluate(() => ({ width: window.innerWidth, height: window.innerHeight }));
+  if (!box) throw new Error("missing control bounds");
+  expect(box.x).toBeGreaterThanOrEqual(0);
+  expect(box.y).toBeGreaterThanOrEqual(0);
+  expect(box.x + box.width).toBeLessThanOrEqual(viewport.width + 1);
+  expect(box.y + box.height).toBeLessThanOrEqual(viewport.height + 1);
+}
+
 async function skipOnboarding(page: Page): Promise<void> {
   const skip = page.getByRole("button", { name: /稍后配置模型|Configure later/ });
   await page.waitForFunction(() => [...document.querySelectorAll("button")].some((candidate) => {
@@ -71,7 +83,7 @@ async function skipOnboarding(page: Page): Promise<void> {
   await expect(page.getByRole("button", { name: /新建项目|New project/ }).first()).toBeEnabled();
 }
 
-async function startFakeOpenAi(): Promise<{ baseUrl: string; requests: FakeOpenAiRequest[]; close(): Promise<void> }> {
+async function startFakeOpenAi(options: { chatDelayMs?: number } = {}): Promise<{ baseUrl: string; requests: FakeOpenAiRequest[]; close(): Promise<void> }> {
   const requests: FakeOpenAiRequest[] = [];
   const server = http.createServer(async (request, response) => {
     let body: Record<string, unknown> | undefined;
@@ -92,6 +104,7 @@ async function startFakeOpenAi(): Promise<{ baseUrl: string; requests: FakeOpenA
       return;
     }
     if (request.method === "POST" && request.url === "/v1/chat/completions") {
+      if (options.chatDelayMs) await new Promise((resolve) => setTimeout(resolve, options.chatDelayMs));
       response.writeHead(200, { "content-type": "text/event-stream" });
       response.end(
         'data: {"choices":[{"delta":{"content":"Grounded alpha "}}]}\n\n'
@@ -397,6 +410,173 @@ test("persists a project across desktop restarts", async ({}, testInfo) => {
   }
 });
 
+test("Task 8 restart recovery retains selected project, appearance, and notes", async ({}, testInfo) => {
+  test.setTimeout(90_000);
+  const userDataDir = testInfo.outputPath("user-data");
+  await fs.mkdir(userDataDir, { recursive: true });
+  const provider = await startFakeOpenAi({ chatDelayMs: 5000 });
+  let first = await launchWithUserData(userDataDir);
+  let selectedProjectId = "";
+  let conversationId = "";
+  let assistantMessageId = "";
+  let assistantContent = "";
+  let noteId = "";
+  let migrationTaskId = "";
+  let inProgressTaskId = "";
+  try {
+    await skipOnboarding(first.page);
+    await first.page.getByRole("button", { name: "新建项目" }).first().click();
+    await first.page.getByLabel("项目名称").fill("恢复项目 A");
+    await first.page.getByRole("button", { name: "确认" }).click();
+    await first.page.getByRole("button", { name: "新建项目" }).first().click();
+    await first.page.getByLabel("项目名称").fill("恢复项目 B");
+    await first.page.getByRole("button", { name: "确认" }).click();
+    await first.page.getByText("恢复项目 B").first().click();
+    const seedProject = await first.page.evaluate(async () => (await (window as unknown as { myNotebook: any }).myNotebook.projects.list()).find((item: { name: string }) => item.name === "恢复项目 B"));
+    if (!seedProject) throw new Error("seed project missing");
+    await first.app.close();
+    const seedDatabase = new Database(path.join(userDataDir, "data", "app.db"));
+    try {
+      const sourceId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1";
+      const revisionId = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb1";
+      const chunkId = "cccccccc-cccc-4ccc-8ccc-ccccccccccc1";
+      const now = new Date().toISOString();
+      seedDatabase.prepare("INSERT INTO sources(id, project_id, kind, display_name, status) VALUES (?, ?, 'text', ?, 'active')").run(sourceId, seedProject.id, "Recovery source");
+      seedDatabase.prepare("INSERT INTO source_revisions(id, source_id, original_path, stored_path, source_hash, locator_kind, chunking_version, state, activated_at) VALUES (?, ?, ?, ?, ?, 'paragraph', 'persisted', 'ready', ?)").run(revisionId, sourceId, "recovery-source.txt", "recovery-source.txt", "sha256:recovery-source", now);
+      seedDatabase.prepare("UPDATE sources SET current_revision_id = ? WHERE id = ?").run(revisionId, sourceId);
+      seedDatabase.prepare("INSERT INTO source_chunks(id, revision_id, ordinal, content_hash, text, locator_json) VALUES (?, ?, 0, ?, ?, ?)").run(chunkId, revisionId, "sha256:recovery-chunk", "Persisted recovery source evidence.", JSON.stringify({ kind: "paragraph", paragraph: 1 }));
+    } finally {
+      seedDatabase.close();
+    }
+    first = await launchWithUserData(userDataDir);
+    const recovery = await first.page.evaluate(async ({ baseUrl }) => {
+      const api = (window as unknown as { myNotebook: any }).myNotebook;
+      const project = (await api.projects.list()).find((item: { name: string }) => item.name === "恢复项目 B");
+      if (!project) throw new Error("selected project missing");
+      const settings = await api.settings.update({ locale: "en", theme: "dark" });
+      if (!settings.ok) throw new Error(`settings: ${settings.error.code}`);
+      const note = await api.notes?.create({ projectId: project.id, title: "Recovered note", body: "# Persisted evidence" });
+      if (!note?.ok) throw new Error(`note: ${note?.error?.code ?? "unavailable"}`);
+      const conversation = await api.conversations.create({ projectId: project.id, title: "Recovered conversation" });
+      if (!conversation.ok) throw new Error(`conversation: ${conversation.error.code}`);
+      const embedding = await api.models.saveProfile({ profile: { id: "99999999-9999-4999-8999-999999999991", name: "Recovery embedding", provider: "openai-compatible", capability: "embedding", baseUrl, modelId: "text-embedding-e2e", enabled: true }, apiKey: "recovery-key" });
+      if (!embedding.ok) throw new Error(`embedding: ${embedding.error.code}`);
+      const generation = await api.models.saveProfile({ profile: { id: "99999999-9999-4999-8999-999999999992", name: "Recovery generation", provider: "openai-compatible", capability: "generation", baseUrl, modelId: "gpt-e2e", enabled: true }, apiKey: "recovery-key" });
+      if (!generation.ok) throw new Error(`generation: ${generation.error.code}`);
+      const route = await api.models.setDefaultRoutes({ generationProfileId: generation.value.id, embeddingProfileId: embedding.value.id });
+      if (!route.ok) throw new Error(`route: ${route.error.code}`);
+      const migration = await api.vector.startMigration({ projectId: project.id, profileId: embedding.value.id });
+      if (!migration.ok) throw new Error(`migration: ${migration.error.code}`);
+      return { projectId: project.id, conversationId: conversation.value.id, noteId: note.value.id, migrationTaskId: migration.value.id };
+    }, { baseUrl: provider.baseUrl });
+    selectedProjectId = recovery.projectId;
+    conversationId = recovery.conversationId;
+    noteId = recovery.noteId;
+    migrationTaskId = recovery.migrationTaskId;
+    await expect.poll(async () => first.page.evaluate(async ({ projectId }) => {
+      const tasks = await (window as unknown as { myNotebook: any }).myNotebook.tasks.list({ projectId });
+      return tasks.find((task: { kind: string }) => task.kind === "validation")?.state;
+    }, { projectId: selectedProjectId }), { timeout: 60_000 }).toBe("completed");
+    await expect.poll(async () => first.page.evaluate(async ({ projectId, taskId }) => {
+      const tasks = await (window as unknown as { myNotebook: any }).myNotebook.tasks.list({ projectId });
+      return tasks.find((task: { id: string }) => task.id === taskId)?.state;
+    }, { projectId: selectedProjectId, taskId: migrationTaskId }), { timeout: 60_000 }).toBe("completed");
+    const chat = await first.page.evaluate(async ({ projectId, conversationId }) => {
+      const api = (window as unknown as { myNotebook: any }).myNotebook;
+      const requestId = crypto.randomUUID();
+      const unsubscribe = api.chat.subscribe(requestId, () => undefined);
+      const sent = await api.chat.send({ requestId, projectId, conversationId, question: "Persisted recovery chat" });
+      unsubscribe();
+      if (!sent.ok) throw new Error(`chat: ${sent.error.code}`);
+      const messages = await api.conversations.listMessages({ projectId, conversationId });
+      if (!messages.ok) throw new Error(`messages: ${messages.error.code}`);
+      const assistant = messages.value.find((message: { id: string }) => message.id === sent.value.assistantMessageId);
+      if (!assistant || assistant.role !== "assistant" || assistant.state !== "completed" || !assistant.content) throw new Error("completed recovery chat missing");
+      return { assistantMessageId: assistant.id, assistantContent: assistant.content };
+    }, { projectId: selectedProjectId, conversationId });
+    assistantMessageId = chat.assistantMessageId;
+    assistantContent = chat.assistantContent;
+    const transformation = await first.page.evaluate(async ({ projectId, noteId }) => {
+      const api = (window as unknown as { myNotebook: any }).myNotebook;
+      const rule = await api.transformations.createRule({ projectId, name: "Recovery note summary", appliesTo: "note", prompt: "Summarize this note:\n\n{{content}}" });
+      if (!rule.ok) throw new Error(`rule: ${rule.error.code}`);
+      const started = await api.transformations.run({ projectId, transformationId: rule.value.id, noteId });
+      if (!started.ok) throw new Error(`transformation: ${started.error.code}`);
+      return started.value.id;
+    }, { projectId: selectedProjectId, noteId });
+    inProgressTaskId = transformation;
+    await expect.poll(async () => first.page.evaluate(async ({ projectId, taskId }) => {
+      const tasks = await (window as unknown as { myNotebook: any }).myNotebook.tasks.list({ projectId });
+      return tasks.find((task: { id: string }) => task.id === taskId)?.state;
+    }, { projectId: selectedProjectId, taskId: inProgressTaskId }), { timeout: 10_000 }).toBe("running");
+  } finally {
+    await first.app.close();
+  }
+  const database = new Database(path.join(userDataDir, "data", "app.db"));
+  try {
+    expect(database.prepare("SELECT state FROM embedding_spaces es JOIN project_embedding_spaces pes ON pes.space_id = es.id WHERE pes.project_id = ?").get(selectedProjectId)).toMatchObject({ state: "active" });
+  } finally {
+    database.close();
+  }
+
+  const second = await launchWithUserData(userDataDir);
+  try {
+    await expect(second.page.locator("html")).toHaveAttribute("lang", "en");
+    await expect(second.page.locator("html")).toHaveAttribute("data-theme", "dark");
+    await expect(second.page.locator(`.project-select[aria-current="page"]`)).toContainText("恢复项目 B");
+    await expect(second.page.getByRole("button", { name: "Configure later", exact: true })).toHaveCount(0);
+    await expect(second.page.getByRole("tab", { name: "Research", exact: true })).toBeVisible();
+    const recovered = await second.page.evaluate(async ({ projectId, conversationId }) => {
+      const api = (window as unknown as { myNotebook: any }).myNotebook;
+      const notes = await api.notes.list({ projectId });
+      const conversations = await api.conversations.list({ projectId });
+      const tasks = await api.tasks?.list({ projectId });
+      const messages = await api.conversations.listMessages({ projectId, conversationId });
+      return { notes, conversations, tasks, messages };
+    }, { projectId: selectedProjectId, conversationId });
+    expect(recovered.notes).toMatchObject({ ok: true, value: [expect.objectContaining({ title: "Recovered note" })] });
+    expect(recovered.conversations).toMatchObject({ ok: true, value: [expect.objectContaining({ title: "Recovered conversation" })] });
+    expect(recovered.tasks).toBeInstanceOf(Array);
+    expect(recovered.tasks).toEqual(expect.arrayContaining([expect.objectContaining({ kind: "validation", state: "completed" })]));
+    expect(recovered.tasks).toEqual(expect.arrayContaining([expect.objectContaining({ id: inProgressTaskId, kind: "transformation", state: "running" })]));
+    expect(recovered.messages).toMatchObject({ ok: true, value: expect.arrayContaining([expect.objectContaining({ id: assistantMessageId, role: "assistant", state: "completed", content: assistantContent })]) });
+    const restartedDatabase = new Database(path.join(userDataDir, "data", "app.db"));
+    try {
+      expect(restartedDatabase.prepare("SELECT state FROM embedding_spaces es JOIN project_embedding_spaces pes ON pes.space_id = es.id WHERE pes.project_id = ?").get(selectedProjectId)).toMatchObject({ state: "active" });
+    } finally {
+      restartedDatabase.close();
+    }
+    await second.page.evaluate(() => { document.documentElement.style.zoom = "2"; });
+    const settingsButton = second.page.getByRole("button", { name: "Settings", exact: true });
+    await expectReachableAtCurrentZoom(second.page, settingsButton);
+    await settingsButton.click();
+    const settingsSave = second.page.getByRole("button", { name: "Save changes", exact: true });
+    await expectReachableAtCurrentZoom(second.page, settingsSave);
+    await second.page.getByRole("button", { name: "Cancel", exact: true }).click();
+
+    const notesTab = second.page.getByRole("tab", { name: "Notes", exact: true });
+    await expectReachableAtCurrentZoom(second.page, notesTab);
+    await notesTab.click();
+    await expect(second.page.getByRole("heading", { name: "Notes", exact: true })).toBeVisible();
+    await expectReachableAtCurrentZoom(second.page, second.page.getByRole("button", { name: "Save note", exact: true }));
+
+    const transformationsTab = second.page.getByRole("tab", { name: "Transformations", exact: true });
+    await expectReachableAtCurrentZoom(second.page, transformationsTab);
+    await transformationsTab.click();
+    await expect(second.page.getByRole("heading", { name: "Transformations", exact: true })).toBeVisible();
+    await second.page.getByRole("button", { name: "New custom rule", exact: true }).click();
+    const ruleDialog = second.page.locator(".rule-dialog");
+    await expect(ruleDialog).toHaveAttribute("role", "dialog");
+    await expect(ruleDialog.getByRole("heading", { name: "New custom rule", exact: true })).toBeVisible();
+    await expectReachableAtCurrentZoom(second.page, ruleDialog.getByRole("button", { name: "Save changes", exact: true }));
+    await ruleDialog.getByRole("button", { name: "Cancel", exact: true }).click();
+    await second.page.evaluate(() => { document.documentElement.style.zoom = "1"; });
+  } finally {
+    await second.app.close();
+    await provider.close();
+  }
+});
+
 test("centers dialogs in the full viewport before and after resizing", async ({}, testInfo) => {
   const userDataDir = testInfo.outputPath("user-data");
   await fs.mkdir(userDataDir, { recursive: true });
@@ -427,9 +607,12 @@ test("centers dialogs in the full viewport before and after resizing", async ({}
   }
 });
 
-test("preload bridge completes cited RAG with a fake OpenAI-compatible provider", async ({}, testInfo) => {
+test("Task 8 real Electron RAG with fake provider and 200% chat zoom evidence", async ({}, testInfo) => {
+  test.setTimeout(90_000);
   const userDataDir = testInfo.outputPath(`user-data-${Date.now()}`);
   await fs.mkdir(userDataDir, { recursive: true });
+  const screenshotDir = testInfo.outputPath("screenshots");
+  await fs.mkdir(screenshotDir, { recursive: true });
   const provider = await startFakeOpenAi();
   const generationProfileId = "11111111-1111-4111-8111-111111111111";
   const embeddingProfileId = "22222222-2222-4222-8222-222222222222";
@@ -472,7 +655,7 @@ test("preload bridge completes cited RAG with a fake OpenAI-compatible provider"
       database.prepare("UPDATE sources SET current_revision_id = ? WHERE id = ?").run(revisionId, sourceId);
       database.prepare(
         "INSERT INTO source_chunks(id, revision_id, ordinal, content_hash, text, locator_json) VALUES (?, ?, 0, ?, ?, ?)"
-      ).run(chunkId, revisionId, "sha256:alpha", "alpha evidence from the authoritative source.", JSON.stringify({ kind: "paragraph", start: 0, end: 45 }));
+      ).run(chunkId, revisionId, "sha256:alpha", "alpha evidence from the authoritative source.", JSON.stringify({ kind: "paragraph", paragraph: 1 }));
       database.prepare(
         "INSERT INTO embedding_spaces(id, project_id, provider, model_id, model_revision, dimension, distance, pooling, preprocess_version, chunking_version, fingerprint, state, progress_1000, created_at, updated_at) VALUES (?, ?, 'openai-compatible', 'text-embedding-e2e', 'text-embedding-e2e', 3, 'cosine', 'mean', 'provider-default-v1', 'persisted', ?, 'active', 1000, ?, ?)"
       ).run(bootstrapSpaceId, project.id, bootstrapFingerprint, new Date().toISOString(), new Date().toISOString());
@@ -494,7 +677,7 @@ test("preload bridge completes cited RAG with a fake OpenAI-compatible provider"
       contentHash: "sha256:alpha",
       text: "alpha evidence from the authoritative source.",
       vector: [1, 0, 0],
-      locatorJson: JSON.stringify({ kind: "paragraph", start: 0, end: 45 }),
+      locatorJson: JSON.stringify({ kind: "paragraph", paragraph: 1 }),
       createdAt: Date.now()
     }]));
     const temporaryTable = await temporaryVectors.openTable(tableName);
@@ -542,18 +725,18 @@ test("preload bridge completes cited RAG with a fake OpenAI-compatible provider"
       const hits = await api.retrieval.search({ projectId, query: "alpha", limit: 1 });
       if (!hits.ok) throw new Error(`retrieval: ${hits.error.code}`);
       if (!hits.value.some((hit: { chunkId: string }) => hit.chunkId === chunkId)) throw new Error("retrieval hit missing");
-
       const conversation = await api.conversations.create({ projectId, title: "Cited RAG" });
       if (!conversation.ok) throw new Error(`conversation: ${conversation.error.code}`);
       const requestId = crypto.randomUUID();
       const events: any[] = [];
-      let completedResolve!: () => void;
-      const completed = new Promise<void>((resolve) => { completedResolve = resolve; });
-      const unsubscribe = api.chat.subscribe(requestId, (event: any) => { events.push(event); if (event.type === "completed") completedResolve(); });
+      const unsubscribe = api.chat.subscribe(requestId, (event: any) => { events.push(event); });
       const send = await api.chat.send({ requestId, projectId, conversationId: conversation.value.id, question: "What is the alpha evidence?" });
-      await completed;
       unsubscribe();
       if (!send.ok) throw new Error(`chat: ${send.error.code}`);
+      const messages = await api.conversations.listMessages({ projectId, conversationId: conversation.value.id });
+      if (!messages.ok) throw new Error(`messages: ${messages.error.code}`);
+      const assistant = messages.value.find((message: { id: string }) => message.id === send.value.assistantMessageId);
+      if (!assistant || assistant.state !== "completed") throw new Error("completed assistant message missing");
       return {
         projectId,
         conversationId: conversation.value.id,
@@ -617,7 +800,7 @@ test("preload bridge completes cited RAG with a fake OpenAI-compatible provider"
     }, setup);
     expect(persisted.assistant.content).toContain("Grounded alpha answer [S1]");
     expect(persisted.citation).toMatchObject({ label: "S1", sourceDisplayName: "authoritative-alpha.txt" });
-    expect(persisted.citation.locator).toMatchObject({ kind: "paragraph", start: 0, end: 45 });
+    expect(persisted.citation.locator).toMatchObject({ kind: "paragraph", paragraph: 1 });
     expect(persisted.opened).toMatchObject({ ok: true, value: { opened: "document" } });
     await restarted.app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]?.setSize(1802, 1128));
     await restarted.page.waitForFunction(() => window.innerWidth >= 1700 && window.innerHeight >= 1000);
@@ -627,13 +810,17 @@ test("preload bridge completes cited RAG with a fake OpenAI-compatible provider"
       const citation = document.querySelector<HTMLElement>(".citation-panel");
       const composer = document.querySelector<HTMLElement>(".chat-composer");
       const cards = document.querySelector<HTMLElement>(".citation-cards");
-      return { citationBottom: citation?.getBoundingClientRect().bottom ?? 0, composerBottom: composer?.getBoundingClientRect().bottom ?? 0, scrollable: Boolean(cards && cards.scrollHeight > cards.clientHeight) };
+      return {
+        citationBottom: citation?.getBoundingClientRect().bottom ?? 0,
+        composerBottom: composer?.getBoundingClientRect().bottom ?? 0,
+        cardsOverflowY: cards ? getComputedStyle(cards).overflowY : ""
+      };
     });
     expect(Math.abs(geometry.citationBottom - geometry.composerBottom)).toBeLessThanOrEqual(1);
-    expect(geometry.scrollable).toBe(true);
+    expect(geometry.cardsOverflowY).toBe("auto");
     await restarted.page.getByRole("button", { name: /Cited RAG|对话/ }).click();
     await expect(restarted.page.locator(".conversation-items.open")).toBeVisible();
-    await restarted.page.screenshot({ path: path.resolve("docs/verification/screenshots/research-chat-zh-light.png"), scale: "css", clip: { x: 0, y: 0, width: 1803, height: 1128 } });
+    await restarted.page.screenshot({ path: path.join(screenshotDir, "research-chat-zh-light.png"), scale: "css", clip: { x: 0, y: 0, width: 1803, height: 1128 } });
     await restarted.page.keyboard.press("Escape");
     await expect(restarted.page.locator(".conversation-items.open")).toBeHidden();
     await restarted.page.getByRole("button", { name: "EN", exact: true }).click();
@@ -641,7 +828,12 @@ test("preload bridge completes cited RAG with a fake OpenAI-compatible provider"
     await expect(restarted.page.locator("html")).toHaveAttribute("lang", "en");
     await expect(restarted.page.locator("html")).toHaveAttribute("data-theme", "dark");
     await expect(restarted.page.getByRole("complementary", { name: "Source citations" })).toBeVisible();
-    await restarted.page.screenshot({ path: path.resolve("docs/verification/screenshots/research-chat-en-dark.png"), scale: "css", clip: { x: 0, y: 0, width: 1803, height: 1128 } });
+    await restarted.page.screenshot({ path: path.join(screenshotDir, "research-chat-en-dark.png"), scale: "css", clip: { x: 0, y: 0, width: 1803, height: 1128 } });
+
+    await restarted.page.evaluate(() => { document.documentElement.style.zoom = "2"; });
+    await expectReachableAtCurrentZoom(restarted.page, restarted.page.locator(".chat-composer textarea"));
+    await expectReachableAtCurrentZoom(restarted.page, restarted.page.getByRole("button", { name: "Send" }));
+    await restarted.page.evaluate(() => { document.documentElement.style.zoom = "1"; });
   } finally {
     await Promise.allSettled([
       app ? closeElectron(app) : Promise.resolve(),

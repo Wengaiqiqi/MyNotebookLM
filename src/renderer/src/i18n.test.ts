@@ -13,9 +13,27 @@ function flattenKeys(value: object, prefix = ""): string[] {
     .sort();
 }
 
+function shape(value: unknown): unknown {
+  if (Array.isArray(value)) return "array";
+  if (value !== null && typeof value === "object") {
+    return Object.fromEntries(Object.entries(value).sort(([a], [b]) => a.localeCompare(b)).map(([key, nested]) => [key, shape(nested)]));
+  }
+  return typeof value;
+}
+
 describe("locale resources", () => {
   it("keeps English and Chinese locale keys identical", () => {
     expect(flattenKeys(en)).toEqual(flattenKeys(zhCN));
+  });
+
+  it("keeps recursive locale value shapes and all view, error, stage, and action keys identical", () => {
+    expect(shape(en)).toEqual(shape(zhCN));
+    expect(flattenKeys(en)).toEqual(expect.arrayContaining([
+      "common.close", "common.focusHint", "common.language", "common.theme",
+      "errors.auth", "errors.conflict", "errors.interrupted", "errors.unsafeInput", "errors.unsupportedFormat",
+      "research.task.cancel", "research.task.retry", "research.task.parsing", "research.task.verifying",
+      "chat.ui.openOriginal", "notes.save", "transformations.run", "routing.saveRoute", "vector.rebuild"
+    ]));
   });
 
   it("contains every project-shell translation", () => {

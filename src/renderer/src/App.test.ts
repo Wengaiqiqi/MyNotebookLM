@@ -325,6 +325,16 @@ describe("App shell behavior", () => {
     expect(list).not.toHaveBeenCalled();
   });
 
+  it("restores the selected project after the renderer restarts", async () => {
+    const { api } = createApi([projectA, projectB]);
+    const first = await renderApp(api);
+    await click(first.querySelectorAll<HTMLButtonElement>(".project-select").item(1));
+    expect(first.querySelector('.project-select[aria-current="page"]')?.textContent).toContain(projectB.name);
+    for (const root of roots.splice(0)) await act(async () => root.unmount());
+    const second = await renderApp(api);
+    expect(second.querySelector('.project-select[aria-current="page"]')?.textContent).toContain(projectB.name);
+  });
+
   it("offers a no-drag theme control in the first-launch header", async () => {
     const { api, updateSettings } = createApi([], false);
     const container = await renderApp(api);
@@ -939,19 +949,19 @@ describe("App shell behavior", () => {
     expect(setTitleOverlayTheme).toHaveBeenCalledExactlyOnceWith({ theme: "light" });
   });
 
-  it("renders the approved disabled import formats, guidance, composer, and citations", async () => {
+  it("renders import formats, guidance, and actionable repair controls", async () => {
     const { api } = createApi([projectA]);
     const container = await renderApp(api);
-    const formats = [...container.querySelectorAll<HTMLButtonElement>(".format-choice")];
+    const formats = [...container.querySelectorAll<HTMLElement>(".format-choice")];
 
     expect(container.querySelector(".import-region")).not.toBeNull();
     expect(formats.map((choice) => choice.textContent?.trim())).toEqual([
       "PDF", "DOCX", "PPTX", "XLSX", "TXT", "Markdown", "URL", "CSV"
     ]);
-    expect(formats.every((choice) => choice.disabled)).toBe(true);
+    expect(formats.every((choice) => choice.tagName === "SPAN")).toBe(true);
     expect(container.querySelector(".guidance-card")).not.toBeNull();
-    expect(button(container, "Import sources").disabled).toBe(true);
-    expect(button(container, "Ask about this project").disabled).toBe(true);
+    expect(button(container, "Import sources").disabled).toBe(false);
+    expect(button(container, "Ask about this project").disabled).toBe(false);
     expect(container.querySelector(".sources-empty")?.textContent).toContain("No sources yet");
   });
 
@@ -961,21 +971,21 @@ describe("App shell behavior", () => {
     const importButton = button(container, "Import sources");
     const settings = button(container, "Settings");
 
-    expect(importButton.title).toBe("Import files or web pages to start your research.");
+    expect(importButton.title).toBe("");
     expect(container.querySelector(".workspace-empty p")?.textContent).toBe(
       "Import files or web pages to start your research."
     );
     expect(container.querySelector(".composer span")?.textContent).toBe(
-      "Research chat will be available after source import."
+      "Import a source to enable research chat."
     );
     expect(settings.disabled).toBe(false);
     expect(settings.title).toBe("");
 
     await click(button(container, "中文"));
 
-    expect(importButton.title).toBe("导入文件或网页，开始你的研究。");
+    expect(importButton.title).toBe("");
     expect(container.querySelector(".composer span")?.textContent).toBe(
-      "研究对话将在资料导入功能提供后可用。"
+      "导入资料后即可使用研究对话。"
     );
     expect(settings.textContent).toContain("设置");
   });

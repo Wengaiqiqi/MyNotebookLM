@@ -1,6 +1,7 @@
 import type Database from "better-sqlite3";
 import { randomUUID } from "node:crypto";
 import { lstat, readFile } from "node:fs/promises";
+import { lstatSync, realpathSync } from "node:fs";
 import path from "node:path";
 import { createHash } from "node:crypto";
 import type { SourceDto } from "../../shared/sources";
@@ -33,7 +34,7 @@ function taskError(error: unknown): TaskErrorSummaryDto {
 }
 export class MainSourceService {
   constructor(private readonly db: Database.Database, private readonly tasks: TaskService, private readonly ingestion: IngestionService, private readonly storageRoot?: string, private readonly bindRevision?: (taskId: string, revisionId: string) => void, private readonly urlSource?: UrlSource) {}
-  listSources(projectId: string): SourceDto[] { return this.db.prepare("SELECT s.*, sr.original_path AS current_locator, sr.state AS current_revision_state FROM sources s LEFT JOIN source_revisions sr ON sr.id = s.current_revision_id WHERE s.project_id = ? AND s.status <> 'deleted' ORDER BY s.updated_at DESC").all(projectId).map((row) => this.source(row as Row)); }
+  listSources(projectId: string): SourceDto[] { return this.db.prepare("SELECT s.*, sr.original_path AS current_locator, sr.stored_path AS current_stored_path, sr.state AS current_revision_state FROM sources s LEFT JOIN source_revisions sr ON sr.id = s.current_revision_id WHERE s.project_id = ? AND s.status <> 'deleted' ORDER BY s.updated_at DESC").all(projectId).map((row) => this.source(row as Row)); }
   listTasks(projectId: string): TaskDto[] { return this.db.prepare("SELECT * FROM tasks WHERE project_id = ? ORDER BY created_at DESC").all(projectId).map((row) => this.task(row as Row)); }
   ownsSource(projectId: string, sourceId: string): boolean { return Boolean(this.db.prepare("SELECT 1 FROM sources WHERE id = ? AND project_id = ? AND status <> 'deleted'").get(sourceId, projectId)); }
   ownsTask(projectId: string, taskId: string): boolean { return Boolean(this.db.prepare("SELECT 1 FROM tasks WHERE id = ? AND project_id = ?").get(taskId, projectId)); }
@@ -59,10 +60,10 @@ export class MainSourceService {
     try { if (!this.tasks.getById || this.tasks.getById(created.id)?.state === "running") this.tasks.fail(created.id, taskError(error), false); } catch { /* cancellation or deletion won the race */ }
       this.db.prepare("UPDATE source_revisions SET state = 'failed' WHERE id = ?").run(revisionId);
     });
-    return this.source(this.db.prepare("SELECT * FROM sources WHERE id = ?").get(sourceId) as Row);
+    return this.source(this.db.prepare("SELECT s.*, sr.original_path AS current_locator, sr.stored_path AS current_stored_path, sr.state AS current_revision_state FROM sources s LEFT JOIN source_revisions sr ON sr.id = s.current_revision_id WHERE s.id = ?").get(sourceId) as Row);
   }
   private kind(file: string): SourceDto["kind"] { const ext = file.toLowerCase().split(".").pop(); return ({ md: "markdown", markdown: "markdown", pdf: "pdf", docx: "docx", pptx: "pptx", xlsx: "xlsx", csv: "csv", txt: "text" } as Record<string, SourceDto["kind"]>)[ext ?? ""] ?? "text"; }
-  private source(row: Row): SourceDto { const kind = row.kind as SourceDto["kind"]; const locator = row.current_locator ? String(row.current_locator) : undefined; return { id: String(row.id), projectId: String(row.project_id), kind, displayName: String(row.display_name), status: row.status as SourceDto["status"], currentRevisionId: row.current_revision_id ? String(row.current_revision_id) : null, createdAt: String(row.created_at), updatedAt: String(row.updated_at), deletedAt: row.deleted_at ? String(row.deleted_at) : null, ...(locator ? { locator: kind === "url" ? locator : locator.split(/[\\/]/).pop()! } : {}), ...(row.current_revision_state ? { currentRevisionState: row.current_revision_state as SourceDto["currentRevisionState"] } : {}) }; }
+  private source(row: Row): SourceDto { const kind = row.kind as SourceDto["kind"]; const locator = row.current_locator ? String(row.current_locator) : undefined; const storedPath = row.current_stored_path ? String(row.current_stored_path) : undefined; let sizeBytes: number | undefined; if (kind !== "url" && this.storageRoot && storedPath) { try { const root = path.resolve(this.storageRoot); const resolved = path.resolve(storedPath); const relative = path.relative(root, resolved); if (lstatSync(root).isDirectory() && relative && relative !== ".." && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative)) { const stat = lstatSync(resolved); const canonical = path.resolve(realpathSync(resolved)); if (stat.isFile() && !stat.isSymbolicLink() && canonical === resolved) sizeBytes = stat.size; } } catch { /* source may be between staging and persistence */ } } return { id: String(row.id), projectId: String(row.project_id), kind, displayName: String(row.display_name), status: row.status as SourceDto["status"], currentRevisionId: row.current_revision_id ? String(row.current_revision_id) : null, createdAt: String(row.created_at), updatedAt: String(row.updated_at), deletedAt: row.deleted_at ? String(row.deleted_at) : null, ...(locator ? { locator: kind === "url" ? locator : locator.split(/[\\/]/).pop()! } : {}), ...(sizeBytes !== undefined ? { sizeBytes } : {}), ...(row.current_revision_state ? { currentRevisionState: row.current_revision_state as SourceDto["currentRevisionState"] } : {}) }; }
   private task(row: Row): TaskDto {
     const errorCode = typeof row.error_code === "string" && ERROR_CODES.has(row.error_code as TaskErrorSummaryDto["code"])
       ? row.error_code as TaskErrorSummaryDto["code"]

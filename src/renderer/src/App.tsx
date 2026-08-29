@@ -38,6 +38,7 @@ const menuWidth = 154;
 const menuHeight = 132;
 const menuMargin = 8;
 const menuGap = 6;
+const selectedProjectStorageKey = "mynotebooklm.selectedProject";
 
 function placeProjectMenu(
   anchor: DOMRect,
@@ -79,7 +80,7 @@ export default function App() {
   const [archivedProjects, setArchivedProjects] = useState<ProjectDto[]>([]);
   const [showArchived, setShowArchived] = useState(false);
   const [deletingProject, setDeletingProject] = useState<ProjectDto>();
-  const [selectedId, setSelectedId] = useState<string>();
+  const [selectedId, setSelectedId] = useState<string | undefined>(() => localStorage.getItem(selectedProjectStorageKey) ?? undefined);
   const [errorKey, setErrorKey] = useState<ErrorKey>();
   const [errorTarget, setErrorTarget] = useState<string>();
   const [openMenu, setOpenMenu] = useState<OpenMenu>();
@@ -194,6 +195,11 @@ export default function App() {
     syncedTitleOverlayTheme.current = theme;
     void window.myNotebook.titleOverlay.setTheme({ theme }).catch(() => undefined);
   }, [theme]);
+
+  useEffect(() => {
+    if (selectedId) localStorage.setItem(selectedProjectStorageKey, selectedId);
+    else localStorage.removeItem(selectedProjectStorageKey);
+  }, [selectedId]);
 
   useEffect(() => {
     if (settingsLoadError) settingsLoadErrorRef.current?.focus();
