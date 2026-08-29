@@ -277,13 +277,14 @@ async function main() {
         assistantContent: assistant ? assistant.content : undefined,
         hasNote: notes.value.some((item) => item.id === noteId),
         spaceId: health.value.spaceId,
-        spaceState: health.value.state,
+        spaceHealthy: health.value.healthy,
+        indexedCount: health.value.indexedCount,
         settingsOk: Boolean(settings.value)
       };
     }, { projectId: seeded.projectId, conversationId: chat.conversationId, assistantMessageId: chat.assistantMessageId, noteId: note, spaceId });
     check("restart-assistant", persisted.assistantState === "completed" && String(persisted.assistantContent).includes("Grounded alpha answer [S1]"));
     check("restart-note", persisted.hasNote);
-    check("restart-active-space", persisted.spaceId === spaceId && persisted.spaceState === "active", JSON.stringify(persisted));
+    check("restart-active-space", persisted.spaceId === spaceId && persisted.spaceHealthy === true && persisted.indexedCount >= 1, JSON.stringify(persisted));
     check("restart-settings", persisted.settingsOk);
     await closeApp(app);
     app = undefined;
@@ -301,7 +302,7 @@ async function main() {
       return {
         noteKept: notes.ok && notes.value.some((item) => item.id === noteId),
         chatOk: messages.ok && messages.value.some((message) => message.role === "assistant"),
-        spaceOk: health.ok && health.value.state === "active"
+        spaceOk: health.ok && health.value.healthy === true
       };
     }, { projectId: seeded.projectId, noteId: note, conversationId: chat.conversationId });
     check("overwrite-data-retained", retained.noteKept && retained.chatOk && retained.spaceOk, JSON.stringify(retained));
