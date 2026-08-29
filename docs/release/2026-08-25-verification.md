@@ -122,3 +122,64 @@ Identical to the pre-smoke hash. No `package`/`build` command was run after pack
 ## Delivery status
 
 The installer is an immutable candidate artifact with verified hash, but per the Completion Gate ("never reuse the failed candidate or claim partial completion") the packaged-exe launch failure and the unexecuted smoke items must be resolved (source fix + new candidate + fresh gates) before this build may be declared the final verified release.
+
+## Task 10 re-verification — Candidate 2 after root-cause fix (2026-08-30)
+
+### Original candidate failure — corrected root cause
+
+Candidate 1 (359,802,370 bytes, SHA-256 `9522DB07D5540788E0254DBED35ACC5DCBB44FB803241B5795750E5298F3EEEF`) failed to open a window. The earlier "migrations ENOENT" hypothesis was an artifact of the reproduction method: running the packaged asar under the dev Electron binary always hits the `app.isPackaged === false` asar-relative migrations branch and explains nothing about the packaged exe. The real packaged-exe failure was captured by dumping the blocking dialog via UI Automation — Electron showed a modal "A JavaScript error occurred in the main process" dialog (process alive, windowless, CDP never opened, stderr empty):
+
+`Error: Cannot find module 'apache-arrow'` — require stack `app.asar/node_modules/@lancedb/lancedb/dist/connection.js`.
+
+`apache-arrow` is a peerDependency of `@lancedb/lancedb@0.37.1` (range `>=15.0.0 <=18.1.0`). electron-builder only walks regular production dependencies into the asar, so the peer never landed in the package (verified by asar listing: installed locally at `node_modules/apache-arrow@18.1.0`, absent from candidate 1's asar). The migrations handling itself was verified correct as-is: all 12 migration SQL files ship under `resources/migrations` via extraResources and the packaged branch resolves there, so no main-process change was needed.
+
+### Fix (minimal, TDD)
+
+- `package.json`: added `"apache-arrow": "18.1.0"` to `dependencies` (exact pin inside the lancedb peer range; `npm ls apache-arrow` shows the top-level entry deduped into `@lancedb/lancedb`).
+- New regression test `src/main/db/packaged-dependencies.test.ts`, written RED first (failed while the dependency was missing) and GREEN after the fix: asserts every non-`@types` runtime peerDependency of `@lancedb/lancedb` is declared by the app, so the packaged dependency closure cannot silently lose a peer again.
+- `scripts/installer-smoke.mjs`: corrected the `restart-active-space` and `overwrite-data-retained` assertions to the real `vectorHealthSchema` contract (`{ spaceId, healthy, indexedCount }` — the schema has no `state` field), fixing smoke-script/contract drift rather than product behavior.
+
+### Gates (exact, all green)
+
+| Command | Exit code | Result |
+| --- | --- | --- |
+| `npm test` | 0 | 109 files / 999 tests passed (includes the new regression test) |
+| `npm run typecheck` | 0 | node + web tsc projects clean |
+| `npm run build` | 0 | electron-vite production build |
+| `npm run test:e2e` | 0 | 20/20 passed (1.6m) |
+
+### Repackage (246 amended)
+
+Two interim `npm run package:win` attempts failed before producing an installer and were retried in place: one `EBUSY` (a stale dev-electron diagnostic process still held `app.asar`; processes closed, no artifact state changed) and one GitHub download `ETIMEDOUT` (network flake). The following run completed with exit code 0 and wrote the new candidate to the same path, replacing the failed candidate 1 (allowed failure-fix-repackage flow).
+
+### New installer identity (247 amended)
+
+| Property | Value |
+| --- | --- |
+| Path | `D:\fix\mynotebokklm\.worktrees\desktop-foundation\dist\MyNotebookLM-Setup-1.0.0.exe` |
+| Byte size | 360,399,111 |
+| SHA-256 (pre-smoke) | `2F4A8071EEB053F0AE72DC2DF7F33DC11554DB94DF4916AE478577BF346D599C` |
+| Superseded candidate 1 | 359,802,370 bytes, SHA-256 `9522DB07D5540788E0254DBED35ACC5DCBB44FB803241B5795750E5298F3EEEF` |
+| Signing | NotSigned (unsigned; SmartScreen warning expected) |
+
+### Packaged-layout verification (new candidate)
+
+- `app.asar` now contains `node_modules/apache-arrow/` (checked `node_modules/apache-arrow/package.json` in the asar listing).
+- `app.asar.unpacked` contains `better-sqlite3/prebuilds/win32-x64.node` (loaded via the prebuildify fallback in `lib/binding.js`), the lancedb win32-x64-msvc native module and onnxruntime DLLs.
+- Packaged-exe launch smoke with an isolated user-data dir: process alive, CDP opens, page target `title=MyNotebookLM` loading `app.asar/out/renderer/index.html` — the window is created.
+
+### Install smoke results (248–251 amended — full pass)
+
+Run by `scripts/installer-smoke.mjs` against the exact new installer, in a silent-extract isolated install dir and isolated user-data dir with a local 127.0.0.1 fake OpenAI-compatible provider. 18/18 PASS, final line `SMOKE_OK`: silent install; onboarding visible; skip lands home; lancedb health; chat completed ("Grounded alpha answer [S1]"); citation S1 resolves; citation opens; note created; restart persistence (assistant, note, space healthy with indexedCount 1, settings); overwrite install retains data; uninstall removes binaries while user data is kept (`deleteAppDataOnUninstall: false` verified by behavior); reinstall opens the retained data.
+
+### Installer hash re-check (252 amended)
+
+Post-smoke SHA-256 re-run: `2F4A8071EEB053F0AE72DC2DF7F33DC11554DB94DF4916AE478577BF346D599C`, identical to the pre-smoke value. No `package`/`build` command was run after packaging.
+
+### Clean-machine status (253, unchanged)
+
+No independent clean Windows machine was available; all packaging and smoke runs remain on the development machine, recorded honestly as before.
+
+### Delivery status (supersedes the candidate-1 status above)
+
+Candidate 2 passed all gates and the full install smoke, and the delivered file is the exact artifact that passed: `D:\fix\mynotebokklm\.worktrees\desktop-foundation\dist\MyNotebookLM-Setup-1.0.0.exe`, 360,399,111 bytes, SHA-256 `2F4A8071EEB053F0AE72DC2DF7F33DC11554DB94DF4916AE478577BF346D599C`, unsigned. Clean-machine verification remains outstanding as recorded.
