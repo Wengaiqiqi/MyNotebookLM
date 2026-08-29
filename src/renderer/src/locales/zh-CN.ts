@@ -18,7 +18,7 @@ const zhCN = {
     restore: "恢复",
     undo: "撤销删除",
     retryDelete: "重试删除",
-    deletionPending: "项目删除正在等待清理。"
+    deletionPending: "项目删除正在等待清理。", sections: "项目页面"
   },
   common: {
     cancel: "取消",
@@ -30,7 +30,7 @@ const zhCN = {
     save: "保存更改",
     saving: "正在保存…",
     openSettings: "打开设置",
-    retry: "重试"
+    retry: "重试", add: "添加", edit: "编辑", delete: "删除"
   },
   model: {
     generation: { title: "生成模型", description: "用于对话、总结与内容生成" },
@@ -177,6 +177,10 @@ const zhCN = {
     importing: "正在导入…",
     importError: "导入失败",
     task: { cancel: "取消任务", retry: "重试任务", remove: "移除任务", completed: "已完成", failed: "失败", queued: "排队中", running: "处理中", cancelled: "已取消", validating: "验证中", staging: "准备中", parsing: "解析中", chunking: "分块中", embedding: "嵌入中", indexing: "建立索引中", verifying: "校验中", cleanup: "清理中", finalizing: "收尾中", preparing: "准备中", generating: "生成中", saving: "保存中" }
+  },
+  notes: { eyebrow: "项目笔记", titlePage: "笔记", subtitle: "用 Markdown 记录和整理有来源依据的研究。", new: "新建笔记", archived: "已归档笔记", active: "当前笔记", count: "篇笔记", empty: "暂无笔记。", select: "请选择一篇笔记进行编辑。", editorEyebrow: "笔记编辑器", edit: "编辑笔记", title: "标题", body: "Markdown 正文", preview: "安全预览", save: "保存笔记", aiTitle: "生成 AI 标题", archive: "归档", restore: "恢复", delete: "删除", deleteConfirm: "确认永久删除这篇笔记？", conflict: "笔记已在其他位置发生变化。请重新加载服务端版本，或保留本地草稿。", reloadServer: "重新加载服务端版本", keepDraft: "保留本地草稿", titleFailure: "AI 标题生成失败，原标题和正文已保留。", links: "关联证据", linkType: "关联类型", source: "来源", message: "消息", citation: "引用", target: "目标 ID", targetPlaceholder: "粘贴目标 ID", link: "关联", unlink: "移除关联", targetUnavailable: "目标不可用", noLinks: "还没有关联证据。", untitled: "未命名笔记", unavailable: "笔记服务尚未就绪。"
+  },
+  transformations: { eyebrow: "研究工具", title: "转换", subtitle: "将项目内容转换为可复用的洞察。", runTitle: "运行转换", rule: "规则", builtins: "内置规则", custom: "自定义规则", target: "目标类型", targetId: "目标 ID", targetPlaceholder: "来源、消息、回答或笔记 ID", run: "运行转换", cancel: "取消", retry: "重试", customRules: "自定义规则", newRule: "新建自定义规则", editRule: "编辑自定义规则", ruleName: "规则名称", appliesTo: "适用目标", prompt: "提示词", placeholders: "允许的占位符", placeholderHelp: "HTML 和其他模板语法会被拒绝。", invalidPrompt: "只能使用四个受支持的占位符。", ruleNameRequired: "请输入规则名称。", noRules: "还没有自定义规则。", insights: "洞察", noInsights: "已完成的洞察会显示在这里。", convert: "转换为笔记", unavailable: "转换服务尚未就绪。", states: { queued: "排队中", running: "处理中", completed: "已完成", failed: "失败", cancelled: "已取消" }
   }
 } as const;
 

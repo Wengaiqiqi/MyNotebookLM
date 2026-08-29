@@ -343,3 +343,70 @@ button:disabled { cursor: not-allowed; opacity: .55; }
   .chat-layout { grid-template-columns: 165px minmax(0, 1fr); }
   .citation-panel { display: none; }
 }
+
+.project-section-tabs { display: flex; gap: 4px; padding: 0 26px 10px; border-bottom: 1px solid var(--border); background: var(--bg); }
+.project-section-tabs button { min-height: 36px; padding: 0 15px; border: 0; border-radius: 8px; color: var(--muted); background: transparent; cursor: pointer; font-weight: 650; }
+.project-section-tabs button[aria-current="page"] { color: white; background: var(--accent); }
+.notes-page, .transformations-page { min-width: 0; min-height: 0; height: calc(100vh - 150px); padding: 24px 30px 30px; overflow: auto; background: var(--bg); }
+.notes-page-header, .transformations-header { display: flex; min-height: 96px; align-items: flex-start; justify-content: space-between; gap: 18px; }
+.notes-page-header h2, .transformations-header h2 { margin: 4px 0 6px; font-size: 30px; letter-spacing: -.03em; }
+.notes-page-header p, .transformations-header p { margin: 0; color: var(--muted); }
+.notes-page-actions, .transformation-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.notes-page-actions button, .transformations-header > button, .transformation-card button, .note-link-create button { min-height: 38px; padding: 0 12px; border: 1px solid var(--border); border-radius: 8px; color: var(--text); background: var(--surface); cursor: pointer; }
+.notes-page-actions button:first-child, .transformations-header > button { color: white; border-color: var(--accent); background: var(--accent); }
+.notes-layout { display: grid; grid-template-columns: 235px minmax(0, 1fr); gap: 18px; min-height: 600px; }
+.notes-list, .notes-editor, .note-links, .transformation-card { min-width: 0; padding: 17px; border: 1px solid var(--border); border-radius: 13px; background: var(--surface); box-shadow: var(--shadow); }
+.notes-list-heading, .notes-editor-heading, .notes-section-heading, .transformation-section-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.notes-list-heading { padding-bottom: 13px; color: var(--muted); border-bottom: 1px solid var(--border); }
+.notes-list-heading strong { color: var(--accent); font-size: 22px; }
+.notes-list [role="listbox"] { display: grid; gap: 5px; margin-top: 11px; }
+.notes-list [role="option"] { display: grid; gap: 4px; padding: 10px; border: 0; border-radius: 8px; color: var(--text); background: transparent; cursor: pointer; text-align: left; }
+.notes-list [role="option"] small { color: var(--muted); }
+.notes-list [role="option"].selected { background: var(--accent-soft); }
+.notes-main { display: grid; align-content: start; gap: 14px; min-width: 0; }
+.notes-editor-heading { margin-bottom: 16px; }
+.notes-editor-heading h3 { margin: 4px 0 0; font-size: 20px; }
+.note-version { color: var(--muted); font-size: 12px; }
+.notes-editor > label, .note-editor-columns label, .transformation-card label, .rule-dialog label { display: grid; gap: 7px; color: var(--muted); font-size: 13px; font-weight: 650; }
+.notes-editor input, .notes-editor textarea, .transformation-card input, .transformation-card select, .rule-dialog input, .rule-dialog textarea, .rule-dialog select, .note-link-create input, .note-link-create select { width: 100%; padding: 9px 10px; border: 1px solid var(--border); border-radius: 8px; color: var(--text); background: var(--bg); font: inherit; }
+.notes-editor input { font-size: 16px; }
+.note-editor-columns { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 13px; margin-top: 14px; }
+.notes-editor textarea { min-height: 290px; resize: vertical; line-height: 1.5; }
+.note-preview { display: grid; align-content: start; gap: 7px; min-height: 290px; padding: 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface-soft); }
+.note-preview > span, .field-help { color: var(--muted); font-size: 12px; }
+.notes-editor-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 7px; margin-top: 15px; }
+.notes-editor-actions button, .note-conflict button, .inline-confirm button { min-height: 36px; padding: 0 11px; border: 1px solid var(--border); border-radius: 7px; color: var(--text); background: var(--surface); cursor: pointer; }
+.notes-editor-actions .primary-button { color: white; border: 0; background: var(--accent); }
+.danger-button { border-color: var(--danger) !important; color: var(--danger) !important; }
+.note-conflict { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 9px; padding: 9px; border: 1px solid var(--danger); border-radius: 8px; background: var(--danger-soft); }
+.inline-confirm { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 10px; padding: 10px; border-radius: 8px; background: var(--danger-soft); }
+.inline-confirm span { flex: 1; }
+.note-links { box-shadow: none; }
+.note-link-create { display: grid; grid-template-columns: 110px minmax(0, 1fr) auto; gap: 7px; margin: 12px 0; }
+.note-links ul, .rule-list, .insights-card ul { display: grid; gap: 7px; margin: 0; padding: 0; list-style: none; }
+.note-links li, .rule-list li, .insights-card li { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 9px; border-radius: 8px; background: var(--surface-soft); font-size: 12px; }
+.note-links li span { min-width: 0; overflow-wrap: anywhere; }
+.note-links li button { border: 0; color: var(--danger); background: transparent; cursor: pointer; }
+.notes-empty, .notes-empty-main, .transformations-page .transformation-card > p { color: var(--muted); text-align: center; }
+.transformations-grid { display: grid; grid-template-columns: minmax(260px, .9fr) minmax(260px, 1fr); gap: 16px; align-items: start; }
+.transformation-card { display: grid; gap: 13px; box-shadow: none; }
+.transformation-card h3 { margin: 0; font-size: 18px; }
+.transformation-card > label { margin-top: 2px; }
+.transformation-task { display: grid; gap: 5px; padding: 10px; border-radius: 8px; background: var(--surface-soft); font-size: 12px; }
+.transformation-task progress { width: 100%; height: 8px; accent-color: var(--accent); }
+.transformation-section-heading { padding-bottom: 9px; border-bottom: 1px solid var(--border); }
+.transformation-section-heading button { min-height: 30px; }
+.rule-list li > span { display: grid; gap: 3px; min-width: 0; }
+.rule-list small { color: var(--muted); }
+.rule-list button { min-height: 30px; padding: 0 8px; font-size: 12px; }
+.insights-card { grid-column: 1 / -1; }
+.insights-card li { align-items: flex-start; }
+.insights-card li > div { min-width: 0; }
+.insights-card li strong { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.insights-card li p { max-height: 4.5em; margin: 5px 0 0; overflow: hidden; color: var(--muted); white-space: pre-wrap; }
+.rule-dialog { width: min(590px, 100%); }
+.rule-dialog form { display: grid; gap: 11px; }
+.rule-dialog h2 { margin: 0 0 4px; }
+.rule-dialog textarea { min-height: 150px; resize: vertical; }
+.rule-dialog .dialog-actions { margin-top: 6px; }
+@media (max-width: 860px) { .notes-layout, .transformations-grid { grid-template-columns: 1fr; } .note-editor-columns { grid-template-columns: 1fr; } .insights-card { grid-column: auto; } }

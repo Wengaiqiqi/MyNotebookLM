@@ -18,7 +18,7 @@ const en = {
     restore: "Restore",
     undo: "Undo deletion",
     retryDelete: "Retry deletion",
-    deletionPending: "Project deletion is waiting for cleanup."
+    deletionPending: "Project deletion is waiting for cleanup.", sections: "Project sections"
   },
   common: {
     cancel: "Cancel",
@@ -30,7 +30,7 @@ const en = {
     save: "Save changes",
     saving: "Saving…",
     openSettings: "Open settings",
-    retry: "Retry"
+    retry: "Retry", add: "Add", edit: "Edit", delete: "Delete"
   },
   model: {
     generation: { title: "Generation model", description: "For chat, summaries, and writing" },
@@ -177,6 +177,9 @@ const en = {
     importing: "Importing…",
     importError: "Import failed",
     task: { cancel: "Cancel task", retry: "Retry task", remove: "Remove task", completed: "Completed", failed: "Failed", queued: "Queued", running: "In progress", cancelled: "Cancelled", validating: "Validating", staging: "Preparing", parsing: "Parsing", chunking: "Chunking", embedding: "Embedding", indexing: "Indexing", verifying: "Verifying", cleanup: "Cleaning up", finalizing: "Finalizing", preparing: "Preparing", generating: "Generating", saving: "Saving" }
+  },
+  notes: { eyebrow: "Workspace notes", titlePage: "Notes", subtitle: "Capture and refine cited research in Markdown.", new: "New note", archived: "Archived notes", active: "Active notes", count: "notes", empty: "No notes yet.", select: "Select a note to edit it.", editorEyebrow: "Note editor", edit: "Edit note", title: "Title", body: "Markdown body", preview: "Safe preview", save: "Save note", aiTitle: "Generate AI title", archive: "Archive", restore: "Restore", delete: "Delete", deleteConfirm: "Delete this note permanently?", conflict: "This note changed elsewhere. Reload the server version or keep this draft.", reloadServer: "Reload server version", keepDraft: "Keep local draft", titleFailure: "AI title generation failed; your title and body were kept.", links: "Linked evidence", linkType: "Link type", source: "Source", message: "Message", citation: "Citation", target: "Target id", targetPlaceholder: "Paste target id", link: "Link", unlink: "Remove link", targetUnavailable: "target unavailable", noLinks: "No linked evidence yet.", untitled: "Untitled note", unavailable: "Notes are unavailable until the desktop service is ready."},
+  transformations: { eyebrow: "Research tools", title: "Transformations", subtitle: "Turn supported project content into reusable insights.", runTitle: "Run a transformation", rule: "Rule", builtins: "Built-in", custom: "Custom", target: "Target type", targetId: "Target id", targetPlaceholder: "Source, message, answer, or note id", run: "Run transformation", cancel: "Cancel", retry: "Retry", customRules: "Custom rules", newRule: "New custom rule", editRule: "Edit custom rule", ruleName: "Rule name", appliesTo: "Applies to", prompt: "Prompt", placeholders: "Allowed placeholders", placeholderHelp: "HTML and other template syntax are rejected.", invalidPrompt: "Use only the four supported placeholders.", ruleNameRequired: "Enter a rule name.", noRules: "No custom rules yet.", insights: "Insights", noInsights: "Completed insights will appear here.", convert: "Convert to note", unavailable: "Transformations are unavailable until the desktop service is ready.", states: { queued: "Queued", running: "In progress", completed: "Completed", failed: "Failed", cancelled: "Cancelled" }
   }
 } as const;
 

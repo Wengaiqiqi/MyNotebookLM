@@ -3,6 +3,9 @@ import type { ProjectDto } from "../../../shared/projects";
 import type { DefaultModelRoutesDto } from "../../../shared/models";
 import SourcePanel from "../sources/SourcePanel";
 import ChatView from "../chat/ChatView";
+import NotesView from "../notes/NotesView";
+import TransformationView from "../transformations/TransformationView";
+import { useTranslation } from "react-i18next";
 
 export type ProjectViewProps = {
   appName: string; project?: ProjectDto | undefined; routes: DefaultModelRoutesDto; busy: boolean;
@@ -15,6 +18,8 @@ export type ProjectViewProps = {
 
 export default function ProjectView(props: ProjectViewProps) {
   const { project, routes } = props;
+  const { t } = useTranslation();
+  const [section, setSection] = useState<"research" | "notes" | "transformations">("research");
   const [importOpen, setImportOpen] = useState(false); const [sourceRefreshKey, setSourceRefreshKey] = useState(0); const importTriggerRef = React.useRef<HTMLButtonElement>(null);
   const sourcesApi = typeof window !== "undefined" ? window.myNotebook?.sources : undefined;
   const tasksApi = typeof window !== "undefined" ? window.myNotebook?.tasks : undefined;
@@ -24,9 +29,10 @@ export default function ProjectView(props: ProjectViewProps) {
     title: props.sourcesLabel, add: props.importSources, empty: props.noSourcesTitle, remove: "Remove", selected: "Selected", file: "Choose files", url: "Import URL", webAddress: "Web address", formats: "PDF, DOCX, PPTX, XLSX, TXT, Markdown, URL, CSV", importing: "Importing…", error: "Import failed", indexed: "Indexed", pending: "Pending", importCancel: "Cancel", openSettings: props.openSettingsLabel,
     cancel: "Cancel", retry: "Retry", completed: "Completed", failed: "Failed", queued: "Queued", running: "Running", cancelled: "Cancelled", validating: "Validating", staging: "Staging", parsing: "Parsing", chunking: "Chunking", embedding: "Embedding", indexing: "Indexing", verifying: "Verifying", cleanup: "Cleaning up", finalizing: "Finalizing", preparing: "Preparing", generating: "Generating", saving: "Saving", ...props.sourceActionLabels
   };
-  return <main className="workspace project-view" aria-label="Project workspace">
+  return <main className={`workspace project-view section-${section}`} aria-label="Project workspace">
     <header className="workspace-header title-drag-region"><div><span className="eyebrow">{props.appName}</span><h2>{project?.name ?? props.emptyTitle}</h2></div></header>
-    <div className={`workspace-grid${canRenderChat ? " chat-enabled" : ""}`}>
+    {project && <nav className="project-section-tabs" aria-label={t("project.sections", "Project sections")} role="tablist"><button type="button" role="tab" aria-selected={section === "research"} aria-current={section === "research" ? "page" : undefined} onClick={() => setSection("research")}>{t("chat.ui.research", "Research")}</button><button type="button" role="tab" aria-selected={section === "notes"} aria-current={section === "notes" ? "page" : undefined} onClick={() => setSection("notes")}>{t("notes.titlePage", "Notes")}</button><button type="button" role="tab" aria-selected={section === "transformations"} aria-current={section === "transformations" ? "page" : undefined} onClick={() => setSection("transformations")}>{t("transformations.title", "Transformations")}</button></nav>}
+    {project && section === "notes" ? <NotesView projectId={project.id} /> : project && section === "transformations" ? <TransformationView projectId={project.id} /> : <div className={`workspace-grid${canRenderChat ? " chat-enabled" : ""}`}>
       <section className={`research-canvas${canRenderChat ? " chat-enabled" : ""}`} aria-labelledby="workspace-title">
         {project ? <>
           {canRenderChat ? <ChatView projectId={project!.id} routes={routes} sourceRefreshKey={sourceRefreshKey} onOpenSettings={props.onOpenSettings} onImportSources={() => setImportOpen(true)} onRebuildIndex={props.onOpenSettings} /> : <>
@@ -42,6 +48,6 @@ export default function ProjectView(props: ProjectViewProps) {
         </> : <div className="no-project"><span className="empty-book" aria-hidden="true">M</span><h3 id="workspace-title">{props.emptyTitle}</h3><p>{props.emptyBody}</p><button className="primary-button" type="button" disabled={props.busy} onClick={(event) => props.onCreate(event.currentTarget)}>{props.createLabel}</button></div>}
       </section>
       {canImport ? <SourcePanel projectId={project!.id} sourcesApi={sourcesApi!} tasksApi={tasksApi!} labels={sourceLabels} importOpen={importOpen} onImportOpen={() => setImportOpen(true)} onImportClose={() => setImportOpen(false)} onImported={() => setSourceRefreshKey((value) => value + 1)} onOpenSettings={props.onOpenSettings} importTriggerRef={importTriggerRef} /> : <aside className="sources-panel" aria-label={props.sourcesLabel}><header><h3>{props.sourcesLabel}</h3><button type="button" disabled aria-label={props.importSources} title={props.sourceImportUnavailable} onClick={props.onOpenSettings}>＋</button></header><div className="sources-empty"><span aria-hidden="true">□＋</span><strong>{props.noSourcesTitle}</strong><p>{props.noSourcesBody}</p></div></aside>}
-    </div>
+    </div>}
   </main>;
 }

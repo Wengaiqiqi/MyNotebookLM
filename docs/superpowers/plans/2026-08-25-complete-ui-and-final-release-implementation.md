@@ -155,14 +155,21 @@ No new visual asset commit is created for this waived gate. The documentation ch
 - Create: `src/renderer/src/transformations/TransformationView.tsx`
 - Create: `src/renderer/src/transformations/TransformationView.test.tsx`
 - Create: `src/renderer/src/transformations/RuleEditorDialog.tsx`
+- Create: `docs/verification/screenshots/notes-zh-light.png`
+- Create: `docs/verification/screenshots/notes-en-dark.png`
+- Create: `docs/verification/screenshots/transformations-zh-light.png`
+- Create: `docs/verification/screenshots/transformations-en-dark.png`
+- Modify: `src/renderer/src/projects/ProjectView.test.tsx`
 - Modify: `src/renderer/src/projects/ProjectView.tsx`
+- Modify: `src/renderer/src/locales/en.ts`
+- Modify: `src/renderer/src/locales/zh-CN.ts`
 - Modify: `src/renderer/src/styles.css`
 
-- [ ] Write failing tests for note CRUD/archive/restore/link/save conflict/AI title and for built-in/custom rule CRUD/run/cancel/retry/idempotent insight/convert-to-note.
-- [ ] Implement approved notes and transformation screens with plain-text Markdown editing plus sanitized preview.
-- [ ] Rule editor documents exactly four placeholders and rejects unknown syntax inline.
-- [ ] Add real Electron screenshots for the notes and transformations states under `docs/verification/screenshots/`; compare against `docs/ui/complete/README.md` and correct differences.
-- [ ] Review and commit `feat: complete notes and transformations interface`.
+- [x] Write failing tests for note CRUD/archive/restore/link/save conflict/AI title and for built-in/custom rule CRUD/run/cancel/retry/idempotent insight/convert-to-note.
+- [x] Implement approved notes and transformation screens with plain-text Markdown editing plus sanitized preview.
+- [x] Rule editor documents exactly four placeholders and rejects unknown syntax inline.
+- [x] Add real Electron screenshots for the notes and transformations states under `docs/verification/screenshots/`; compare against `docs/ui/complete/README.md` and correct differences. Final evidence (2026-08-29): four complete real Electron views at 1803x1128 cover notes and transformations in zh-CN/light and en/dark. The real profile contains a Markdown note and custom rule; provider-backed insights remain honestly empty rather than fabricated.
+- [x] Independent read-only review PASS after two RED/GREEN repair rounds. Main-model evidence (2026-08-29): focused Task 6 regression `4 files / 31 tests`, full suite `103 files / 943 tests`, `npm run typecheck`, `npm run build`, and `git diff --check` passed. Active/archived note lists now match the repository's mixed `includeArchived` semantics, conflict reload preserves the local draft until chosen, dangerous Markdown is sanitized, and research-chat navigation remains intact. Review and commit `feat: complete notes and transformations interface`.
 
 ## Task 7: Implement Approved Model Routing UI and Complete Settings
 
