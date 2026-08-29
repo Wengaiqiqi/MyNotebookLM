@@ -3,6 +3,10 @@ productName: MyNotebookLM
 asar: true
 asarUnpack:
   - "**/*.node"
+  - "**/onnxruntime-node/bin/**"
+  - "**/lancedb*.node"
+  - "**/sharp*.node"
+  - "**/skia*.node"
 files:
   - out/**
   - package.json

@@ -61,15 +61,19 @@ async function captureRoutingScreenshot(page: Page, filePath: string): Promise<v
 }
 
 async function expectReachableAtCurrentZoom(page: Page, locator: ReturnType<Page["locator"]>): Promise<void> {
-  await locator.evaluate((element) => element.scrollIntoView({ block: "center", inline: "nearest" }));
-  await expect(locator).toBeVisible();
-  const box = await locator.boundingBox();
-  const viewport = await page.evaluate(() => ({ width: window.innerWidth, height: window.innerHeight }));
-  if (!box) throw new Error("missing control bounds");
-  expect(box.x).toBeGreaterThanOrEqual(0);
-  expect(box.y).toBeGreaterThanOrEqual(0);
-  expect(box.x + box.width).toBeLessThanOrEqual(viewport.width + 1);
-  expect(box.y + box.height).toBeLessThanOrEqual(viewport.height + 1);
+  // Window restore/zoom relayout can settle after scrollIntoView; retry the
+  // measurement loop instead of failing on a mid-layout snapshot.
+  await expect(async () => {
+    await locator.evaluate((element) => element.scrollIntoView({ block: "center", inline: "nearest" }));
+    await expect(locator).toBeVisible();
+    const box = await locator.boundingBox();
+    const viewport = await page.evaluate(() => ({ width: window.innerWidth, height: window.innerHeight }));
+    if (!box) throw new Error("missing control bounds");
+    expect(box.x).toBeGreaterThanOrEqual(0);
+    expect(box.y).toBeGreaterThanOrEqual(0);
+    expect(box.x + box.width).toBeLessThanOrEqual(viewport.width + 1);
+    expect(box.y + box.height).toBeLessThanOrEqual(viewport.height + 1);
+  }).toPass({ timeout: 5_000 });
 }
 
 async function skipOnboarding(page: Page): Promise<void> {

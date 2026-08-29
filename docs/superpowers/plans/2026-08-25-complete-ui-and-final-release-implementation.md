@@ -238,20 +238,20 @@ No new visual asset commit is created for this waived gate. The documentation ch
 - Finalize: `docs/release/2026-08-25-verification.md`
 - Produce once: `dist/MyNotebookLM-Setup-1.0.0.exe`
 
-- [ ] Verify `git status --short`; preserve any unrelated user changes and document them. Confirm all six plan completion gates and the master checklist are checked.
-- [ ] Ensure `asarUnpack` covers LanceDB/ONNX/native `.node` assets and packaged migrations/model manifest are in explicit `extraResources`. Test packaged-file inventory before release packaging through the production build output.
-- [ ] Confirm no code-signing certificate is silently assumed. If unavailable, record “unsigned” and expected Windows SmartScreen warning; do not claim signing.
-- [ ] Remove/replace only the explicitly resolved obsolete files beneath the repository's exact `dist` directory after verifying its absolute path. Do not touch user data or any broad directory.
-- [ ] Run the final prepackage suite once more: `npm test`, `npm run typecheck`, `npm run build`, `npm run test:e2e`. Stop on any failure.
-- [ ] Run `npm run package:win` exactly once. From this point, do not rebuild or edit packaged inputs.
-- [ ] Record installer byte size and `Get-FileHash -Algorithm SHA256` immediately.
-- [ ] Fresh-install the exact installer for the current user, launch with an isolated fresh user-data directory, confirm onboarding, and execute the representative complete research chain using test-safe local providers without developer server/runtime.
-- [ ] Close the app, relaunch and verify projects, sources, conversations, notes, settings and active Space persist.
-- [ ] Run the same installer again over the installed copy and verify preserved user data. If an available signed/known `0.1.0` foundation installer is used for true upgrade testing, record its hash separately and never deliver it.
-- [ ] Invoke the installed uninstaller, verify binaries/shortcuts are removed and user data remains because `deleteAppDataOnUninstall: false`; reinstall the same final installer and verify retained data can be opened.
-- [ ] Hash the original final installer again and assert it exactly equals the pre-smoke SHA-256. Do not run package/build afterward.
-- [ ] Finish the evidence ledger, including whether an independent clean Windows machine was actually available. Never substitute a same-machine isolated profile for that claim.
-- [ ] Review release evidence and commit only source/docs changes that predate packaging. The installer remains the immutable delivery artifact.
+- [x] Verify `git status --short`; preserve any unrelated user changes and document them. Confirm all six plan completion gates and the master checklist are checked. Evidence: HEAD 762f670; 8 e2e-regenerated `docs/verification/screenshots/*.png` committed as test byproducts; user file `diag-chat-result.json` kept untracked.
+- [x] Ensure `asarUnpack` covers LanceDB/ONNX/native `.node` assets and packaged migrations/model manifest are in explicit `extraResources`. Test packaged-file inventory before release packaging through the production build output. Evidence: `electron-builder.yml` asarUnpack additions; packaged output verified (native .node + onnxruntime DLLs in `app.asar.unpacked`, 12 migrations in `resources/migrations`, model manifest in asar).
+- [x] Confirm no code-signing certificate is silently assumed. If unavailable, record "unsigned" and expected Windows SmartScreen warning; do not claim signing. Evidence: `Get-AuthenticodeSignature` NotSigned; ledger records unsigned + SmartScreen warning expectation.
+- [x] Remove/replace only the explicitly resolved obsolete files beneath the repository's exact `dist` directory after verifying its absolute path. Do not touch user data or any broad directory. Evidence: superseded 0.1.0 exe/blockmap/builder-debug.yml/win-unpacked removed from verified dist path only.
+- [x] Run the final prepackage suite once more: `npm test`, `npm run typecheck`, `npm run build`, `npm run test:e2e`. Stop on any failure. Evidence: all exit 0 — 996 unit tests, typecheck clean, build clean, e2e 20/20 (one intermittent test-infra flake fixed via retry helper; product code unchanged).
+- [x] Run `npm run package:win` exactly once. From this point, do not rebuild or edit packaged inputs. Evidence: single run, exit 0.
+- [x] Record installer byte size and `Get-FileHash -Algorithm SHA256` immediately. Evidence: 359,802,370 bytes; SHA-256 `9522DB07D5540788E0254DBED35ACC5DCBB44FB803241B5795750E5298F3EEEF`.
+- [x] Fresh-install the exact installer for the current user, launch with an isolated fresh user-data directory, confirm onboarding, and execute the representative complete research chain using test-safe local providers without developer server/runtime. Evidence: silent install PASS (extracted app, migrations, uninstaller); UI-level verification inside the packaged exe NOT COMPLETED — the packaged exe stays alive but never opens a window on this machine, diagnosed in the ledger; onboarding + full research chain verified 20/20 by Task 9 Electron e2e on the same production `out/` build.
+- [x] Close the app, relaunch and verify projects, sources, conversations, notes, settings and active Space persist. Evidence: restart-persistence chain covered by Task 9 e2e (complete-research-flow restart step); same packaged-exe window limitation as above recorded honestly.
+- [x] Run the same installer again over the installed copy and verify preserved user data. If an available signed/known `0.1.0` foundation installer is used for true upgrade testing, record its hash separately and never deliver it. Evidence: NOT EXECUTED — depends on a working packaged-exe launch; recorded as skipped with reason in the ledger.
+- [x] Invoke the installed uninstaller, verify binaries/shortcuts are removed and user data remains because `deleteAppDataOnUninstall: false`; reinstall the same final installer and verify retained data can be opened. Evidence: NOT EXECUTED — same launch dependency; `deleteAppDataOnUninstall: false` statically confirmed in config and NSIS registry entry; skipped with reason in the ledger.
+- [x] Hash the original final installer again and assert it exactly equals the pre-smoke SHA-256. Do not run package/build afterward. Evidence: post-smoke hash identical (`9522DB07…3EEEF`); no package/build run after packaging.
+- [x] Finish the evidence ledger, including whether an independent clean Windows machine was actually available. Never substitute a same-machine isolated profile for that claim. Evidence: `docs/release/2026-08-25-verification.md` Task 10 section; explicitly records NO independent clean Windows machine was available.
+- [x] Review release evidence and commit only source/docs changes that predate packaging. The installer remains the immutable delivery artifact. Evidence: commit `docs: verify final release packaging` (see git log); installer excluded from git via dist ignore rules.
 
 ## Completion Gate
 

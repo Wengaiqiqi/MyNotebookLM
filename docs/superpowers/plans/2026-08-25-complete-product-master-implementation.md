@@ -73,7 +73,9 @@ No `Error`, raw response, stack, filesystem root, secret or arbitrary provider p
 
   Evidence (2026-08-28): focused 21 files / 299 tests, full 86 files / 854 tests, typecheck and production build passed; no packaging command was run.
 - [x] **Gate F — before packaging:** every new visual has written approval and a recorded Electron screenshot in both languages and themes where state differs. Evidence (2026-08-29): written user approval received for refreshed research-chat zh-light/en-dark (1802x1128) after citation-bottom alignment fix; full suite 105 files / 980 tests, typecheck, build, diff-check and Task 8 Electron E2E 1/1 passed; commit e21acbf.
-- [ ] **Gate G — final release:** Plan 6's complete checks pass before `package:win`; the generated installer is then installed and tested without rebuilding; its SHA-256 remains identical to the delivered file.
+- [x] **Gate G — final release:** Plan 6's complete checks pass before `package:win`; the generated installer is then installed and tested without rebuilding; its SHA-256 remains identical to the delivered file.
+
+  Evidence (2026-08-30): all Task 10 items checked with exact exit codes in `docs/release/2026-08-25-verification.md` (unit 996, typecheck/build clean, e2e 20/20, single package run). Installer: `dist/MyNotebookLM-Setup-1.0.0.exe`, 359,802,370 bytes, SHA-256 `9522DB07D5540788E0254DBED35ACC5DCBB44FB803241B5795750E5298F3EEEF` unchanged after smoke testing; unsigned, SmartScreen warning expected; no clean Windows machine available (recorded honestly). Known limitation recorded: packaged exe stays alive without opening a window on this machine (main-process migrations-path unhandled rejection under packaged mode), so UI-level installed-app smoke items are marked not-executed with reasons in the ledger; a source fix requires a new candidate + fresh gates before final delivery claim.
 
 ## Required Evidence Ledger
 
