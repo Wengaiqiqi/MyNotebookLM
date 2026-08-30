@@ -15,7 +15,11 @@ export class IngestionService {
     persistParsedResult(this.db, { revisionId: input.revisionId, taskId: input.taskId, chunks: result.chunks, updatedAt: input.updatedAt });
     if (this.indexing) {
       const space = this.db.prepare("SELECT es.id, es.dimension FROM source_revisions sr JOIN sources s ON s.id = sr.source_id JOIN project_embedding_spaces pes ON pes.project_id = s.project_id JOIN embedding_spaces es ON es.id = pes.space_id AND es.state = 'active' WHERE sr.id = ?").get(input.revisionId) as { id: string; dimension: number } | undefined;
-      if (!space) throw new Error("No active embedding space for revision project");
+      if (!space) {
+        // First ingest for a project without a built embedding Space: surface
+        // a clear, recoverable error the renderer can act on instead of INTERNAL.
+        throw Object.assign(new Error("errors.indexUnavailable"), { code: "INDEX_UNAVAILABLE" });
+      }
       await this.indexing.index({ taskId: input.taskId, revisionId: input.revisionId, space });
     }
   }

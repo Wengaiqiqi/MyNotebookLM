@@ -23,6 +23,7 @@ const ERROR_CODES = new Set<TaskErrorSummaryDto["code"]>([
 ]);
 const MESSAGE_KEYS = new Set(["errors.interrupted", "errors.internal", "errors.validation", "errors.notFound", "errors.conflict", "errors.cancelled", "errors.auth", "errors.rateLimited", "errors.timeout", "errors.network", "errors.provider", "errors.unsupportedFormat", "errors.unsafeInput", "errors.indexUnavailable", "errors.modelCapability", "errors.embeddingProfileUnavailable", "errors.taskConflict"]);
 function taskError(error: unknown): TaskErrorSummaryDto {
+  console.error("[ingest] task failed:", error);
   const candidate = error as { code?: unknown; message?: unknown };
   const recoverableHint = (candidate as { recoverable?: unknown }).recoverable === true;
   const code = typeof candidate.code === "string" && ERROR_CODES.has(candidate.code as TaskErrorSummaryDto["code"])

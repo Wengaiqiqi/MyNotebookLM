@@ -76,6 +76,7 @@ export default function Workspace({ projectId, projectName, routes, onOpenSettin
         <div className="pane research">
           <SourcesPanel
             projectId={projectId}
+            embeddingProfileId={routes.embeddingProfileId}
             onImported={() => { setSourcesVersion((value) => value + 1); onSourcesChanged?.(); }}
             onOpenSettings={onOpenSettings}
           />

@@ -244,6 +244,7 @@ const en = {
     researchChatUnavailable: "Import sources to enable research chat.",
     settingsUnavailable: "Open settings to configure model services.",
     openSource: "Open source",
+    buildIndex: "Build index",
     indexStuckHint: "Source stuck while indexing?",
     chooseFiles: "Choose files",
     importUrl: "Import URL",

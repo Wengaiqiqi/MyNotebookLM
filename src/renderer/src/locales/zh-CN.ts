@@ -244,6 +244,7 @@ const zhCN = {
     researchChatUnavailable: "导入资料后即可使用研究对话。",
     settingsUnavailable: "打开设置即可配置模型服务。",
     openSource: "打开来源",
+    buildIndex: "构建索引",
     indexStuckHint: "来源长时间未完成索引？",
     chooseFiles: "选择文件",
     importUrl: "导入网址",

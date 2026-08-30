@@ -9,8 +9,9 @@ import { useTaskFeed } from "../../hooks/useTaskFeed";
 import { cssKindClass, errorText, formatBytes, kindLabel, sourceReady } from "../../lib/format";
 import { api } from "../../lib/api";
 
-export default function SourcesPanel({ projectId, onImported, onOpenSettings }: {
+export default function SourcesPanel({ projectId, embeddingProfileId, onImported, onOpenSettings }: {
   projectId: string;
+  embeddingProfileId?: string | undefined;
   onImported?: () => void;
   onOpenSettings?: () => void;
 }) {
@@ -20,6 +21,7 @@ export default function SourcesPanel({ projectId, onImported, onOpenSettings }: 
   const [importOpen, setImportOpen] = useState(false);
   const [collapsed, setCollapsed] = useState(false);
   const [batch, setBatch] = useState<{ total: number; done: number } | undefined>();
+  const [spaceBuilding, setSpaceBuilding] = useState(false);
 
   const tasks = useTaskFeed(
     projectId,
@@ -38,6 +40,25 @@ export default function SourcesPanel({ projectId, onImported, onOpenSettings }: 
   }, [projectId, t]);
 
   useEffect(() => { void refresh(); }, [refresh]);
+
+  // First build of the project's embedding Space: once the migration task
+  // completes, retry the imports that failed for lack of a Space.
+  useEffect(() => {
+    if (!spaceBuilding) return;
+    const migration = tasks.find((task) => task.kind === "validation");
+    if (!migration) return;
+    if (migration.state === "completed") {
+      setSpaceBuilding(false);
+      for (const [sourceId, task] of failedTaskBySource) {
+        if (task.error?.code === "INDEX_UNAVAILABLE") void retry(sourceId);
+      }
+      toast.success(t("vector.rebuilt"));
+    } else if (migration.state === "failed" || migration.state === "cancelled") {
+      setSpaceBuilding(false);
+      toast.error(t("vector.failedBody"));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [spaceBuilding, tasks]);
 
   // Refresh when any task affecting this project settles.
   useEffect(() => {
@@ -186,6 +207,23 @@ export default function SourcesPanel({ projectId, onImported, onOpenSettings }: 
                     {failedTask.error?.recoverable && (
                       <button type="button" className="btn ghost sm source-task-action" onClick={() => void retry(source.id)}>
                         {t("research.task.retry")}
+                      </button>
+                    )}
+                    {failedTask.error?.code === "INDEX_UNAVAILABLE" && embeddingProfileId && (
+                      <button
+                        type="button"
+                        className="btn ghost sm source-task-action"
+                        disabled={spaceBuilding}
+                        onClick={async () => {
+                          setSpaceBuilding(true);
+                          const result = await window.myNotebook.vector.startMigration({ projectId, profileId: embeddingProfileId }).catch(() => undefined);
+                          if (!result?.ok) {
+                            setSpaceBuilding(false);
+                            toast.error(result ? errorText(result, t) : t("errors.internal"));
+                          }
+                        }}
+                      >
+                        {spaceBuilding ? t("vector.building") : t("research.buildIndex")}
                       </button>
                     )}
                   </div>
