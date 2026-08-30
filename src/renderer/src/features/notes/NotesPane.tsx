@@ -104,19 +104,8 @@ export default function NotesPane({ projectId }: { projectId: string }) {
     setSelectedId(undefined);
   }
 
-  if (collapsed) {
-    return (
-      <aside className="panel rail rail-left" aria-label={t("notes.titlePage")}>
-        <button type="button" className="icon-btn" aria-label={t("notes.expandPanel")} onClick={() => setCollapsed(false)}>
-          <Icon name="chevrons-right" />
-        </button>
-      </aside>
-    );
-  }
-
-  return (
-    <div className="pane notes">
-      <section className="panel" aria-label={t("notes.titlePage")}>
+  const listPanel = (
+    <section className="panel" aria-label={t("notes.titlePage")}>
         <header className="panel-head">
           <h2>{showArchived ? t("notes.archived") : t("notes.titlePage")}</h2>
           <span className="count">{notes.length}</span>
@@ -210,8 +199,17 @@ export default function NotesPane({ projectId }: { projectId: string }) {
             )
           ))}
         </div>
-      </section>
+      </section>);
 
+  return (
+    <div className="pane notes">
+      {collapsed ? (
+        <aside className="panel rail rail-left" aria-label={t("notes.titlePage")}>
+          <button type="button" className="icon-btn" aria-label={t("notes.expandPanel")} onClick={() => setCollapsed(false)}>
+            <Icon name="chevrons-right" />
+          </button>
+        </aside>
+      ) : listPanel}
       {confirmingDelete && (
         <Modal open alert onClose={() => setConfirmingDelete(false)} labelledBy="note-delete-title">
           <DialogHead id="note-delete-title" icon="trash" title={t("notes.delete")} body={t("notes.deleteConfirm")} />
