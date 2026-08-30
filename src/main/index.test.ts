@@ -9,7 +9,7 @@ const mocks = vi.hoisted(() => {
   const callbacks = new Map<string, Callback>();
   // Default prepare chain keeps startup recovery from exploding in composition tests;
   // individual tests override implementations for their specific SQL shapes.
-  const connection = { prepare: vi.fn((_sql: string): { run?: (...args: unknown[]) => unknown; get?: (...args: unknown[]) => unknown; all?: (...args: unknown[]) => unknown } => ({ run: vi.fn(() => ({ changes: 0 })), get: vi.fn(() => undefined), all: vi.fn(() => []) })) };
+  const connection = { prepare: vi.fn((_sql: string): { run?: (...args: unknown[]) => unknown; get?: (...args: unknown[]) => unknown; all?: (...args: unknown[]) => unknown } => ({ run: vi.fn(() => ({ changes: 0 })), get: vi.fn(() => undefined), all: vi.fn(() => []) })), transaction: vi.fn((fn: () => unknown) => () => fn()) };
   const ipcMain = { handle: vi.fn(), removeHandler: vi.fn() };
   let vectorService: Record<string, (...args: any[]) => any> | undefined;
   let databasePending: Promise<void> = Promise.resolve();
@@ -459,6 +459,26 @@ describe("main application composition", () => {
     await expect(service.startMigration({ projectId: "project-1", profileId: "profile-1" })).resolves.toMatchObject({ ok: true });
     const rebuild = (mocks.SpaceService.mock.instances[0] as any).rebuild;
     expect(rebuild).toHaveBeenCalledWith(expect.objectContaining({ spec: expect.objectContaining({ provider, modelId: profile.modelId, modelRevision: profile.modelId, dimension: 4 }) }));
+  });
+
+  it("rebuilds and activates the latest parsed revision when an import failed before the first Space existed", async () => {
+    const profile = { id: "profile-1", provider: "openai", capability: "embedding", enabled: true, modelId: "embedding-model", baseUrl: "https://api.example.test" };
+    const revision = { id: "pending-revision" };
+    const runs: Array<[string, unknown[]]> = [];
+    mocks.connection.prepare.mockImplementation((sql: string) => ({
+      get: vi.fn(() => sql.includes("model_profiles") ? profile : sql.includes("embedding_spaces") ? undefined : undefined),
+      all: vi.fn(() => sql.includes("source_revisions") ? [revision] : []),
+      run: vi.fn((...args: unknown[]) => { runs.push([sql, args]); return { changes: 1 }; })
+    }));
+    mocks.SettingsRepository.mockImplementation(function (this: Record<string, unknown>) { this.getProfile = vi.fn(() => profile); this.listProfiles = vi.fn(() => [profile]); });
+    mocks.CredentialStore.mockImplementation(function (this: Record<string, unknown>) { this.withSecret = vi.fn(async (_id: string, _binding: unknown, invoke: (key: string) => Promise<unknown>) => invoke("secret")); });
+    await import("./index");
+    await vi.waitFor(() => expect(mocks.createMainWindow).toHaveBeenCalledOnce());
+
+    const service = mocks.getVectorService() as { startMigration: (input: unknown) => Promise<any> };
+    await expect(service.startMigration({ projectId: "project-1", profileId: "profile-1" })).resolves.toMatchObject({ ok: true });
+    await vi.waitFor(() => expect((mocks.IndexingService.mock.instances[0] as any).rebuild).toHaveBeenCalledWith(expect.objectContaining({ revisionId: revision.id })));
+    await vi.waitFor(() => expect(runs.some(([sql, args]) => sql.includes("UPDATE source_revisions") && args.includes(revision.id))).toBe(true));
   });
 
   it("fails closed when a cloud migration profile has an invalid modelId", async () => {

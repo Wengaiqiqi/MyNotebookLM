@@ -33,4 +33,17 @@ describe("ingestion progress", () => {
     await service.run({ taskId: "task", revisionId: "revision", kind: "text", data: new Uint8Array(), updatedAt: "now" });
     expect(indexed[0]).toMatchObject({ revisionId: "revision", space: { id: "space-1" } });
   });
+
+  it("keeps parsed chunks recoverable when the project has no active embedding space", async () => {
+    const persisted: unknown[] = [];
+    const db = { transaction: (fn: () => void) => () => fn(), prepare: (sql: string) => ({
+      all: () => [],
+      run: (...args: unknown[]) => ({ changes: persisted.push([sql, args]) && 1 }),
+      get: () => sql.includes("project_embedding_spaces") ? undefined : { project_id: "project-1" }
+    }) } as never;
+    const service = new IngestionService({ start: async () => ({ version: 1, type: "result", taskId: "task", chunks: [{ ordinal: 0, contentHash: "hash", text: "evidence", tokenEstimate: 1, locator: { kind: "paragraph", paragraph: 1 } }] }), cancel: () => undefined }, db, undefined, undefined, { index: async () => undefined } as unknown as import("../vector/indexing-service").IndexingService);
+
+    await expect(service.run({ taskId: "task", revisionId: "revision", kind: "text", data: new Uint8Array(), updatedAt: "now" })).rejects.toMatchObject({ code: "INDEX_UNAVAILABLE", recoverable: true });
+    expect(persisted.some((entry) => String(entry).includes("source_chunks"))).toBe(true);
+  });
 });

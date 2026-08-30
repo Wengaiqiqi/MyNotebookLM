@@ -611,7 +611,7 @@ test("centers dialogs in the full viewport before and after resizing", async ({}
   }
 });
 
-test("Task 8 real Electron RAG with fake provider and 200% chat zoom evidence", async ({}, testInfo) => {
+test("Task 8 real Electron RAG at the default window and 200% chat zoom", async ({}, testInfo) => {
   test.setTimeout(90_000);
   const userDataDir = testInfo.outputPath(`user-data-${Date.now()}`);
   await fs.mkdir(userDataDir, { recursive: true });
@@ -806,9 +806,9 @@ test("Task 8 real Electron RAG with fake provider and 200% chat zoom evidence", 
     expect(persisted.citation).toMatchObject({ label: "S1", sourceDisplayName: "authoritative-alpha.txt" });
     expect(persisted.citation.locator).toMatchObject({ kind: "paragraph", paragraph: 1 });
     expect(persisted.opened).toMatchObject({ ok: true, value: { opened: "document" } });
-    await restarted.app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]?.setSize(1802, 1128));
-    await restarted.page.waitForFunction(() => window.innerWidth >= 1700 && window.innerHeight >= 1000);
-    await expect(restarted.page.getByRole("heading", { name: "Cited RAG" })).toBeVisible();
+    await restarted.app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]?.setSize(1440, 900));
+    await restarted.page.waitForFunction(() => window.innerWidth >= 1400 && window.innerHeight >= 850);
+    await expect(restarted.page.getByRole("button", { name: /Cited RAG|对话/ })).toBeVisible();
     await expect(restarted.page.getByRole("complementary", { name: "来源引用" })).toBeVisible();
     const geometry = await restarted.page.evaluate(() => {
       const citation = document.querySelector<HTMLElement>(".citation-panel");
@@ -824,7 +824,7 @@ test("Task 8 real Electron RAG with fake provider and 200% chat zoom evidence", 
     expect(geometry.cardsOverflowY).toBe("auto");
     await restarted.page.getByRole("button", { name: /Cited RAG|对话/ }).click();
     await expect(restarted.page.locator(".conversation-items.open")).toBeVisible();
-    await restarted.page.screenshot({ path: path.join(screenshotDir, "research-chat-zh-light.png"), scale: "css", clip: { x: 0, y: 0, width: 1803, height: 1128 } });
+    await restarted.page.screenshot({ path: path.join(screenshotDir, "research-chat-zh-light.png"), scale: "css" });
     await restarted.page.keyboard.press("Escape");
     await expect(restarted.page.locator(".conversation-items.open")).toBeHidden();
     await restarted.page.getByRole("button", { name: "EN", exact: true }).click();
@@ -832,7 +832,7 @@ test("Task 8 real Electron RAG with fake provider and 200% chat zoom evidence", 
     await expect(restarted.page.locator("html")).toHaveAttribute("lang", "en");
     await expect(restarted.page.locator("html")).toHaveAttribute("data-theme", "dark");
     await expect(restarted.page.getByRole("complementary", { name: "Source citations" })).toBeVisible();
-    await restarted.page.screenshot({ path: path.join(screenshotDir, "research-chat-en-dark.png"), scale: "css", clip: { x: 0, y: 0, width: 1803, height: 1128 } });
+    await restarted.page.screenshot({ path: path.join(screenshotDir, "research-chat-en-dark.png"), scale: "css" });
 
     await restarted.page.evaluate(() => { document.documentElement.style.zoom = "2"; });
     await expectReachableAtCurrentZoom(restarted.page, restarted.page.locator(".chat-composer textarea"));

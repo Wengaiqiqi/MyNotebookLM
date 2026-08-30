@@ -152,6 +152,20 @@ describe("ChatView", () => {
     expect(screen.getByRole("status").textContent).toMatch(/parsing · 42%/i);
   });
 
+  it("shows a failed source as failed with a retry action instead of calling it pending", async () => {
+    const failed = { ...source, currentRevisionId: null, currentRevisionState: "failed" as const };
+    const task: TaskDto = { id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", projectId: source.projectId, sourceId: source.id, kind: "ingest", state: "failed", stage: "embedding", progress: 600, attempt: 0, error: { code: "INDEX_UNAVAILABLE", messageKey: "errors.indexUnavailable", recoverable: true }, idempotencyKey: null, createdAt: "2026-08-29T00:00:00.000Z", updatedAt: "2026-08-29T00:00:00.000Z" };
+    const retry = vi.fn().mockResolvedValue({ ok: true, value: { ...task, state: "running" } });
+    window.myNotebook = { sources: { retry }, tasks: { list: vi.fn().mockResolvedValue([task]), subscribe: vi.fn(() => vi.fn()) } } as never;
+    const api = { conversations: { list: vi.fn().mockResolvedValue({ ok: true, value: [conversation] }), create: vi.fn(), rename: vi.fn(), archive: vi.fn(), delete: vi.fn(), listMessages: vi.fn().mockResolvedValue({ ok: true, value: [] }) }, chat: { send: vi.fn(), stop: vi.fn(), regenerate: vi.fn(), subscribe: vi.fn().mockReturnValue(vi.fn()), unsubscribe: vi.fn() }, citations: { open: vi.fn() } } as never;
+
+    render(<ChatView projectId={source.projectId} routes={{ generationProfileId: "55555555-5555-4555-8555-555555555555" }} sources={[failed]} api={api} />);
+    expect(await screen.findByText(/Failed|失败/)).toBeTruthy();
+    expect(screen.queryByText(/^pending$/i)).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: /Retry|重试/ }));
+    expect(retry).toHaveBeenCalledWith({ projectId: source.projectId, sourceId: source.id });
+  });
+
   it("does not replace supplied sources after a terminal task event", async () => {
     const supplied = { ...source, displayName: "Supplied source" };
     const refreshed = { ...source, id: "cccccccc-cccc-4ccc-8ccc-cccccccccccc", displayName: "Global source" };

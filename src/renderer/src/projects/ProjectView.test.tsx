@@ -12,6 +12,9 @@ describe("ProjectView", () => {
     expect(screen.getByRole("heading", { name: "Research" })).toBeTruthy();
     expect(screen.getAllByText("No sources")).toHaveLength(2);
     expect(screen.getAllByText("Chat unavailable")).toHaveLength(2);
+    const header = document.querySelector(".workspace-header");
+    expect(header?.querySelector(".workspace-subtitle")).toBeTruthy();
+    expect(header?.querySelector(".project-section-tabs")).toBeTruthy();
   });
 
   it("opens the research chat when a generation route is configured and source revision is ready", async () => {

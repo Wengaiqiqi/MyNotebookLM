@@ -131,8 +131,22 @@ app.whenReady().then(async () => {
     taskService
   });
   await projectService.recoverStaleDeletions?.();
+  const projectRevisions = (projectId: string): Array<{ id: string }> => appDatabase!.connection.prepare(`SELECT COALESCE(s.current_revision_id, (
+    SELECT sr.id FROM source_revisions sr WHERE sr.source_id = s.id AND sr.state IN ('awaiting_embedding','failed') ORDER BY sr.created_at DESC LIMIT 1
+  )) AS id FROM sources s WHERE s.project_id = ? AND s.status = 'active' AND COALESCE(s.current_revision_id, (
+    SELECT sr.id FROM source_revisions sr WHERE sr.source_id = s.id AND sr.state IN ('awaiting_embedding','failed') ORDER BY sr.created_at DESC LIMIT 1
+  )) IS NOT NULL`).all(projectId) as Array<{ id: string }>;
+  const activateRevisions = (projectId: string, revisions: Array<{ id: string }>): void => {
+    if (!revisions.length) return;
+    const now = new Date().toISOString();
+    appDatabase!.connection.transaction(() => {
+      const ready = appDatabase!.connection.prepare("UPDATE source_revisions SET state = 'ready', activated_at = COALESCE(activated_at, ?) WHERE id = ? AND state IN ('awaiting_embedding','failed','ready')");
+      const select = appDatabase!.connection.prepare("UPDATE sources SET current_revision_id = ?, updated_at = ? WHERE project_id = ? AND id = (SELECT source_id FROM source_revisions WHERE id = ?)");
+      for (const revision of revisions) { ready.run(now, revision.id); select.run(revision.id, now, projectId, revision.id); }
+    })();
+  };
   const spaces = new SpaceRepository(appDatabase.connection, undefined, undefined, lance);
-  const spaceService = new SpaceService(spaces, { rebuild: async (raw: unknown) => { const input = raw as { space: { id: string; dimension: number }; spec: { projectId: string }; signal?: AbortSignal; revisionId?: string }; const revisions = input.revisionId ? [{ id: input.revisionId }] : appDatabase!.connection.prepare("SELECT current_revision_id AS id FROM sources WHERE project_id = ? AND status = 'active' AND current_revision_id IS NOT NULL").all(input.spec.projectId) as Array<{ id: string }>; for (const revision of revisions) await indexing.rebuild(input.signal ? { revisionId: revision.id, space: input.space, signal: input.signal } : { revisionId: revision.id, space: input.space }); }, optimize: async (raw: unknown) => { const value = raw as { taskId?: string; projectId?: string; space: { id: string; dimension: number }; signal?: AbortSignal }; const taskId = value.taskId ?? (value.projectId ? taskService.createTask({ projectId: value.projectId, sourceId: null, kind: "optimize" }).id : undefined); if (!taskId) throw new Error("optimize requires taskId or projectId"); taskService.start(taskId, "indexing"); try { taskService.advance(taskId, "indexing", 500); await lance.optimize(value.space, value.signal); taskService.complete(taskId); } catch (error) { if ((error as { code?: string }).code === "TASK_CANCELLED") { const current = taskService.getById(taskId); if (current?.state === "queued" || current?.state === "running") taskService.cancel(taskId); } else taskService.fail(taskId, { code: "INTERNAL", messageKey: "errors.internal", recoverable: false }); throw error; } } }, async () => backupDatabase(appDatabase!.connection, appPaths.database + ".space-backup-" + Date.now() + ".db"));
+  const spaceService = new SpaceService(spaces, { rebuild: async (raw: unknown) => { const input = raw as { space: { id: string; dimension: number }; spec: { projectId: string }; signal?: AbortSignal; revisionId?: string; revisions?: Array<{ id: string }> }; const revisions = input.revisionId ? [{ id: input.revisionId }] : input.revisions ?? projectRevisions(input.spec.projectId); for (const revision of revisions) await indexing.rebuild(input.signal ? { revisionId: revision.id, space: input.space, signal: input.signal } : { revisionId: revision.id, space: input.space }); }, optimize: async (raw: unknown) => { const value = raw as { taskId?: string; projectId?: string; space: { id: string; dimension: number }; signal?: AbortSignal }; const taskId = value.taskId ?? (value.projectId ? taskService.createTask({ projectId: value.projectId, sourceId: null, kind: "optimize" }).id : undefined); if (!taskId) throw new Error("optimize requires taskId or projectId"); taskService.start(taskId, "indexing"); try { taskService.advance(taskId, "indexing", 500); await lance.optimize(value.space, value.signal); taskService.complete(taskId); } catch (error) { if ((error as { code?: string }).code === "TASK_CANCELLED") { const current = taskService.getById(taskId); if (current?.state === "queued" || current?.state === "running") taskService.cancel(taskId); } else taskService.fail(taskId, { code: "INTERNAL", messageKey: "errors.internal", recoverable: false }); throw error; } } }, async () => backupDatabase(appDatabase!.connection, appPaths.database + ".space-backup-" + Date.now() + ".db"));
   await spaceService.recoverInterrupted();
   const localRuntime = createTransformersEmbeddingRuntime(appPaths.models, managedActiveDirectory(appPaths.models, LOCAL_MODEL_MANIFEST));
   const stagingRuntime = createTransformersEmbeddingRuntime(appPaths.models, managedStagingDirectory(appPaths.models, LOCAL_MODEL_MANIFEST));
@@ -209,6 +223,11 @@ app.whenReady().then(async () => {
     });
     return task;
   };
+  const rebuildProject = async (taskId: string, spec: import("./vector/space-repository").SpaceSpec): Promise<void> => {
+    const revisions = projectRevisions(spec.projectId);
+    await spaceService.rebuild({ taskId, spec, revisions });
+    activateRevisions(spec.projectId, revisions);
+  };
   const vectorService = {
     getHealth: async ({ projectId }: { projectId: string }): Promise<Result<VectorHealthDto>> => {
       const space = spaces.active(projectId);
@@ -234,7 +253,7 @@ app.whenReady().then(async () => {
       const modelRevision = capability.modelRevision;
       const fingerprint = canonicalEmbeddingFingerprint({ provider: capability.provider, modelId: capability.modelId, modelRevision, dimension, distance: capability.distance, pooling: capability.pooling, preprocessVersion: capability.preprocessVersion, chunkingVersion: capability.chunkingVersion });
       const task = taskService.createTask({ projectId, sourceId: null, kind: "validation" });
-      return { ok: true, value: runTask(task, () => spaceService.rebuild({ taskId: task.id, spec: { projectId, provider: capability.provider, modelId: capability.modelId, modelRevision, dimension, distance: capability.distance, pooling: capability.pooling, preprocessVersion: capability.preprocessVersion, chunkingVersion: capability.chunkingVersion, fingerprint } })) };
+      return { ok: true, value: runTask(task, () => rebuildProject(task.id, { projectId, provider: capability.provider, modelId: capability.modelId, modelRevision, dimension, distance: capability.distance, pooling: capability.pooling, preprocessVersion: capability.preprocessVersion, chunkingVersion: capability.chunkingVersion, fingerprint })) };
     },
     rebuild: async ({ projectId, spaceId }: { projectId: string; spaceId: string }): Promise<Result<TaskDto>> => {
       const space = spaces.get(spaceId);
@@ -242,7 +261,7 @@ app.whenReady().then(async () => {
       const existing = activeTask(projectId);
       if (existing) return failure("CONFLICT", "errors.taskConflict", true);
       const task = taskService.createTask({ projectId, sourceId: null, kind: "validation" });
-      return { ok: true, value: runTask(task, () => spaceService.rebuild({ taskId: task.id, spec: space })) };
+      return { ok: true, value: runTask(task, () => rebuildProject(task.id, space)) };
     },
     optimize: async ({ projectId, spaceId }: { projectId: string; spaceId: string }): Promise<Result<TaskDto>> => {
       const space = spaces.get(spaceId);

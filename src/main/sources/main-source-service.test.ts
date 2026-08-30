@@ -157,6 +157,14 @@ describe("main source import orchestration", () => {
     } finally { rmSync(root, { recursive: true, force: true }); }
   });
 
+  it("lists the latest failed revision while current_revision_id is still null", () => {
+    const row = { id: "22222222-2222-4222-8222-222222222222", project_id: "11111111-1111-4111-8111-111111111111", kind: "pdf", display_name: "Report.pdf", status: "active", current_revision_id: null, created_at: "2026-01-01T00:00:00.000Z", updated_at: "2026-01-01T00:00:00.000Z", deleted_at: null, current_locator: "C:\\original\\Report.pdf", current_stored_path: "C:\\managed\\content", current_revision_state: "failed" };
+    const prepare = vi.fn((_sql: string) => ({ all: () => [row] }));
+    const result = new MainSourceService({ prepare } as any, {} as any, {} as any).listSources(row.project_id)[0]!;
+    expect(result.currentRevisionState).toBe("failed");
+    expect(String(prepare.mock.calls[0]?.[0])).toMatch(/current_revision_id.*source_revisions|COALESCE|ORDER BY.*created_at/is);
+  });
+
   it("omits size when the managed file is unavailable or the source is a URL", () => {
     const rows = [
       { id: "22222222-2222-4222-8222-222222222222", project_id: "project", kind: "pdf", display_name: "Missing.pdf", status: "active", current_revision_id: null, created_at: "2026-01-01T00:00:00.000Z", updated_at: "2026-01-01T00:00:00.000Z", deleted_at: null, current_locator: "C:\\original\\Missing.pdf", current_stored_path: "C:\\missing\\managed.pdf", current_revision_state: "ready" },
