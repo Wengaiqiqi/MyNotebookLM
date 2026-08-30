@@ -63,16 +63,14 @@ describe("ProviderHttpClient", () => {
   });
 
   it("keeps a streaming deadline distinguishable from a network reader failure", async () => {
-    const fetchImpl: FetchLike = async (_input, init) => new Response(new ReadableStream({
-      start(controller) {
-        init?.signal?.addEventListener(
-          "abort",
-          () => controller.error(new DOMException("timed out", "AbortError")),
-          { once: true }
-        );
-      }
+    // Deadline: a stream that connects but never delivers a byte hits the
+    // idle watchdog (TIMEOUT), while a stream that errors mid-body is a
+    // network/provider failure (PROVIDER) — long streams are never killed
+    // just because they take a while overall.
+    const stalling: FetchLike = async () => new Response(new ReadableStream({
+      start() { /* never yields, never closes */ }
     }));
-    const client = new ProviderHttpClient(fetchImpl, { timeoutMs: 5 });
+    const client = new ProviderHttpClient(stalling, { idleTimeoutMs: 5 });
 
     const error = await requestError(async () => {
       for await (const _record of client.ndjson("https://models.example", "/stream", { signal: new AbortController().signal })) {
@@ -81,6 +79,19 @@ describe("ProviderHttpClient", () => {
     });
 
     expect(error.failure).toMatchObject({ fallbackEligible: true, error: { code: "TIMEOUT" } });
+
+    const failing: FetchLike = async () => new Response(new ReadableStream({
+      start(controller) { controller.error(new Error("connection reset")); }
+    }));
+    const network = new ProviderHttpClient(failing);
+
+    const networkError = await requestError(async () => {
+      for await (const _record of network.ndjson("https://models.example", "/stream", { signal: new AbortController().signal })) {
+        // The stream dies mid-body: a network failure, not a deadline.
+      }
+    });
+
+    expect(networkError.failure).toMatchObject({ error: { code: "NETWORK" } });
   });
 
   it("normalizes HTTP failures and preserves only retry metadata", async () => {

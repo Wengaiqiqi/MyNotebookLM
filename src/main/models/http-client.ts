@@ -1,12 +1,16 @@
 import { classifyProviderError, type ProviderFailure } from "./provider-errors";
 
 const DEFAULT_TIMEOUT_MS = 30_000;
+/** Streaming responses may legitimately run for minutes; the read watchdog
+ *  only fires when no bytes arrive at all (idle), not on total duration. */
+const DEFAULT_IDLE_TIMEOUT_MS = 120_000;
 const DEFAULT_MAX_RESPONSE_BYTES = 1_048_576;
 
 export type FetchLike = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
 
 export type HttpClientOptions = Readonly<{
   timeoutMs?: number;
+  idleTimeoutMs?: number;
   maxResponseBytes?: number;
 }>;
 
@@ -15,7 +19,6 @@ export type HttpRequestOptions = RequestInit & Readonly<{ signal: AbortSignal }>
 type RequestedResponse = Readonly<{
   response: Response;
   originalSignal: AbortSignal;
-  signal: AbortSignal;
 }>;
 
 export class ProviderRequestError extends Error {
@@ -33,6 +36,7 @@ export function joinUrl(baseUrl: string, endpoint: string): string {
 
 export class ProviderHttpClient {
   private readonly timeoutMs: number;
+  private readonly idleTimeoutMs: number;
   private readonly maxResponseBytes: number;
 
   constructor(
@@ -40,6 +44,7 @@ export class ProviderHttpClient {
     options: HttpClientOptions = {}
   ) {
     this.timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+    this.idleTimeoutMs = options.idleTimeoutMs ?? DEFAULT_IDLE_TIMEOUT_MS;
     this.maxResponseBytes = options.maxResponseBytes ?? DEFAULT_MAX_RESPONSE_BYTES;
   }
 
@@ -85,15 +90,19 @@ export class ProviderHttpClient {
   }
 
   private async request(baseUrl: string, endpoint: string, options: HttpRequestOptions): Promise<RequestedResponse> {
+    // The hard timeout covers connecting + response headers only; body reads
+    // are governed by the idle watchdog in readChunks instead, so long-lived
+    // streams are never killed mid-flight for taking a while overall.
     const timeout = AbortSignal.timeout(this.timeoutMs);
     const signal = AbortSignal.any([options.signal, timeout]);
+    const { signal: _bodySignal, ...init } = options;
     try {
-      const response = await this.fetchImpl(joinUrl(baseUrl, endpoint), { ...options, signal });
+      const response = await this.fetchImpl(joinUrl(baseUrl, endpoint), { ...init, signal });
       if (!response.ok) {
         void response.body?.cancel().catch(() => undefined);
         throw new ProviderRequestError(classifyProviderError({ status: response.status, headers: response.headers }));
       }
-      return { response, originalSignal: options.signal, signal };
+      return { response, originalSignal: options.signal };
     } catch (reason) {
       if (reason instanceof ProviderRequestError) throw reason;
       if (options.signal.aborted) throw new ProviderRequestError(classifyProviderError({ cancelled: true }));
@@ -109,15 +118,25 @@ export class ProviderHttpClient {
   }
 
   private async *readChunks(requested: RequestedResponse): AsyncIterable<string> {
-    const { response, originalSignal, signal } = requested;
+    const { response, originalSignal } = requested;
     if (!response.body) return;
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
     let total = 0;
     let completed = false;
+    class IdleTimeout extends Error {}
+    const readIdle = async (): Promise<ReadableStreamReadResult<Uint8Array>> => {
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      try {
+        return await Promise.race([
+          reader.read(),
+          new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new IdleTimeout()), this.idleTimeoutMs); })
+        ]);
+      } finally { clearTimeout(timer); }
+    };
     try {
       while (true) {
-        const { done, value } = await reader.read();
+        const { done, value } = await readIdle();
         if (done) break;
         total += value.byteLength;
         if (total > this.maxResponseBytes) throw new ResponseTooLargeError();
@@ -130,8 +149,8 @@ export class ProviderHttpClient {
     } catch (reason) {
       if (reason instanceof ProviderRequestError) throw reason;
       if (reason instanceof ResponseTooLargeError) throw new ProviderRequestError(classifyProviderError({ responseTooLarge: true }));
+      if (reason instanceof IdleTimeout) throw new ProviderRequestError(classifyProviderError({ timeout: true }));
       if (originalSignal.aborted) throw new ProviderRequestError(classifyProviderError({ cancelled: true }));
-      if (signal.aborted) throw new ProviderRequestError(classifyProviderError({ timeout: true }));
       throw new ProviderRequestError(classifyProviderError({ cause: reason }));
     } finally {
       if (!completed) void reader.cancel().catch(() => undefined);
