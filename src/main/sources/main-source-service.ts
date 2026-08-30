@@ -21,7 +21,7 @@ const ERROR_CODES = new Set<TaskErrorSummaryDto["code"]>([
   "RATE_LIMITED", "TIMEOUT", "NETWORK", "PROVIDER",
   "UNSUPPORTED_FORMAT", "UNSAFE_INPUT", "INDEX_UNAVAILABLE", "INTERNAL"
 ]);
-const MESSAGE_KEYS = new Set(["errors.interrupted", "errors.internal", "errors.validation", "errors.notFound", "errors.conflict", "errors.cancelled", "errors.auth", "errors.rateLimited", "errors.timeout", "errors.network", "errors.provider", "errors.unsupportedFormat", "errors.unsafeInput", "errors.indexUnavailable", "errors.modelCapability", "errors.embeddingProfileUnavailable", "errors.taskConflict"]);
+const MESSAGE_KEYS = new Set(["errors.interrupted", "errors.internal", "errors.validation", "errors.notFound", "errors.conflict", "errors.cancelled", "errors.auth", "errors.rateLimited", "errors.timeout", "errors.network", "errors.provider", "errors.unsupportedFormat", "errors.unsafeInput", "errors.indexUnavailable", "errors.modelCapability", "errors.embeddingProfileUnavailable", "errors.taskConflict", "errors.embeddingRejected"]);
 function taskError(error: unknown): TaskErrorSummaryDto {
   console.error("[ingest] task failed:", error);
   const candidate = error as { code?: unknown; message?: unknown };

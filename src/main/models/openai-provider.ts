@@ -170,12 +170,22 @@ export class OpenAiProvider implements ModelProvider {
       input: request.inputs,
       ...(request.dimensions === undefined ? {} : { dimensions: request.dimensions })
     };
-    const response = await this.client.json<unknown>(this.baseUrl, "/embeddings", {
-      method: "POST",
-      headers: this.headers(true),
-      body: JSON.stringify(body),
-      signal
-    });
+    let response: unknown;
+    try {
+      response = await this.client.json<unknown>(this.baseUrl, "/embeddings", {
+        method: "POST",
+        headers: this.headers(true),
+        body: JSON.stringify(body),
+        signal
+      });
+    } catch (error) {
+      // A 400 on an embedding call is almost always an input the embedder
+      // refuses (over-length, bad field) — surface a distinct, recoverable key.
+      if (error instanceof ProviderRequestError && (error.failure as { status?: number }).status === 400) {
+        throw Object.assign(new Error("errors.embeddingRejected"), { code: "PROVIDER" });
+      }
+      throw error;
+    }
     if (!isRecord(response) || !Array.isArray(response.data) || response.data.length !== request.inputs.length) {
       throw malformedResponse();
     }

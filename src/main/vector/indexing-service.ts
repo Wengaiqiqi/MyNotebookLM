@@ -9,6 +9,60 @@ type ResolvedProvider = EmbeddingProvider;
 type ProviderResolver = ResolvedProvider | ((revisionId: string, space: LanceSpace) => Promise<ResolvedProvider>);
 type StoredLike = Omit<LanceRow, "locator"> & { locatorJson?: string; locator?: unknown };
 type SpaceBoundary = { project_id: string; source_id: string; space_id?: string; space_project_id?: string; space_dimension?: number; space_state?: string; active_space_id?: string; provider?: string; model_id?: string; model_revision?: string; distance?: string; pooling?: string; preprocess_version?: string; chunking_version?: string; fingerprint?: string };
+/** Character ceiling per embedding input; conservative against providers
+ *  whose tokenizers count dense CJK/digit content at ~1 token per char. */
+export const EMBEDDING_INPUT_CHAR_LIMIT = 2400;
+
+export function splitForEmbedding(text: string, limit = EMBEDDING_INPUT_CHAR_LIMIT): string[] {
+  if (text.length <= limit) return [text];
+  const parts: string[] = [];
+  let rest = text;
+  while (rest.length > limit) {
+    let cut = rest.lastIndexOf("\n", limit);
+    if (cut < limit * 0.5) cut = limit;
+    parts.push(rest.slice(0, cut));
+    rest = rest.slice(cut);
+  }
+  if (rest.length > 0) parts.push(rest);
+  return parts;
+}
+
+function meanPool(vectors: number[][]): number[] {
+  const dimension = vectors[0]!.length;
+  const pooled = new Array<number>(dimension).fill(0);
+  for (const vector of vectors) {
+    for (let i = 0; i < dimension; i += 1) pooled[i] = (pooled[i] ?? 0) + vector[i]! / vectors.length;
+  }
+  const norm = Math.sqrt(pooled.reduce((sum, value) => sum + value * value, 0)) || 1;
+  return pooled.map((value) => value / norm);
+}
+
+/** Oversized chunks are split into embeddable segments; the segment vectors
+ *  are mean-pooled back into one vector so chunks stay 1:1 with rows. */
+function withOversizeGuard(provider: ResolvedProvider): ResolvedProvider {
+  return {
+    describe: () => provider.describe(),
+    embedBatch: async (texts, signal, batchSize) => {
+      const vectors: number[][] = [];
+      for (const text of texts) {
+        const segments = splitForEmbedding(text);
+        if (segments.length === 1) {
+          vectors.push(...await provider.embedBatch(segments, signal, batchSize));
+          continue;
+        }
+        console.error(`[index] chunk exceeds the embedding input limit (${text.length} chars); embedding ${segments.length} segments and pooling`);
+        const pooled: number[][] = [];
+        for (let i = 0; i < segments.length; i += Math.max(1, batchSize ?? 32)) {
+          pooled.push(...await provider.embedBatch(segments.slice(i, i + Math.max(1, batchSize ?? 32)), signal, batchSize));
+        }
+        if (pooled.length !== segments.length) throw new Error("Embedding response count mismatch");
+        vectors.push(meanPool(pooled));
+      }
+      return vectors;
+    }
+  };
+}
+
 export function canonicalEmbeddingFingerprint(value: { provider: string; modelId: string; modelRevision: string; dimension: number; distance: string; pooling: string; preprocessVersion: string; chunkingVersion: string }): string { return createHash("sha256").update(JSON.stringify(value)).digest("hex"); }
 function canonicalLocatorJson(value: unknown): string { if (value === null || typeof value !== "object") return JSON.stringify(value); if (Array.isArray(value)) return "[" + value.map(canonicalLocatorJson).join(",") + "]"; return "{" + Object.keys(value as Record<string, unknown>).sort().map(k => JSON.stringify(k) + ":" + canonicalLocatorJson((value as Record<string, unknown>)[k])).join(",") + "}"; }
 export class IndexingService {
@@ -49,7 +103,7 @@ export class IndexingService {
     const persisted = this.validateSpace(input.revisionId, input.space, "index");
     const source = persisted;
     try {
-      const provider = await this.resolveAndValidateProvider(input.revisionId, input.space, persisted);
+      const provider = withOversizeGuard(await this.resolveAndValidateProvider(input.revisionId, input.space, persisted));
       await this.lance.createSpace?.(input.space);
       const chunks = this.db.prepare("SELECT id, ordinal, content_hash, text, locator_json FROM source_chunks WHERE revision_id = ? ORDER BY ordinal").all(input.revisionId) as Chunk[];
       const size = Math.max(1, input.batchSize ?? 32);
@@ -75,7 +129,7 @@ export class IndexingService {
   async rebuild(input: { revisionId: string; space: LanceSpace; signal?: AbortSignal; batchSize?: number }): Promise<void> {
     const persisted = this.validateSpace(input.revisionId, input.space, "rebuild");
     const source = persisted;
-    const provider = await this.resolveAndValidateProvider(input.revisionId, input.space, persisted);
+    const provider = withOversizeGuard(await this.resolveAndValidateProvider(input.revisionId, input.space, persisted));
     let chunks = this.db.prepare("SELECT id, ordinal, content_hash, text, locator_json FROM source_chunks WHERE revision_id = ? ORDER BY ordinal").all(input.revisionId) as Chunk[];
     if (chunks.length === 0 && this.recoverChunks) { await this.recoverChunks(input.revisionId); }
     chunks = this.db.prepare("SELECT id, ordinal, content_hash, text, locator_json FROM source_chunks WHERE revision_id = ? ORDER BY ordinal").all(input.revisionId) as Chunk[];

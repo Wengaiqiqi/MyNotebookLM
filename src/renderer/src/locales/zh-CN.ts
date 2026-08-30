@@ -171,6 +171,7 @@ const zhCN = {
     indexUnavailable: "索引暂时不可用，请重试或重建。",
     taskConflict: "已有索引任务正在运行，请稍后再试。",
     embeddingProfileUnavailable: "嵌入模型不可用，请检查模型设置后重试。",
+    embeddingRejected: "嵌入模型拒绝了部分内容（通常超出单条输入上限）。系统已自动拆分重试，请重新导入；若仍失败请检查文件内容。",
     unsupportedFormat: "不支持此文件格式，请选择 PDF、DOCX、PPTX、XLSX、TXT、Markdown 或 CSV。",
     unsafeInput: "来源校验失败，请检查文件或网址后重试。",
     generationProfileMissing: "尚未配置生成模型，请打开模型服务设置。",
@@ -181,6 +182,7 @@ const zhCN = {
     providerFailure: "模型服务请求失败，请检查服务状态后重试。",
     providerIncomplete: "模型服务未完成回答，请重试。",
     citationOpenFailed: "无法打开来源，请检查来源文件或网址。",
+    citationDetailFailed: "无法读取引用原文，请稍后重试。",
     sourceUnavailable: "来源不可用，请重新导入或检查来源。",
     notFound: "找不到请求的资源，请重新加载设置。",
     modelCapability: "此提供商或模型不支持所需能力，请选择其他模型。",
@@ -228,7 +230,7 @@ const zhCN = {
     retryBusyHint: "正在生成回答，请等待完成或停止后再重试",
     ui: {
       conversations: "对话", rename: "重命名", remove: "删除", saveTitle: "保存对话标题", noConversations: "暂无对话。", conversationTitle: "对话标题", viewDetails: "查看原文",
-      citationTitle: "来源引用", citationEmpty: "回答中的引用会显示在这里。", openOriginal: "打开原始来源", opened: "已打开{{kind}}", sourceLabel: "已有资料", indexed: "已建立索引", indexedLabel: "已建立索引", processingComplete: "资料处理完成", research: "研究", researchChat: "研究对话", askPlaceholder: "针对来源提问，Enter 发送，Shift+Enter 换行…", model: "模型", generationModel: "生成模型", noModel: "无模型", send: "发送", stop: "停止", copy: "复制", regenerate: "重新生成", answerFailed: "回答失败。", retryAnswer: "重试回答", fallbackBanner: "首选模型暂时不可用，回答已切换到回退模型。", unavailableTitle: "研究对话尚未就绪", unavailableImport: "导入来源并等待索引完成后，即可开始提问。", unavailableModel: "请在设置中配置生成模型后提问。", importSources: "导入来源", openSettings: "打开设置", rebuildIndex: "重建索引", pending: "待处理", ready: "已就绪", sourceProgress: "{{stage}} · {{progress}}%", page: "第", slide: "幻灯片", sheet: "工作表", cell: "单元格"
+      citationTitle: "来源引用", citationEmpty: "回答中的引用会显示在这里。", sourceExcerptTitle: "引用原文", sourceExcerptUnavailable: "原文暂不可用。", openOriginal: "打开原始来源", opened: "已打开{{kind}}", sourceLabel: "已有资料", indexed: "已建立索引", indexedLabel: "已建立索引", processingComplete: "资料处理完成", research: "研究", researchChat: "研究对话", askPlaceholder: "针对来源提问，Enter 发送，Shift+Enter 换行…", model: "模型", generationModel: "生成模型", noModel: "无模型", send: "发送", stop: "停止", copy: "复制", regenerate: "重新生成", answerFailed: "回答失败。", retryAnswer: "重试回答", fallbackBanner: "首选模型暂时不可用，回答已切换到回退模型。", unavailableTitle: "研究对话尚未就绪", unavailableImport: "导入来源并等待索引完成后，即可开始提问。", unavailableModel: "请在设置中配置生成模型后提问。", importSources: "导入来源", openSettings: "打开设置", rebuildIndex: "重建索引", pending: "待处理", ready: "已就绪", sourceProgress: "{{stage}} · {{progress}}%", page: "第", slide: "幻灯片", sheet: "工作表", cell: "单元格"
     }
   },
   research: {

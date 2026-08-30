@@ -20,15 +20,21 @@ function isWordChar(char: string): boolean {
 }
 
 /**
- * Deterministic token estimate: each CJK code point costs 1 token; each
- * non-CJK word costs ceil(1.3) tokens. CJK characters and punctuation act
- * as word boundaries so unspaced mixed text (e.g. "ab你cd") is not
- * collapsed into a single under-counted word.
+ * Deterministic token estimate biased toward OVER-counting, because an
+ * underestimate lets oversized chunks reach providers that reject them.
+ * Each CJK code point costs 1 token, each digit costs 1 token (tokenizers
+ * break digit runs far more aggressively than 1.3/word), each visible
+ * symbol costs 1 token, and each remaining non-CJK word costs ceil(1.3)
+ * tokens. CJK characters and punctuation act as word boundaries so
+ * unspaced mixed text (e.g. "ab你cd") is not collapsed into a single
+ * under-counted word.
  */
 export function estimateTokens(text: string): number {
   if (text.length === 0) return 0;
   let cjk = 0;
   let wordCount = 0;
+  let digits = 0;
+  let symbols = 0;
   let inWord = false;
   for (const char of text) {
     if (CJK_CODE_POINT.test(char)) {
@@ -36,11 +42,17 @@ export function estimateTokens(text: string): number {
       cjk += 1;
       continue;
     }
+    if (/[0-9]/.test(char)) {
+      if (inWord) { wordCount += 1; inWord = false; }
+      digits += 1;
+      continue;
+    }
     if (isWordChar(char)) { inWord = true; continue; }
     if (inWord) { wordCount += 1; inWord = false; }
+    if (!/\s/.test(char)) symbols += 1;
   }
   if (inWord) wordCount += 1;
-  return cjk + Math.ceil(wordCount * 1.3);
+  return cjk + digits + symbols + Math.ceil(wordCount * 1.3);
 }
 
 function chunkHash(text: string): string {

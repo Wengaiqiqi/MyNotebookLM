@@ -76,14 +76,14 @@ describe("estimateTokens", () => {
     expect(estimateTokens("ab你cd")).toBe(4);
   });
 
-  it("splits non-CJK words at punctuation so punctuation never inflates a word count", () => {
-    expect(estimateTokens("hello,world")).toBe(3);
-    expect(estimateTokens("a,b,c")).toBe(4);
+  it("splits non-CJK words at punctuation and counts each symbol as a token", () => {
+    expect(estimateTokens("hello,world")).toBe(4);
+    expect(estimateTokens("a,b,c")).toBe(6);
   });
 
-  it("counts pure punctuation as zero words", () => {
-    expect(estimateTokens("...")).toBe(0);
-    expect(estimateTokens("，。！？")).toBe(0);
+  it("counts pure punctuation as symbols, not words", () => {
+    expect(estimateTokens("...")).toBe(3);
+    expect(estimateTokens("，。！？")).toBe(4);
   });
 });
 
@@ -164,7 +164,9 @@ describe("chunkBlocks 900-token target", () => {
 
 describe("chunkBlocks 150-token overlap", () => {
   it("re-includes trailing blocks of a chunk at the head of the next by default", () => {
-    const blocks = makeParagraphs(40, 25);
+    // Blocks stay well under the chunk target so each block remains whole
+    // even with the digit/symbol-aware estimator.
+    const blocks = makeParagraphs(40, 8);
     const chunks = chunkBlocks(blocks);
     expect(chunks.length).toBeGreaterThan(1);
     for (let i = 0; i < chunks.length - 1; i += 1) {
@@ -176,7 +178,7 @@ describe("chunkBlocks 150-token overlap", () => {
   });
 
   it("bounds the reused overlap tail to the overlap window", () => {
-    const blocks = makeParagraphs(20, 25);
+    const blocks = makeParagraphs(20, 8);
     const chunks = chunkBlocks(blocks, { targetTokens: 100, overlapTokens: 40 });
     expect(chunks.length).toBeGreaterThan(2);
     const shared = blocks.find(

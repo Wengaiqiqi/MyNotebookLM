@@ -171,6 +171,7 @@ const en = {
     indexUnavailable: "The index is temporarily unavailable. Retry or rebuild.",
     taskConflict: "An index task is already running. Try again later.",
     embeddingProfileUnavailable: "The embedding model is unavailable. Check the model settings.",
+    embeddingRejected: "The embedding model rejected part of the content (usually over the per-input limit). It was split and retried automatically; re-import the source, or check the file if it still fails.",
     unsupportedFormat: "Unsupported file format. Choose PDF, DOCX, PPTX, XLSX, TXT, Markdown or CSV.",
     unsafeInput: "Source validation failed. Check the file or URL and retry.",
     generationProfileMissing: "No generation model configured. Open the model services settings.",
@@ -181,6 +182,7 @@ const en = {
     providerFailure: "The model service request failed. Check the service status.",
     providerIncomplete: "The model service did not finish the answer. Please retry.",
     citationOpenFailed: "Could not open the source. Check the source file or URL.",
+    citationDetailFailed: "Could not load the source excerpt. Please retry.",
     sourceUnavailable: "The source is unavailable. Re-import it or check the source.",
     notFound: "The requested resource was not found. Reload the settings.",
     modelCapability: "This provider or model does not support the required capability. Choose another model.",
@@ -228,7 +230,7 @@ const en = {
     retryBusyHint: "An answer is streaming. Wait for it to finish or stop it first",
     ui: {
       conversations: "Conversations", rename: "Rename", remove: "Delete", saveTitle: "Save conversation title", noConversations: "No conversations yet.", conversationTitle: "Conversation title", viewDetails: "View source",
-      citationTitle: "Source citations", citationEmpty: "Citations from answers will appear here.", openOriginal: "Open original source", opened: "Opened {{kind}}", sourceLabel: "Sources", indexed: "indexed", indexedLabel: "indexed", processingComplete: "Processing complete", research: "Research", researchChat: "Research chat", askPlaceholder: "Ask about your sources. Enter to send, Shift+Enter for a new line…", model: "Model", generationModel: "Generation model", noModel: "No model", send: "Send", stop: "Stop", copy: "Copy", regenerate: "Regenerate", answerFailed: "The answer failed.", retryAnswer: "Retry answer", fallbackBanner: "The primary model was unavailable. The answer continued with a fallback model.", unavailableTitle: "Research chat is not ready yet", unavailableImport: "Import a source and wait for indexing to finish, then start asking.", unavailableModel: "Configure a generation model in settings to ask questions.", importSources: "Import sources", openSettings: "Open settings", rebuildIndex: "Rebuild index", pending: "pending", ready: "ready", sourceProgress: "{{stage}} · {{progress}}%", page: "Page", slide: "Slide", sheet: "Sheet", cell: "Cell"
+      citationTitle: "Source citations", citationEmpty: "Citations from answers will appear here.", sourceExcerptTitle: "Source excerpt", sourceExcerptUnavailable: "The source excerpt is unavailable.", openOriginal: "Open original source", opened: "Opened {{kind}}", sourceLabel: "Sources", indexed: "indexed", indexedLabel: "indexed", processingComplete: "Processing complete", research: "Research", researchChat: "Research chat", askPlaceholder: "Ask about your sources. Enter to send, Shift+Enter for a new line…", model: "Model", generationModel: "Generation model", noModel: "No model", send: "Send", stop: "Stop", copy: "Copy", regenerate: "Regenerate", answerFailed: "The answer failed.", retryAnswer: "Retry answer", fallbackBanner: "The primary model was unavailable. The answer continued with a fallback model.", unavailableTitle: "Research chat is not ready yet", unavailableImport: "Import a source and wait for indexing to finish, then start asking.", unavailableModel: "Configure a generation model in settings to ask questions.", importSources: "Import sources", openSettings: "Open settings", rebuildIndex: "Rebuild index", pending: "pending", ready: "ready", sourceProgress: "{{stage}} · {{progress}}%", page: "Page", slide: "Slide", sheet: "Sheet", cell: "Cell"
     }
   },
   research: {
