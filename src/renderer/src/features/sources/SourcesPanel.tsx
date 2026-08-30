@@ -177,11 +177,6 @@ export default function SourcesPanel({ projectId, embeddingProfileId, onImported
                     <button type="button" className="icon-btn" aria-label={t("research.openSource")} onClick={() => void open(source)}>
                       <Icon name="open" />
                     </button>
-                    {source.currentRevisionState === "failed" && (
-                      <button type="button" className="icon-btn" aria-label={t("research.task.retry")} onClick={() => void retry(source.id)}>
-                        <Icon name="retry" />
-                      </button>
-                    )}
                     <button type="button" className="icon-btn danger" aria-label={`${t("research.removeSource")}: ${source.displayName}`} onClick={() => void remove(source)}>
                       <Icon name="trash" />
                     </button>
