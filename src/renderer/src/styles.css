@@ -855,8 +855,9 @@ button:disabled { cursor: not-allowed; opacity: .5; }
 .note-menu-trigger:focus-visible { opacity: 1; }
 .note-menu-trigger:hover { background: color-mix(in srgb, var(--ink) 8%, transparent); color: var(--ink); }
 .note-menu-trigger svg { width: 16px; height: 16px; }
-.notes-menu-anchor { position: static; }
-.note-item .notes-menu { top: calc(100% - 4px); right: 6px; left: auto; }
+.notes-menu-anchor { position: static; display: flex; align-items: center; margin-right: 4px; }
+.note-menu-trigger { align-self: auto; }
+.note-item .notes-menu { top: calc(100% + 2px); right: 0; left: auto; }
 .note-list-item strong { display: block; font-size: 13.5px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .note-list-item small { color: var(--ink-3); font-size: 11.5px; display: flex; gap: 6px; margin-top: 2px; }
 .note-list-item .archived-tag { color: var(--warn); }
