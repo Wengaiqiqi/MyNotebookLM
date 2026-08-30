@@ -438,6 +438,7 @@ export function CitationsPanel({ projectId, citations, active, onSelect }: {
   onSelect: (citation: CitationDto) => void;
 }) {
   const { t } = useTranslation();
+  const cardRefs = useRef(new Map<string, HTMLElement>());
   const unique = useMemo(() => {
     const seen = new Set<string>();
     return citations.filter((citation) => {
@@ -454,6 +455,17 @@ export function CitationsPanel({ projectId, citations, active, onSelect }: {
   }
 
   const [collapsed, setCollapsed] = useState(false);
+
+  // Clicking a citation chip in the transcript scrolls its card into view
+  // (and expands the panel first if it was collapsed).
+  useEffect(() => {
+    if (active && collapsed) setCollapsed(false);
+  }, [active, collapsed]);
+  useEffect(() => {
+    if (!active || collapsed) return;
+    cardRefs.current.get(active.label)?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  }, [active, collapsed]);
+
   if (collapsed) {
     return (
       <aside className="panel rail rail-right" aria-label={t("chat.ui.citationTitle")}>
@@ -484,6 +496,10 @@ export function CitationsPanel({ projectId, citations, active, onSelect }: {
           <article
             className={`cite-item${active?.id === citation.id ? " active" : ""}`}
             key={citation.label}
+            ref={(node) => {
+              if (node) cardRefs.current.set(citation.label, node);
+              else cardRefs.current.delete(citation.label);
+            }}
             onClick={() => onSelect(citation)}
           >
             <div className="cite-item-head">
