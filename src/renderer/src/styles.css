@@ -531,6 +531,12 @@ button:disabled { cursor: not-allowed; opacity: .5; }
 .task-card .actions { display: flex; gap: 6px; justify-content: flex-end; margin-top: 8px; }
 .progress { height: 6px; border-radius: 999px; background: var(--surface-3); overflow: hidden; }
 .progress > i { display: block; height: 100%; border-radius: 999px; background: var(--accent); transition: width .25s ease; }
+.progress.indeterminate > i { width: 36%; transition: none; animation: indeterminate 1.15s ease-in-out infinite; }
+@keyframes indeterminate {
+  0% { transform: translateX(-110%); }
+  60% { transform: translateX(170%); }
+  100% { transform: translateX(290%); }
+}
 .progress.ok > i { background: var(--ok); }
 .progress.danger > i { background: var(--danger); }
 

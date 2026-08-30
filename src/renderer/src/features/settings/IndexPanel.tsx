@@ -117,9 +117,8 @@ export default function IndexPanel({ projectId }: { projectId: string }) {
         <div>
           <div className="row" style={{ display: "flex", justifyContent: "space-between", fontSize: 12, marginBottom: 4 }}>
             <strong>{t(`research.task.${task?.stage ?? "indexing"}`, task?.stage ?? "")}</strong>
-            <span>{percent}%</span>
           </div>
-          <div className="progress"><i style={{ width: `${percent}%` }} /></div>
+          <div className="progress indeterminate"><i /></div>
         </div>
       )}
 

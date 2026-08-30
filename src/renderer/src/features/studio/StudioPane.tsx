@@ -233,10 +233,9 @@ export default function StudioPane({ projectId }: { projectId: string }) {
             <div className="task-card" role="status">
               <div className="row">
                 <strong>{t(`transformations.states.${transformTask.state}`, transformTask.state)}</strong>
-                <span className="pct">{taskPercent}%</span>
               </div>
-              <div className={`progress${transformTask.state === "failed" ? " danger" : transformTask.state === "completed" ? " ok" : ""}`}>
-                <i style={{ width: `${taskPercent}%` }} />
+              <div className={`progress${transformTask.state === "failed" ? " danger" : transformTask.state === "completed" ? " ok" : transformTask.state === "running" || transformTask.state === "queued" ? " indeterminate" : ""}`}>
+                <i style={transformTask.state === "failed" || transformTask.state === "completed" ? { width: `${taskPercent}%` } : undefined} />
               </div>
               {transformTask.error && <p className="err" role="alert">{t(transformTask.error.messageKey, transformTask.error.messageKey)}</p>}
             </div>

@@ -157,7 +157,6 @@ export default function SourcesPanel({ projectId, embeddingProfileId, onImported
             const ready = sourceReady(source);
             const activeTask = activeTaskBySource.get(source.id);
             const failedTask = failedTaskBySource.get(source.id);
-            const percent = activeTask ? Math.round(activeTask.progress / 10) : 0;
             return (
               <div className="source-item" key={source.id}>
                 <div className="source-item-main">
@@ -193,9 +192,8 @@ export default function SourcesPanel({ projectId, embeddingProfileId, onImported
                   <div className="source-task" role="status">
                     <div className="source-task-row">
                       <span>{t(`research.task.${activeTask.stage}`, activeTask.stage)}</span>
-                      <span className="pct">{percent}%</span>
                     </div>
-                    <div className="progress" aria-hidden="true"><i style={{ width: `${percent}%` }} /></div>
+                    <div className="progress indeterminate" aria-hidden="true"><i /></div>
                     <button type="button" className="btn ghost sm source-task-action" onClick={() => void cancel(activeTask)}>
                       {t("research.task.cancel")}
                     </button>
