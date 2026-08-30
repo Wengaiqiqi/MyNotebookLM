@@ -6,7 +6,7 @@ import Icon from "../../ui/Icon";
 import Modal, { DialogHead } from "../../ui/Modal";
 import { toast } from "../../ui/Toast";
 import { useTaskFeed } from "../../hooks/useTaskFeed";
-import { cssKindClass, errorText, formatBytes, kindLabel, sourceReady } from "../../lib/format";
+import { cssKindClass, errorText, kindLabel, sourceReady } from "../../lib/format";
 import { api } from "../../lib/api";
 
 export default function SourcesPanel({ projectId, embeddingProfileId, onImported, onOpenSettings }: {
@@ -165,7 +165,6 @@ export default function SourcesPanel({ projectId, embeddingProfileId, onImported
                   </span>
                   <span className="source-item-copy">
                     <strong title={source.displayName}>{source.displayName}</strong>
-                    {source.sizeBytes !== undefined && <small>{formatBytes(source.sizeBytes)}</small>}
                     <small className="source-status">
                       {ready
                         ? <><span className="state-dot ready" aria-hidden="true" />{t("research.indexed")}</>
