@@ -224,7 +224,7 @@ const en = {
     renameHint: "Click to switch, double-click to rename",
     thinking: "Thinking level",
     thinkingHint: "Higher levels reason more but respond slower; unsupported models degrade automatically",
-    thinkingLevel: { off: "Thinking: off", low: "Thinking: low", medium: "Thinking: medium", high: "Thinking: high" },
+    thinkingLevel: { off: "Off", low: "Low", medium: "Medium", high: "High" },
     retryBusyHint: "An answer is streaming. Wait for it to finish or stop it first",
     ui: {
       conversations: "Conversations", rename: "Rename", remove: "Delete", saveTitle: "Save conversation title", noConversations: "No conversations yet.", conversationTitle: "Conversation title", viewDetails: "View source",

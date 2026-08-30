@@ -165,8 +165,8 @@ export default function SourcesPanel({ projectId, embeddingProfileId, onImported
                   </span>
                   <span className="source-item-copy">
                     <strong title={source.displayName}>{source.displayName}</strong>
-                    <small>
-                      {source.sizeBytes !== undefined ? `${formatBytes(source.sizeBytes)} · ` : ""}
+                    {source.sizeBytes !== undefined && <small>{formatBytes(source.sizeBytes)}</small>}
+                    <small className="source-status">
                       {ready
                         ? <><span className="state-dot ready" aria-hidden="true" />{t("research.indexed")}</>
                         : source.currentRevisionState === "failed"
