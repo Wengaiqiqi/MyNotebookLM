@@ -8,13 +8,20 @@ import type { IndexingService } from "../vector/indexing-service";
 export type IngestionRun = { taskId: string; revisionId: string; kind: string; data: Uint8Array; updatedAt: string };
 
 export class IngestionService {
-  constructor(private readonly pool: Pick<WorkerPool, "start" | "cancel"> & Partial<Pick<WorkerPool, "setDurablePayloadLoader" | "setProgressCallback">>, private readonly db: Database.Database, durablePayload?: (taskId: string, revisionId: string) => DurableWorkerPayload | undefined, onProgress?: (taskId: string, value: number) => void, private readonly indexing?: IndexingService) { if (durablePayload) this.pool.setDurablePayloadLoader?.(durablePayload); if (onProgress) this.pool.setProgressCallback?.((taskId, value) => throttleProgress(taskId, (v) => onProgress(taskId, v))(value)); }
+  constructor(private readonly pool: Pick<WorkerPool, "start" | "cancel"> & Partial<Pick<WorkerPool, "setDurablePayloadLoader" | "setProgressCallback">>, private readonly db: Database.Database, durablePayload?: (taskId: string, revisionId: string) => DurableWorkerPayload | undefined, onProgress?: (taskId: string, value: number) => void, private readonly indexing?: IndexingService, private readonly ensureSpace?: (projectId: string) => Promise<void>) { if (durablePayload) this.pool.setDurablePayloadLoader?.(durablePayload); if (onProgress) this.pool.setProgressCallback?.((taskId, value) => throttleProgress(taskId, (v) => onProgress(taskId, v))(value)); }
   async run(input: IngestionRun): Promise<void> {
     let result;
     try { result = await this.pool.start(input.taskId, input.revisionId, input.kind, input.data); } catch (error) { if ((error as { state?: string }).state === "cancelled") return; throw error; }
     persistParsedResult(this.db, { revisionId: input.revisionId, taskId: input.taskId, chunks: result.chunks, updatedAt: input.updatedAt });
     if (this.indexing) {
-      const space = this.db.prepare("SELECT es.id, es.dimension FROM source_revisions sr JOIN sources s ON s.id = sr.source_id JOIN project_embedding_spaces pes ON pes.project_id = s.project_id JOIN embedding_spaces es ON es.id = pes.space_id AND es.state = 'active' WHERE sr.id = ?").get(input.revisionId) as { id: string; dimension: number } | undefined;
+      const spaceQuery = this.db.prepare("SELECT es.id, es.dimension, s.project_id FROM source_revisions sr JOIN sources s ON s.id = sr.source_id JOIN project_embedding_spaces pes ON pes.project_id = s.project_id JOIN embedding_spaces es ON es.id = pes.space_id AND es.state = 'active' WHERE sr.id = ?");
+      let space = spaceQuery.get(input.revisionId) as { id: string; dimension: number; project_id: string } | undefined;
+      if (!space && this.ensureSpace) {
+        // First import into a fresh project: build the embedding Space from
+        // the default embedding profile, then continue transparently.
+        await this.ensureSpace((this.db.prepare("SELECT s.project_id FROM source_revisions sr JOIN sources s ON s.id = sr.source_id WHERE sr.id = ?").get(input.revisionId) as { project_id: string }).project_id);
+        space = spaceQuery.get(input.revisionId) as { id: string; dimension: number; project_id: string } | undefined;
+      }
       if (!space) {
         // First ingest for a project without a built embedding Space: surface
         // a clear, recoverable error the renderer can act on instead of INTERNAL.

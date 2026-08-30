@@ -176,12 +176,49 @@ app.whenReady().then(async () => {
     return row ? { provider: await createProviderForSpace(row, space) } : null;
   }});
   (indexing as IndexingService & { setChunkRecovery?: (revisionId: string) => void }).setChunkRecovery?.((revisionId) => ingestionService.reparseRevision(revisionId));
+  // Lazily build a project's embedding Space on first import so users never
+  // have to fail an import manually before the index exists.
+  const spaceBuilds = new Map<string, Promise<void>>();
+  const ensureSpaceForProject = async (projectId: string): Promise<void> => {
+    if (spaces.active(projectId)) return;
+    const inflight = spaceBuilds.get(projectId);
+    if (inflight) { await inflight; return; }
+    const build = (async () => {
+      const profileId = settingsRepository.getRoute("embedding")[0]?.profileId;
+      const profile = profileId ? settingsRepository.getProfile(profileId) : undefined;
+      const unavailable = () => Object.assign(new Error("errors.embeddingProfileUnavailable"), { code: "INDEX_UNAVAILABLE" });
+      if (!profile || !profile.enabled || profile.capability !== "embedding") throw unavailable();
+      const modelId = profile.modelId.trim();
+      if (!modelId) throw unavailable();
+      const trustedRevision = profile.provider === "local" ? LOCAL_MODEL_MANIFEST.revision : modelId;
+      const seedDimension = profile.provider === "local" ? LOCAL_MODEL_MANIFEST.dimension : 1;
+      const capabilitySeed = { provider: profile.provider, modelId, modelRevision: trustedRevision, dimension: seedDimension, distance: "cosine" as const, pooling: "mean" as const, preprocessVersion: profile.provider === "local" ? "e5-query-passage-v1" : "provider-default-v1", chunkingVersion: "persisted" };
+      const provider = await createProviderForSpace({ provider: capabilitySeed.provider, model_id: capabilitySeed.modelId, model_revision: capabilitySeed.modelRevision, dimension: capabilitySeed.dimension, distance: capabilitySeed.distance, pooling: capabilitySeed.pooling, preprocess_version: capabilitySeed.preprocessVersion, chunking_version: capabilitySeed.chunkingVersion, ...(profile.provider === "local" ? { fingerprint: canonicalEmbeddingFingerprint(capabilitySeed) } : {}) }, { id: "", dimension: capabilitySeed.dimension });
+      const probe = await provider?.embedBatch?.(["embedding profile probe"], new AbortController().signal, 1);
+      const dimension = probe[0]?.length;
+      if (!dimension) throw unavailable();
+      const capability = provider.describe();
+      const fingerprint = canonicalEmbeddingFingerprint({ provider: capability.provider, modelId: capability.modelId, modelRevision: capability.modelRevision, dimension, distance: capability.distance, pooling: capability.pooling, preprocessVersion: capability.preprocessVersion, chunkingVersion: capability.chunkingVersion });
+      const task = taskService.createTask({ projectId, sourceId: null, kind: "validation" });
+      taskService.start(task.id, "validating");
+      try {
+        await spaceService.rebuild({ taskId: task.id, spec: { projectId, provider: capability.provider, modelId: capability.modelId, modelRevision: capability.modelRevision, dimension, distance: capability.distance, pooling: capability.pooling, preprocessVersion: capability.preprocessVersion, chunkingVersion: capability.chunkingVersion, fingerprint } });
+        taskService.complete(task.id);
+      } catch (error) {
+        try { taskService.fail(task.id, { code: "INTERNAL", messageKey: "errors.internal", recoverable: false }); } catch { /* already terminal */ }
+        console.error(`[space] auto-build for project ${projectId} failed:`, error);
+        throw Object.assign(new Error("errors.indexUnavailable"), { code: "INDEX_UNAVAILABLE", cause: error });
+      }
+    })();
+    spaceBuilds.set(projectId, build);
+    try { await build; } finally { spaceBuilds.delete(projectId); }
+  };
   ingestionService = new IngestionService(pool, appDatabase.connection, (taskId) => {
     const revisionId = taskRevisions.get(taskId);
     const row = revisionId ? appDatabase?.connection.prepare("SELECT sr.stored_path, s.kind FROM tasks t JOIN source_revisions sr ON sr.id = ? JOIN sources s ON s.id = t.source_id WHERE t.id = ?").get(revisionId, taskId) as { stored_path?: string; kind?: string } | undefined : undefined;
     if (!row?.stored_path || !row.kind) return undefined;
     try { return { kind: row.kind, data: readFileSync(row.stored_path) }; } catch { return undefined; }
-  }, (taskId, value) => { const task = taskService.getById(taskId); if (task?.state === "running") taskService.advance(taskId, "parsing", Math.min(600, Math.floor(value * 600))); }, indexing);
+  }, (taskId, value) => { const task = taskService.getById(taskId); if (task?.state === "running") taskService.advance(taskId, "parsing", Math.min(600, Math.floor(value * 600))); }, indexing, ensureSpaceForProject);
   const continueEmbedding = async (task: { id: string; sourceId: string | null }) => {
     const revisionId = taskRevisions.get(task.id) ?? (appDatabase?.connection.prepare("SELECT sr.id FROM tasks t JOIN sources s ON s.id = t.source_id JOIN source_revisions sr ON sr.source_id = s.id AND (sr.id = s.current_revision_id OR (s.current_revision_id IS NULL AND sr.state = 'awaiting_embedding')) WHERE t.id = ? AND t.project_id = s.project_id AND t.source_id = ? ORDER BY CASE WHEN sr.id = s.current_revision_id THEN 0 ELSE 1 END, sr.created_at DESC LIMIT 1").get(task.id, task.sourceId) as { id?: string } | undefined)?.id;
     if (!revisionId) throw new Error("Embedding task has no revision");
