@@ -96,7 +96,6 @@ export default function SourcesPanel({ projectId, onImported, onOpenSettings }: 
     <section className="panel" aria-label={t("research.sources")}>
       <header className="panel-head">
         <h2>{t("research.sources")}</h2>
-        <span className="count">{readyCount}/{sources.length} {t("chat.ui.indexedLabel")}</span>
         <span className="spacer" />
         <button type="button" className="icon-btn" title={t("research.collapsePanel")} aria-label={t("research.collapsePanel")} onClick={() => setCollapsed(true)}>
           <Icon name="chevrons-left" />

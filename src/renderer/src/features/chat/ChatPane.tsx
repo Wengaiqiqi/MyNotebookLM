@@ -351,7 +351,6 @@ export default function ChatPane({ projectId, generationProfileId, sources, onOp
                   aria-label={t("chat.ui.model")}
                   onClick={() => setModelMenuOpen((value) => !value)}
                 >
-                  <Icon name="cpu" />
                   <span className="model-pill-name">
                     {profiles.find((profile) => profile.id === selectedProfileId)?.modelId ?? t("chat.ui.noModel")}
                   </span>

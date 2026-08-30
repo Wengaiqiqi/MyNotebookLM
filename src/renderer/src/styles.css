@@ -201,18 +201,17 @@ button:disabled { cursor: not-allowed; opacity: .5; }
 .project-filter svg { width: 15px; height: 15px; flex: none; }
 
 .project-list { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 2px; padding: 2px; margin: 0 -2px; }
-.project-item { display: flex; align-items: stretch; border-radius: 10px; }
+.project-item {
+  display: flex; align-items: stretch; border-radius: 10px;
+  transition: background .1s ease, box-shadow .1s ease;
+}
+.project-item:hover { background: color-mix(in srgb, var(--ink) 5%, transparent); }
+.project-item.selected { background: var(--surface); box-shadow: var(--shadow-1); }
 .project-item-btn {
-  position: relative; display: flex; align-items: center; gap: 10px;
+  display: flex; align-items: center; gap: 10px;
   flex: 1; min-width: 0; padding: 9px 4px 9px 10px;
   border: 0; border-radius: 10px; background: transparent;
-  text-align: left; transition: background .1s ease;
-}
-.project-item-btn:hover { background: color-mix(in srgb, var(--ink) 5%, transparent); }
-.project-item.selected .project-item-btn { background: var(--surface); box-shadow: var(--shadow-1); }
-.project-item.selected .project-item-btn::before {
-  content: ""; position: absolute; left: 0; top: 9px; bottom: 9px; width: 3px;
-  border-radius: 3px 0 0 3px; background: var(--accent);
+  text-align: left;
 }
 .project-icon {
   display: grid; place-items: center; flex: none;
@@ -300,7 +299,7 @@ button:disabled { cursor: not-allowed; opacity: .5; }
    ------------------------------------------------------------ */
 .btn {
   display: inline-flex; align-items: center; justify-content: center; gap: 7px;
-  height: 36px; padding: 0 14px;
+  height: 36px; padding: 0 14px; white-space: nowrap;
   border: 1px solid transparent; border-radius: 9px;
   background: var(--surface-2); color: var(--ink);
   font-size: 13.5px; font-weight: 550;
@@ -458,12 +457,13 @@ button:disabled { cursor: not-allowed; opacity: .5; }
   min-height: 50px; padding: 0 8px 0 16px;
   border-bottom: 1px solid var(--line); flex: none;
 }
-.panel-head h2 { font-size: 14px; font-weight: 650; }
+.panel-head h2 { font-size: 14px; font-weight: 650; white-space: nowrap; }
 .panel-head .count { color: var(--ink-3); font-size: 12px; margin-left: -4px; }
 .panel-head .spacer { flex: 1; }
 .panel-body { flex: 1; min-height: 0; overflow-y: auto; padding: 10px; }
 
-/* collapsed side rails (sources / citations) */
+/* collapsed side rails (sources / citations): the chat pane grows back
+   the exact width a collapsed panel frees up */
 .panel.rail { align-items: flex-start; justify-content: flex-start; padding: 10px 0; }
 .research:has(> .rail-left) { grid-template-columns: 44px minmax(0, 1fr) 300px; }
 .research:has(> .rail-right) { grid-template-columns: 264px minmax(0, 1fr) 44px; }
@@ -1075,8 +1075,10 @@ button:disabled { cursor: not-allowed; opacity: .5; }
 .fade-in { animation: fade-in .18s ease; }
 
 @media (max-width: 1180px) {
-  .research { grid-template-columns: 232px minmax(0, 1fr); }
-  .research .cite-panel { display: none; }
+  .research { grid-template-columns: 204px minmax(0, 1fr) 224px; }
+  .research:has(> .rail-left) { grid-template-columns: 40px minmax(0, 1fr) 224px; }
+  .research:has(> .rail-right) { grid-template-columns: 204px minmax(0, 1fr) 40px; }
+  .research:has(> .rail-left):has(> .rail-right) { grid-template-columns: 40px minmax(0, 1fr) 40px; }
   .notes { grid-template-columns: 232px minmax(0, 1fr); }
   .studio { grid-template-columns: 1fr; grid-template-rows: auto auto auto; }
   .studio-run { grid-column: 1; grid-row: 1; }
