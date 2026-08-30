@@ -53,7 +53,8 @@ export default function ChatPane({ projectId, generationProfileId, sources, onOp
   const indexedCount = useMemo(() => sources.filter(sourceReady).length, [sources]);
   const chatAvailable = Boolean(generationProfileId) && indexedCount > 0;
 
-  // Conversations
+  // Conversations. Runs only when the project changes: rerunning on every
+  // render would wipe the optimistic new-conversation state.
   useEffect(() => {
     let alive = true;
     setConversationId("");
@@ -68,7 +69,8 @@ export default function ChatPane({ projectId, generationProfileId, sources, onOp
       }
     }).catch(() => undefined);
     return () => { alive = false; };
-  }, [projectId, t]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [projectId]);
 
   // Restore transcript when switching conversations.
   useEffect(() => {

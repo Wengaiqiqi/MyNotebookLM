@@ -819,6 +819,25 @@ button:disabled { cursor: not-allowed; opacity: .5; }
    Notes
    ------------------------------------------------------------ */
 .notes { grid-template-columns: 272px minmax(0, 1fr); }
+.notes:has(> .rail-left) { grid-template-columns: 44px minmax(0, 1fr); }
+.notes-menu-anchor { position: relative; }
+.notes-menu {
+  position: absolute; z-index: 60; top: calc(100% + 6px); right: 0;
+  width: 150px; padding: 4px;
+  border: 1px solid var(--line); border-radius: 12px;
+  background: var(--surface); box-shadow: var(--shadow-pop);
+  animation: pop-in .14s ease;
+}
+.notes-menu button {
+  display: flex; align-items: center; gap: 9px;
+  width: 100%; min-height: 32px; padding: 0 9px;
+  border: 0; border-radius: 8px; background: transparent;
+  font-size: 12.5px; text-align: left;
+}
+.notes-menu button:hover:not(:disabled) { background: var(--surface-2); }
+.notes-menu button.danger { color: var(--danger); }
+.notes-menu button svg { width: 14px; height: 14px; }
+.note-rename { min-height: 34px; padding: 6px 10px; font-size: 13px; font-weight: 600; }
 .note-list-item {
   width: 100%; padding: 11px 12px; border: 0; border-radius: 10px;
   background: transparent; text-align: left; cursor: pointer;
@@ -1131,6 +1150,7 @@ button:disabled { cursor: not-allowed; opacity: .5; }
   .research:has(> .rail-right) { grid-template-columns: 204px minmax(0, 1fr) 40px; }
   .research:has(> .rail-left):has(> .rail-right) { grid-template-columns: 40px minmax(0, 1fr) 40px; }
   .notes { grid-template-columns: 232px minmax(0, 1fr); }
+  .notes:has(> .rail-left) { grid-template-columns: 40px minmax(0, 1fr); }
   .studio { grid-template-columns: 1fr; grid-template-rows: auto auto auto; }
   .studio-run { grid-column: 1; grid-row: 1; }
   .studio-rules { grid-column: 1; grid-row: 2; }

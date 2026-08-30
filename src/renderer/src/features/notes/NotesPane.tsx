@@ -22,6 +22,10 @@ export default function NotesPane({ projectId }: { projectId: string }) {
   const [selectedId, setSelectedId] = useState<string>();
   const [sources, setSources] = useState<SourceDto[]>([]);
   const [loaded, setLoaded] = useState(false);
+  const [collapsed, setCollapsed] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [renaming, setRenaming] = useState<{ id: string; draft: string }>();
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
 
   const load = useCallback(async (includeArchived: boolean) => {
     const result = await api().list({ projectId, includeArchived }).catch(() => undefined);
@@ -39,6 +43,45 @@ export default function NotesPane({ projectId }: { projectId: string }) {
   }, [projectId]);
 
   const selected = useMemo(() => notes.find((note) => note.id === selectedId), [notes, selectedId]);
+
+  useEffect(() => {
+    if (!menuOpen) return;
+    const close = (event: MouseEvent): void => {
+      if (!(event.target as HTMLElement).closest(".notes-menu-anchor")) setMenuOpen(false);
+    };
+    document.addEventListener("mousedown", close);
+    return () => document.removeEventListener("mousedown", close);
+  }, [menuOpen]);
+
+  async function setNoteState(action: "archive" | "restore"): Promise<void> {
+    if (!selected) return;
+    const result = await api()[action]({ projectId, id: selected.id, version: selected.version }).catch(() => undefined);
+    setMenuOpen(false);
+    if (!result?.ok) { toast.error(result ? errorText(result, t) : t("errors.internal")); return; }
+    onChanged(result.value);
+  }
+
+  async function deleteSelected(): Promise<void> {
+    if (!selected) return;
+    const result = await api().delete({ projectId, id: selected.id, version: selected.version }).catch(() => undefined);
+    setMenuOpen(false);
+    setConfirmingDelete(false);
+    if (!result?.ok) { toast.error(result ? errorText(result, t) : t("errors.internal")); return; }
+    setNotes((current) => current.filter((note) => note.id !== selected.id));
+    setSelectedId(undefined);
+  }
+
+  async function commitRename(): Promise<void> {
+    const target = renaming;
+    setRenaming(undefined);
+    if (!target) return;
+    const note = notes.find((item) => item.id === target.id);
+    const title = target.draft.trim();
+    if (!note || !title || title === note.title) return;
+    const result = await api().update({ projectId, id: note.id, title, body: note.body, version: note.version }).catch(() => undefined);
+    if (!result?.ok) { toast.error(result ? errorText(result, t) : t("errors.internal")); return; }
+    setNotes((current) => current.map((item) => (item.id === result.value.id ? result.value : item)));
+  }
 
   async function createNote(): Promise<void> {
     const result = await api().create({ projectId, title: t("notes.untitled"), body: "" }).catch(() => undefined);
@@ -61,6 +104,16 @@ export default function NotesPane({ projectId }: { projectId: string }) {
     setSelectedId(undefined);
   }
 
+  if (collapsed) {
+    return (
+      <aside className="panel rail rail-left" aria-label={t("notes.titlePage")}>
+        <button type="button" className="icon-btn" aria-label={t("notes.expandPanel")} onClick={() => setCollapsed(false)}>
+          <Icon name="chevrons-right" />
+        </button>
+      </aside>
+    );
+  }
+
   return (
     <div className="pane notes">
       <section className="panel" aria-label={t("notes.titlePage")}>
@@ -68,6 +121,38 @@ export default function NotesPane({ projectId }: { projectId: string }) {
           <h2>{showArchived ? t("notes.archived") : t("notes.titlePage")}</h2>
           <span className="count">{notes.length}</span>
           <span className="spacer" />
+          <button type="button" className="icon-btn" aria-label={t("notes.collapsePanel")} onClick={() => setCollapsed(true)}>
+            <Icon name="chevrons-left" />
+          </button>
+          <div className="notes-menu-anchor">
+            <button
+              type="button"
+              className="icon-btn"
+              aria-label={t("notes.actions")}
+              aria-haspopup="menu"
+              aria-expanded={menuOpen}
+              disabled={!selected}
+              onClick={() => setMenuOpen((value) => !value)}
+            >
+              <Icon name="dots" />
+            </button>
+            {menuOpen && selected && (
+              <div className="notes-menu" role="menu">
+                {selected.archivedAt ? (
+                  <button type="button" role="menuitem" onClick={() => void setNoteState("restore")}>
+                    <Icon name="restore" />{t("notes.restore")}
+                  </button>
+                ) : (
+                  <button type="button" role="menuitem" onClick={() => void setNoteState("archive")}>
+                    <Icon name="archive" />{t("notes.archive")}
+                  </button>
+                )}
+                <button type="button" role="menuitem" className="danger" onClick={() => { setMenuOpen(false); setConfirmingDelete(true); }}>
+                  <Icon name="trash" />{t("notes.delete")}
+                </button>
+              </div>
+            )}
+          </div>
           <button type="button" className="btn primary sm" onClick={() => void createNote()}>
             <Icon name="plus" />{t("notes.new")}
           </button>
@@ -91,23 +176,53 @@ export default function NotesPane({ projectId }: { projectId: string }) {
               </div>
             </div>
           ) : notes.map((note) => (
-            <button
-              type="button"
-              key={note.id}
-              className={`note-list-item${note.id === selectedId ? " selected" : ""}`}
-              aria-current={note.id === selectedId ? "page" : undefined}
-              onClick={() => setSelectedId(note.id)}
-            >
-              <strong>{note.title}</strong>
-              <small>
-                {formatDate(note.updatedAt, language)}
-                {note.archivedAt && <span className="archived-tag"> · {t("notes.archivedTag")}</span>}
-              </small>
-            </button>
+            renaming?.id === note.id ? (
+              <input
+                key={note.id}
+                className="input note-rename"
+                autoFocus
+                value={renaming.draft}
+                onChange={(event) => setRenaming({ id: note.id, draft: event.target.value })}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") void commitRename();
+                  if (event.key === "Escape") setRenaming(undefined);
+                }}
+                onBlur={() => void commitRename()}
+                maxLength={200}
+                aria-label={t("notes.title")}
+              />
+            ) : (
+              <button
+                type="button"
+                key={note.id}
+                className={`note-list-item${note.id === selectedId ? " selected" : ""}`}
+                aria-current={note.id === selectedId ? "page" : undefined}
+                title={t("notes.renameHint")}
+                onClick={() => setSelectedId(note.id)}
+                onDoubleClick={() => setRenaming({ id: note.id, draft: note.title })}
+              >
+                <strong>{note.title}</strong>
+                <small>
+                  {formatDate(note.updatedAt, language)}
+                  {note.archivedAt && <span className="archived-tag"> · {t("notes.archivedTag")}</span>}
+                </small>
+              </button>
+            )
           ))}
         </div>
       </section>
 
+      {confirmingDelete && (
+        <Modal open alert onClose={() => setConfirmingDelete(false)} labelledBy="note-delete-title">
+          <DialogHead id="note-delete-title" icon="trash" title={t("notes.delete")} body={t("notes.deleteConfirm")} />
+          <div className="dialog-foot">
+            <button type="button" className="btn" onClick={() => setConfirmingDelete(false)}>{t("common.cancel")}</button>
+            <button type="button" className="btn danger" onClick={() => void deleteSelected()}>
+              <Icon name="trash" />{t("common.confirm")}
+            </button>
+          </div>
+        </Modal>
+      )}
       {selected
         ? <NoteEditor key={selected.id} note={selected} language={language} onChanged={onChanged} onDeleted={deleted} sources={sources} />
         : (
