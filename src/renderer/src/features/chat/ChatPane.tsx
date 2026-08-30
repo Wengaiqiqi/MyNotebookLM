@@ -28,6 +28,8 @@ export default function ChatPane({ projectId, generationProfileId, sources, onOp
   const [profiles, setProfiles] = useState<ModelProfileDto[]>([]);
   const [selectedProfileId, setSelectedProfileId] = useState(generationProfileId ?? "");
   const [convMenuOpen, setConvMenuOpen] = useState(false);
+  const [editingTitle, setEditingTitle] = useState(false);
+  const [titleDraft, setTitleDraft] = useState("");
   const [question, setQuestion] = useState("");
   const [activeCitation, setActiveCitation] = useState<CitationDto | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -96,6 +98,16 @@ export default function ChatPane({ projectId, generationProfileId, sources, onOp
       if (!created.ok) { toast.error(errorText(created, t)); return; }
       setConversations((current) => [created.value, ...current]);
       setConversationId(created.value.id);
+    } else {
+      // A fresh "新对话" takes its title from the first question sent.
+      const current = conversations.find((item) => item.id === conversationId);
+      if (current && current.title === t("chat.newConversation")) {
+        void window.myNotebook.conversations.rename({ projectId, conversationId, title: text.slice(0, 60) })
+          .then((result) => {
+            if (result.ok) setConversations((items) => items.map((item) => (item.id === conversationId ? result.value : item)));
+          })
+          .catch(() => undefined);
+      }
     }
     await stream.send(text);
   }
@@ -115,6 +127,16 @@ export default function ChatPane({ projectId, generationProfileId, sources, onOp
 
   const activeConversation = conversations.find((item) => item.id === conversationId);
 
+  async function commitTitle(): Promise<void> {
+    const target = activeConversation;
+    const title = titleDraft.trim();
+    setEditingTitle(false);
+    if (!target || !title || title === target.title) return;
+    const result = await window.myNotebook.conversations.rename({ projectId, conversationId: target.id, title });
+    if (!result.ok) { toast.error(errorText(result, t)); return; }
+    setConversations((current) => current.map((item) => (item.id === target.id ? result.value : item)));
+  }
+
   if (!chatAvailable) {
     return <ChatUnavailable indexedCount={indexedCount} hasModel={Boolean(generationProfileId)} onOpenSettings={onOpenSettings} onImport={onImport} />;
   }
@@ -124,26 +146,45 @@ export default function ChatPane({ projectId, generationProfileId, sources, onOp
     <section className="panel chat" aria-label={t("chat.ui.researchChat")}>
       <header className="chat-toolbar">
         <div className="conv-picker">
-          <button
-            type="button"
-            className="btn ghost sm"
-            aria-expanded={convMenuOpen}
-            aria-haspopup="menu"
-            onClick={() => setConvMenuOpen((value) => !value)}
-          >
-            <Icon name="chat" />
-            <span style={{ maxWidth: 220, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-              {activeConversation?.title ?? t("chat.ui.conversations")}
-            </span>
-            <Icon name={convMenuOpen ? "chevron-up" : "chevron-down"} />
-          </button>
+          {editingTitle ? (
+            <input
+              className="input conv-rename"
+              autoFocus
+              value={titleDraft}
+              onChange={(event) => setTitleDraft(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") void commitTitle();
+                if (event.key === "Escape") setEditingTitle(false);
+              }}
+              onBlur={() => void commitTitle()}
+              maxLength={200}
+              aria-label={t("chat.ui.rename")}
+            />
+          ) : (
+            <button
+              type="button"
+              className="conv-trigger"
+              aria-expanded={convMenuOpen}
+              aria-haspopup="menu"
+              title={t("chat.renameHint")}
+              onClick={() => setConvMenuOpen((value) => !value)}
+              onDoubleClick={() => {
+                if (!activeConversation) return;
+                setTitleDraft(activeConversation.title);
+                setEditingTitle(true);
+              }}
+            >
+              <Icon name="chat" />
+              <span className="conv-trigger-title">{activeConversation?.title ?? t("chat.ui.conversations")}</span>
+              <Icon name={convMenuOpen ? "chevron-up" : "chevron-down"} className="conv-caret" />
+            </button>
+          )}
           {convMenuOpen && (
             <div className="conv-menu" role="menu">
               <button
                 type="button"
                 role="menuitem"
-                className="btn ghost sm"
-                style={{ width: "100%", justifyContent: "flex-start", color: "var(--accent)" }}
+                className="conv-new"
                 onClick={async () => {
                   setConvMenuOpen(false);
                   const created = await window.myNotebook.conversations.create({ projectId, title: t("chat.newConversation") });
@@ -153,7 +194,6 @@ export default function ChatPane({ projectId, generationProfileId, sources, onOp
               >
                 <Icon name="plus" />{t("chat.newConversation")}
               </button>
-              <div className="menu-sep" aria-hidden="true" />
               {conversations.length === 0 && <p className="empty-note">{t("chat.ui.noConversations")}</p>}
               {conversations.map((item) => (
                 <div className={`conv-item${item.id === conversationId ? " selected" : ""}`} key={item.id}>
@@ -161,7 +201,14 @@ export default function ChatPane({ projectId, generationProfileId, sources, onOp
                     type="button"
                     role="menuitem"
                     className="conv-open"
+                    title={t("chat.renameHint")}
                     onClick={() => { setConversationId(item.id); setActiveCitation(null); setConvMenuOpen(false); }}
+                    onDoubleClick={() => {
+                      setConversationId(item.id);
+                      setTitleDraft(item.title);
+                      setEditingTitle(true);
+                      setConvMenuOpen(false);
+                    }}
                   >
                     <strong>{item.title}</strong>
                     <small>{formatDateTime(item.updatedAt, language)}</small>
@@ -185,7 +232,6 @@ export default function ChatPane({ projectId, generationProfileId, sources, onOp
             </div>
           )}
         </div>
-        <h2>{activeConversation?.title ?? t("chat.ui.researchChat")}</h2>
         <span className="spacer" />
         <span className="badge accent">{indexedCount} {t("chat.ui.indexedLabel")}</span>
       </header>

@@ -219,6 +219,7 @@ const en = {
       retry: "Retry answer",
       repair: "Repair answer"
     },
+    renameHint: "Click to switch, double-click to rename",
     ui: {
       conversations: "Conversations", rename: "Rename", remove: "Delete", saveTitle: "Save conversation title", noConversations: "No conversations yet.", conversationTitle: "Conversation title", viewDetails: "View source",
       citationTitle: "Source citations", citationEmpty: "Citations from answers will appear here.", openOriginal: "Open original source", opened: "Opened {{kind}}", sourceLabel: "Sources", indexed: "indexed", indexedLabel: "indexed", processingComplete: "Processing complete", research: "Research", researchChat: "Research chat", askPlaceholder: "Ask about your sources. Enter to send, Shift+Enter for a new line…", model: "Model", generationModel: "Generation model", noModel: "No model", send: "Send", stop: "Stop", copy: "Copy", regenerate: "Regenerate", answerFailed: "The answer failed.", retryAnswer: "Retry answer", fallbackBanner: "The primary model was unavailable. The answer continued with a fallback model.", unavailableTitle: "Research chat is not ready yet", unavailableImport: "Import a source and wait for indexing to finish, then start asking.", unavailableModel: "Configure a generation model in settings to ask questions.", importSources: "Import sources", openSettings: "Open settings", rebuildIndex: "Rebuild index", pending: "pending", ready: "ready", sourceProgress: "{{stage}} · {{progress}}%", page: "Page", slide: "Slide", sheet: "Sheet", cell: "Cell"
