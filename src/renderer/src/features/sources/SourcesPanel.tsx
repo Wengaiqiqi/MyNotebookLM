@@ -45,18 +45,32 @@ export default function SourcesPanel({ projectId, onImported, onOpenSettings }: 
     if (settled) void refresh();
   }, [tasks, refresh]);
 
-  // Tasks belonging to sources that no longer exist (removed mid-flight or
-  // deleted later) must not keep rendering their progress/error cards.
-  const knownSource = useCallback((sourceId: string | null) =>
-    sourceId === null || sources.some((item) => item.id === sourceId), [sources]);
-  const activeTasks = useMemo(() =>
-    tasks.filter((task) => (task.state === "queued" || task.state === "running") && knownSource(task.sourceId)),
-  [tasks, knownSource]);
-  const recentFailed = useMemo(() =>
-    tasks.filter((task) => task.state === "failed" && knownSource(task.sourceId))
-      .filter((task, index, all) => all.findIndex((candidate) => candidate.sourceId === task.sourceId) === index)
-      .slice(0, 3),
-  [tasks, knownSource]);
+  // Latest task per source, for rendering progress and failures inside the
+  // source's own row. Tasks whose source no longer exists are dropped.
+  const taskBySource = useMemo(() => {
+    const next = new Map<string, TaskDto>();
+    for (const task of tasks) {
+      if (!task.sourceId || !sources.some((item) => item.id === task.sourceId)) continue;
+      if (!next.has(task.sourceId) || task.updatedAt >= next.get(task.sourceId)!.updatedAt) {
+        next.set(task.sourceId, task);
+      }
+    }
+    return next;
+  }, [tasks, sources]);
+  const activeTaskBySource = useMemo(() => {
+    const next = new Map<string, TaskDto>();
+    for (const [sourceId, task] of taskBySource) {
+      if (task.state === "queued" || task.state === "running") next.set(sourceId, task);
+    }
+    return next;
+  }, [taskBySource]);
+  const failedTaskBySource = useMemo(() => {
+    const next = new Map<string, TaskDto>();
+    for (const [sourceId, task] of taskBySource) {
+      if (task.state === "failed") next.set(sourceId, task);
+    }
+    return next;
+  }, [taskBySource]);
 
   async function remove(source: SourceDto): Promise<void> {
     const result = await api().sources.remove({ projectId, sourceId: source.id });
@@ -106,15 +120,6 @@ export default function SourcesPanel({ projectId, onImported, onOpenSettings }: 
       </header>
 
       <div className="panel-body">
-        {activeTasks.map((task) => (
-          <TaskCard key={task.id} task={task} onCancel={() => void cancel(task)} />
-        ))}
-        {recentFailed.map((task) => (
-          <TaskCard key={task.id} task={task}
-            {...(task.error?.recoverable && task.sourceId ? { onRetry: () => void retry(task.sourceId!) } : {})}
-          />
-        ))}
-
         {!loaded ? (
           <div className="empty"><span className="spinner" aria-hidden="true" /></div>
         ) : sources.length === 0 ? (
@@ -129,41 +134,68 @@ export default function SourcesPanel({ projectId, onImported, onOpenSettings }: 
         ) : (
           sources.map((source) => {
             const ready = sourceReady(source);
+            const activeTask = activeTaskBySource.get(source.id);
+            const failedTask = failedTaskBySource.get(source.id);
+            const percent = activeTask ? Math.round(activeTask.progress / 10) : 0;
             return (
               <div className="source-item" key={source.id}>
-                <span className={`kind-badge ${cssKindClass(source.kind)}`} aria-hidden="true">
-                  {source.kind === "url" ? <Icon name="globe" /> : kindLabel(source.kind)}
-                </span>
-                <span className="source-item-copy">
-                  <strong title={source.displayName}>{source.displayName}</strong>
-                  <small>
-                    {source.sizeBytes !== undefined ? `${formatBytes(source.sizeBytes)} · ` : ""}
-                    {ready
-                      ? <><span className="state-dot ready" aria-hidden="true" />{t("research.indexed")}</>
-                      : source.currentRevisionState === "failed"
-                        ? <><span className="state-dot failed" aria-hidden="true" />{t("research.task.failed")}</>
-                        : <><span className="state-dot pending" aria-hidden="true" />{t("research.pending")}</>}
-                  </small>
-                </span>
-                <span className="row-actions">
-                  <button type="button" className="icon-btn" aria-label={t("research.openSource")} onClick={() => void open(source)}>
-                    <Icon name="open" />
-                  </button>
-                  {source.currentRevisionState === "failed" && (
-                    <button type="button" className="icon-btn" aria-label={t("research.task.retry")} onClick={() => void retry(source.id)}>
-                      <Icon name="retry" />
+                <div className="source-item-main">
+                  <span className={`kind-badge ${cssKindClass(source.kind)}`} aria-hidden="true">
+                    {source.kind === "url" ? <Icon name="globe" /> : kindLabel(source.kind)}
+                  </span>
+                  <span className="source-item-copy">
+                    <strong title={source.displayName}>{source.displayName}</strong>
+                    <small>
+                      {source.sizeBytes !== undefined ? `${formatBytes(source.sizeBytes)} · ` : ""}
+                      {ready
+                        ? <><span className="state-dot ready" aria-hidden="true" />{t("research.indexed")}</>
+                        : source.currentRevisionState === "failed"
+                          ? <><span className="state-dot failed" aria-hidden="true" />{t("research.task.failed")}</>
+                          : <><span className="state-dot pending" aria-hidden="true" />{t("research.pending")}</>}
+                    </small>
+                  </span>
+                  <span className="row-actions">
+                    <button type="button" className="icon-btn" aria-label={t("research.openSource")} onClick={() => void open(source)}>
+                      <Icon name="open" />
                     </button>
-                  )}
-                  <button type="button" className="icon-btn danger" aria-label={`${t("research.removeSource")}: ${source.displayName}`} onClick={() => void remove(source)}>
-                    <Icon name="trash" />
-                  </button>
-                </span>
+                    {source.currentRevisionState === "failed" && (
+                      <button type="button" className="icon-btn" aria-label={t("research.task.retry")} onClick={() => void retry(source.id)}>
+                        <Icon name="retry" />
+                      </button>
+                    )}
+                    <button type="button" className="icon-btn danger" aria-label={`${t("research.removeSource")}: ${source.displayName}`} onClick={() => void remove(source)}>
+                      <Icon name="trash" />
+                    </button>
+                  </span>
+                </div>
+                {activeTask && (
+                  <div className="source-task" role="status">
+                    <div className="source-task-row">
+                      <span>{t(`research.task.${activeTask.stage}`, activeTask.stage)}</span>
+                      <span className="pct">{percent}%</span>
+                    </div>
+                    <div className="progress" aria-hidden="true"><i style={{ width: `${percent}%` }} /></div>
+                    <button type="button" className="btn ghost sm source-task-action" onClick={() => void cancel(activeTask)}>
+                      {t("research.task.cancel")}
+                    </button>
+                  </div>
+                )}
+                {!activeTask && failedTask && (
+                  <div className="source-task failed" role="alert">
+                    <p className="source-task-error">{t(failedTask.error?.messageKey ?? "errors.internal", failedTask.error?.messageKey ?? "")}</p>
+                    {failedTask.error?.recoverable && (
+                      <button type="button" className="btn ghost sm source-task-action" onClick={() => void retry(source.id)}>
+                        {t("research.task.retry")}
+                      </button>
+                    )}
+                  </div>
+                )}
               </div>
             );
           })
         )}
 
-        {sources.length > 0 && readyCount < sources.length && activeTasks.length === 0 && onOpenSettings && (
+        {sources.length > 0 && readyCount < sources.length && activeTaskBySource.size === 0 && onOpenSettings && (
           <p style={{ margin: "10px 6px 2px", fontSize: 12, color: "var(--ink-3)" }}>
             {t("research.indexStuckHint")}
             <button type="button" className="btn ghost sm" onClick={onOpenSettings}>{t("common.openSettings")}</button>
@@ -189,28 +221,6 @@ export default function SourcesPanel({ projectId, onImported, onOpenSettings }: 
   );
 }
 
-function TaskCard({ task, onCancel, onRetry }: { task: TaskDto; onCancel?: () => void; onRetry?: () => void }) {
-  const { t } = useTranslation();
-  const percent = Math.round(task.progress / 10);
-  const running = task.state === "running" || task.state === "queued";
-  return (
-    <div className="task-card" role="status">
-      <div className="row">
-        <strong>{t(`research.task.${task.stage}`, task.stage)}</strong>
-        <span className="pct">{percent}%</span>
-      </div>
-      <div className={`progress${task.state === "failed" ? " danger" : task.state === "completed" ? " ok" : ""}`} aria-hidden="true">
-        <i style={{ width: `${percent}%` }} />
-      </div>
-      {task.error && <p className="err" role="alert">{t(task.error.messageKey, task.error.messageKey)}</p>}
-      <div className="actions">
-        {running && onCancel && <button type="button" className="btn ghost sm" onClick={onCancel}>{t("research.task.cancel")}</button>}
-        {task.state === "failed" && task.error?.recoverable && onRetry && <button type="button" className="btn ghost sm" onClick={onRetry}>{t("research.task.retry")}</button>}
-      </div>
-    </div>
-  );
-}
-
 function ImportDialog({ projectId, batch, onClose, onBatchStart, onFileDone, onBatchEnd }: {
   projectId: string;
   batch?: { total: number; done: number } | undefined;
@@ -221,18 +231,20 @@ function ImportDialog({ projectId, batch, onClose, onBatchStart, onFileDone, onB
 }) {
   const { t } = useTranslation();
   const [url, setUrl] = useState("");
-  const [busy, setBusy] = useState(false);
+  const [fileBusy, setFileBusy] = useState(false);
+  const [urlBusy, setUrlBusy] = useState(false);
   const [error, setError] = useState("");
+  const busy = fileBusy || urlBusy;
 
   async function importFiles(): Promise<void> {
-    setBusy(true); setError("");
+    setFileBusy(true); setError("");
     try {
       const tokens = await api().sources.chooseFiles({ projectId });
-      if (!tokens) { setBusy(false); return; }
+      if (!tokens) { setFileBusy(false); return; }
       if (tokens.length > 0) onBatchStart(tokens.length);
       for (const dialogToken of tokens) {
         const result = await api().sources.importFile({ projectId, dialogToken });
-        if (!result.ok) { setError(errorText(result, t)); setBusy(false); onBatchEnd(); return; }
+        if (!result.ok) { setError(errorText(result, t)); setFileBusy(false); onBatchEnd(); return; }
         // Each finished file updates the shared counter and refreshes the
         // list, so earlier sources show their own status as soon as ready.
         onFileDone();
@@ -242,15 +254,15 @@ function ImportDialog({ projectId, batch, onClose, onBatchStart, onFileDone, onB
     } catch {
       setError(t("research.importError"));
     } finally {
-      setBusy(false);
+      setFileBusy(false);
     }
   }
 
   async function submitUrl(event: React.FormEvent): Promise<void> {
     event.preventDefault();
-    setBusy(true); setError("");
+    setUrlBusy(true); setError("");
     const result = await api().sources.importUrl({ projectId, url: url.trim() }).catch(() => undefined);
-    setBusy(false);
+    setUrlBusy(false);
     if (!result?.ok) { setError(result ? errorText(result, t) : t("research.importError")); return; }
     onBatchEnd();
     onClose();
@@ -268,11 +280,11 @@ function ImportDialog({ projectId, batch, onClose, onBatchStart, onFileDone, onB
 
       <button type="button" className="dropzone" disabled={busy} onClick={() => void importFiles()}>
         <span className="dropzone-icon" aria-hidden="true"><Icon name="upload" /></span>
-        <strong>{busy && batch ? t("research.importProgress", { done: batch.done, total: batch.total }) : t("research.chooseFiles")}</strong>
+        <strong>{fileBusy && batch ? t("research.importProgress", { done: batch.done, total: batch.total }) : t("research.chooseFiles")}</strong>
         <span className="format-chips" aria-hidden="true">
           {formats.map((format) => <span key={format}>{format}</span>)}
         </span>
-        {busy && batch && (
+        {fileBusy && batch && (
           <span className="progress" style={{ width: "100%" }}>
             <i style={{ width: `${batchPercent}%` }} />
           </span>
@@ -296,7 +308,7 @@ function ImportDialog({ projectId, batch, onClose, onBatchStart, onFileDone, onB
             disabled={busy}
           />
           <button type="submit" className="btn primary" disabled={busy || !url.trim()}>
-            {busy && !batch ? <span className="spinner light" aria-hidden="true" /> : <Icon name="globe" />}
+            {urlBusy ? <span className="spinner light" aria-hidden="true" /> : <Icon name="globe" />}
             {t("research.importUrl")}
           </button>
         </div>
