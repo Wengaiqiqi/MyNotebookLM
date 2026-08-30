@@ -305,18 +305,18 @@ export default function ChatPane({ projectId, generationProfileId, sources, onOp
                         <button type="button" onClick={() => { void navigator.clipboard?.writeText(message.content); toast.success(t("chat.copied")); }}>
                           <Icon name="copy" />{t("chat.ui.copy")}
                         </button>
-                        <button type="button" onClick={() => void stream.regenerate(message.id)}>
+                        <button type="button" disabled={stream.state === "streaming"} title={t("chat.retryBusyHint")} onClick={() => void stream.regenerate(message.id)}>
                           <Icon name="retry" />{t("chat.ui.regenerate")}
                         </button>
                       </>
                     )}
                     {message.state === "cancelled" && (
-                      <button type="button" onClick={() => void stream.regenerate(message.id)}>
+                      <button type="button" disabled={stream.state === "streaming"} title={t("chat.retryBusyHint")} onClick={() => void stream.regenerate(message.id)}>
                         <Icon name="retry" />{t("chat.ui.regenerate")}
                       </button>
                     )}
                     {message.state === "failed" && (
-                      <button type="button" onClick={() => void stream.regenerate(message.id)}>
+                      <button type="button" disabled={stream.state === "streaming"} title={t("chat.retryBusyHint")} onClick={() => void stream.regenerate(message.id)}>
                         <Icon name="retry" />{t("chat.ui.retryAnswer")}
                       </button>
                     )}

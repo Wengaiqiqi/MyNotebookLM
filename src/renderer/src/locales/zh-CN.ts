@@ -222,6 +222,7 @@ const zhCN = {
       repair: "修复回答"
     },
     renameHint: "单击切换对话，双击重命名",
+    retryBusyHint: "正在生成回答，请等待完成或停止后再重试",
     ui: {
       conversations: "对话", rename: "重命名", remove: "删除", saveTitle: "保存对话标题", noConversations: "暂无对话。", conversationTitle: "对话标题", viewDetails: "查看原文",
       citationTitle: "来源引用", citationEmpty: "回答中的引用会显示在这里。", openOriginal: "打开原始来源", opened: "已打开{{kind}}", sourceLabel: "已有资料", indexed: "已建立索引", indexedLabel: "已建立索引", processingComplete: "资料处理完成", research: "研究", researchChat: "研究对话", askPlaceholder: "针对来源提问，Enter 发送，Shift+Enter 换行…", model: "模型", generationModel: "生成模型", noModel: "无模型", send: "发送", stop: "停止", copy: "复制", regenerate: "重新生成", answerFailed: "回答失败。", retryAnswer: "重试回答", fallbackBanner: "首选模型暂时不可用，回答已切换到回退模型。", unavailableTitle: "研究对话尚未就绪", unavailableImport: "导入来源并等待索引完成后，即可开始提问。", unavailableModel: "请在设置中配置生成模型后提问。", importSources: "导入来源", openSettings: "打开设置", rebuildIndex: "重建索引", pending: "待处理", ready: "已就绪", sourceProgress: "{{stage}} · {{progress}}%", page: "第", slide: "幻灯片", sheet: "工作表", cell: "单元格"

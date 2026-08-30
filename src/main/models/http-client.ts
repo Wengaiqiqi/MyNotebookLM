@@ -90,14 +90,19 @@ export class ProviderHttpClient {
   }
 
   private async request(baseUrl: string, endpoint: string, options: HttpRequestOptions): Promise<RequestedResponse> {
-    // The hard timeout covers connecting + response headers only; body reads
-    // are governed by the idle watchdog in readChunks instead, so long-lived
-    // streams are never killed mid-flight for taking a while overall.
-    const timeout = AbortSignal.timeout(this.timeoutMs);
-    const signal = AbortSignal.any([options.signal, timeout]);
-    const { signal: _bodySignal, ...init } = options;
+    // The connect deadline covers dialing + response headers only and is
+    // disarmed once headers arrive: aborting a fetch signal afterwards would
+    // also kill the body stream, cutting off long legitimate generations.
+    // Body reads are governed by the idle watchdog in readChunks instead.
+    const controller = new AbortController();
+    let timedOut = false;
+    const timer = setTimeout(() => { timedOut = true; controller.abort(); }, this.timeoutMs);
+    const propagateCancel = () => controller.abort();
+    if (options.signal.aborted) propagateCancel();
+    else options.signal.addEventListener("abort", propagateCancel);
+    const { signal: _callerSignal, ...init } = options;
     try {
-      const response = await this.fetchImpl(joinUrl(baseUrl, endpoint), { ...init, signal });
+      const response = await this.fetchImpl(joinUrl(baseUrl, endpoint), { ...init, signal: controller.signal });
       if (!response.ok) {
         void response.body?.cancel().catch(() => undefined);
         throw new ProviderRequestError(classifyProviderError({ status: response.status, headers: response.headers }));
@@ -106,8 +111,11 @@ export class ProviderHttpClient {
     } catch (reason) {
       if (reason instanceof ProviderRequestError) throw reason;
       if (options.signal.aborted) throw new ProviderRequestError(classifyProviderError({ cancelled: true }));
-      if (timeout.aborted) throw new ProviderRequestError(classifyProviderError({ timeout: true }));
+      if (timedOut) throw new ProviderRequestError(classifyProviderError({ timeout: true }));
       throw new ProviderRequestError(classifyProviderError({ cause: reason }));
+    } finally {
+      clearTimeout(timer);
+      options.signal.removeEventListener("abort", propagateCancel);
     }
   }
 
@@ -125,12 +133,18 @@ export class ProviderHttpClient {
     let total = 0;
     let completed = false;
     class IdleTimeout extends Error {}
+    // Body reads race three outcomes: a chunk, the idle watchdog, or the
+    // caller's cancellation (which no longer flows through the fetch signal).
+    let rejectCancelled: ((reason: Error) => void) | undefined;
+    const onCallerAbort = () => rejectCancelled?.(new DOMException("aborted", "AbortError"));
+    if (!originalSignal.aborted) originalSignal.addEventListener("abort", onCallerAbort, { once: true });
     const readIdle = async (): Promise<ReadableStreamReadResult<Uint8Array>> => {
       let timer: ReturnType<typeof setTimeout> | undefined;
       try {
         return await Promise.race([
           reader.read(),
-          new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new IdleTimeout()), this.idleTimeoutMs); })
+          new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new IdleTimeout()), this.idleTimeoutMs); }),
+          ...(originalSignal.aborted ? [] : [new Promise<never>((_, reject) => { rejectCancelled = reject; })])
         ]);
       } finally { clearTimeout(timer); }
     };
@@ -153,6 +167,7 @@ export class ProviderHttpClient {
       if (originalSignal.aborted) throw new ProviderRequestError(classifyProviderError({ cancelled: true }));
       throw new ProviderRequestError(classifyProviderError({ cause: reason }));
     } finally {
+      originalSignal.removeEventListener("abort", onCallerAbort);
       if (!completed) void reader.cancel().catch(() => undefined);
       reader.releaseLock();
     }
