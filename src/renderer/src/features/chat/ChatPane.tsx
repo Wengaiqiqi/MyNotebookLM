@@ -457,7 +457,7 @@ export function CitationsPanel({ projectId, citations, active, onSelect }: {
   if (collapsed) {
     return (
       <aside className="panel rail rail-right" aria-label={t("chat.ui.citationTitle")}>
-        <button type="button" className="icon-btn" title={t("chat.citeExpand")} aria-label={t("chat.citeExpand")} onClick={() => setCollapsed(false)}>
+        <button type="button" className="icon-btn" aria-label={t("chat.citeExpand")} onClick={() => setCollapsed(false)}>
           <Icon name="chevrons-left" />
         </button>
       </aside>
@@ -470,7 +470,7 @@ export function CitationsPanel({ projectId, citations, active, onSelect }: {
         <h2>{t("chat.ui.citationTitle")}</h2>
         <span className="count">{unique.length}</span>
         <span className="spacer" />
-        <button type="button" className="icon-btn" title={t("chat.citeCollapse")} aria-label={t("chat.citeCollapse")} onClick={() => setCollapsed(true)}>
+        <button type="button" className="icon-btn" aria-label={t("chat.citeCollapse")} onClick={() => setCollapsed(true)}>
           <Icon name="chevrons-right" />
         </button>
       </header>

@@ -85,7 +85,7 @@ export default function SourcesPanel({ projectId, onImported, onOpenSettings }: 
   if (collapsed) {
     return (
       <aside className="panel rail rail-left" aria-label={t("research.sources")}>
-        <button type="button" className="icon-btn" title={t("research.expandPanel")} aria-label={t("research.expandPanel")} onClick={() => setCollapsed(false)}>
+        <button type="button" className="icon-btn" aria-label={t("research.expandPanel")} onClick={() => setCollapsed(false)}>
           <Icon name="chevrons-right" />
         </button>
       </aside>
@@ -97,7 +97,7 @@ export default function SourcesPanel({ projectId, onImported, onOpenSettings }: 
       <header className="panel-head">
         <h2>{t("research.sources")}</h2>
         <span className="spacer" />
-        <button type="button" className="icon-btn" title={t("research.collapsePanel")} aria-label={t("research.collapsePanel")} onClick={() => setCollapsed(true)}>
+        <button type="button" className="icon-btn" aria-label={t("research.collapsePanel")} onClick={() => setCollapsed(true)}>
           <Icon name="chevrons-left" />
         </button>
         <button type="button" className="btn primary sm" onClick={() => setImportOpen(true)}>
