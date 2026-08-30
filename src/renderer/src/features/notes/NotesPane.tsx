@@ -23,9 +23,9 @@ export default function NotesPane({ projectId }: { projectId: string }) {
   const [sources, setSources] = useState<SourceDto[]>([]);
   const [loaded, setLoaded] = useState(false);
   const [collapsed, setCollapsed] = useState(false);
-  const [menuOpen, setMenuOpen] = useState(false);
+  const [menuOpenFor, setMenuOpenFor] = useState<string>();
   const [renaming, setRenaming] = useState<{ id: string; draft: string }>();
-  const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<NoteDto>();
 
   const load = useCallback(async (includeArchived: boolean) => {
     const result = await api().list({ projectId, includeArchived }).catch(() => undefined);
@@ -45,30 +45,27 @@ export default function NotesPane({ projectId }: { projectId: string }) {
   const selected = useMemo(() => notes.find((note) => note.id === selectedId), [notes, selectedId]);
 
   useEffect(() => {
-    if (!menuOpen) return;
+    if (!menuOpenFor) return;
     const close = (event: MouseEvent): void => {
-      if (!(event.target as HTMLElement).closest(".notes-menu-anchor")) setMenuOpen(false);
+      if (!(event.target as HTMLElement).closest(".notes-menu-anchor")) setMenuOpenFor(undefined);
     };
     document.addEventListener("mousedown", close);
     return () => document.removeEventListener("mousedown", close);
-  }, [menuOpen]);
+  }, [menuOpenFor]);
 
-  async function setNoteState(action: "archive" | "restore"): Promise<void> {
-    if (!selected) return;
-    const result = await api()[action]({ projectId, id: selected.id, version: selected.version }).catch(() => undefined);
-    setMenuOpen(false);
+  async function setNoteState(note: NoteDto, action: "archive" | "restore"): Promise<void> {
+    const result = await api()[action]({ projectId, id: note.id, version: note.version }).catch(() => undefined);
+    setMenuOpenFor(undefined);
     if (!result?.ok) { toast.error(result ? errorText(result, t) : t("errors.internal")); return; }
     onChanged(result.value);
   }
 
-  async function deleteSelected(): Promise<void> {
-    if (!selected) return;
-    const result = await api().delete({ projectId, id: selected.id, version: selected.version }).catch(() => undefined);
-    setMenuOpen(false);
-    setConfirmingDelete(false);
+  async function deleteNote(note: NoteDto): Promise<void> {
+    const result = await api().delete({ projectId, id: note.id, version: note.version }).catch(() => undefined);
+    setDeleteTarget(undefined);
     if (!result?.ok) { toast.error(result ? errorText(result, t) : t("errors.internal")); return; }
-    setNotes((current) => current.filter((note) => note.id !== selected.id));
-    setSelectedId(undefined);
+    setNotes((current) => current.filter((item) => item.id !== note.id));
+    setSelectedId((current) => (current === note.id ? undefined : current));
   }
 
   async function commitRename(): Promise<void> {
@@ -113,35 +110,6 @@ export default function NotesPane({ projectId }: { projectId: string }) {
           <button type="button" className="icon-btn" aria-label={t("notes.collapsePanel")} onClick={() => setCollapsed(true)}>
             <Icon name="chevrons-left" />
           </button>
-          <div className="notes-menu-anchor">
-            <button
-              type="button"
-              className="icon-btn"
-              aria-label={t("notes.actions")}
-              aria-haspopup="menu"
-              aria-expanded={menuOpen}
-              disabled={!selected}
-              onClick={() => setMenuOpen((value) => !value)}
-            >
-              <Icon name="dots" />
-            </button>
-            {menuOpen && selected && (
-              <div className="notes-menu" role="menu">
-                {selected.archivedAt ? (
-                  <button type="button" role="menuitem" onClick={() => void setNoteState("restore")}>
-                    <Icon name="restore" />{t("notes.restore")}
-                  </button>
-                ) : (
-                  <button type="button" role="menuitem" onClick={() => void setNoteState("archive")}>
-                    <Icon name="archive" />{t("notes.archive")}
-                  </button>
-                )}
-                <button type="button" role="menuitem" className="danger" onClick={() => { setMenuOpen(false); setConfirmingDelete(true); }}>
-                  <Icon name="trash" />{t("notes.delete")}
-                </button>
-              </div>
-            )}
-          </div>
           <button type="button" className="btn primary sm" onClick={() => void createNote()}>
             <Icon name="plus" />{t("notes.new")}
           </button>
@@ -165,38 +133,66 @@ export default function NotesPane({ projectId }: { projectId: string }) {
               </div>
             </div>
           ) : notes.map((note) => (
-            renaming?.id === note.id ? (
-              <input
-                key={note.id}
-                className="input note-rename"
-                autoFocus
-                value={renaming.draft}
-                onChange={(event) => setRenaming({ id: note.id, draft: event.target.value })}
-                onKeyDown={(event) => {
-                  if (event.key === "Enter") void commitRename();
-                  if (event.key === "Escape") setRenaming(undefined);
-                }}
-                onBlur={() => void commitRename()}
-                maxLength={200}
-                aria-label={t("notes.title")}
-              />
-            ) : (
-              <button
-                type="button"
-                key={note.id}
-                className={`note-list-item${note.id === selectedId ? " selected" : ""}`}
-                aria-current={note.id === selectedId ? "page" : undefined}
-                title={t("notes.renameHint")}
-                onClick={() => setSelectedId(note.id)}
-                onDoubleClick={() => setRenaming({ id: note.id, draft: note.title })}
-              >
-                <strong>{note.title}</strong>
-                <small>
-                  {formatDate(note.updatedAt, language)}
-                  {note.archivedAt && <span className="archived-tag"> · {t("notes.archivedTag")}</span>}
-                </small>
-              </button>
-            )
+            <div className={`note-item${note.id === selectedId ? " selected" : ""}`} key={note.id}>
+              {renaming?.id === note.id ? (
+                <input
+                  className="input note-rename"
+                  autoFocus
+                  value={renaming.draft}
+                  onChange={(event) => setRenaming({ id: note.id, draft: event.target.value })}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter") void commitRename();
+                    if (event.key === "Escape") setRenaming(undefined);
+                  }}
+                  onBlur={() => void commitRename()}
+                  maxLength={200}
+                  aria-label={t("notes.title")}
+                />
+              ) : (
+                <button
+                  type="button"
+                  className="note-list-item"
+                  aria-current={note.id === selectedId ? "page" : undefined}
+                  title={t("notes.renameHint")}
+                  onClick={() => setSelectedId(note.id)}
+                  onDoubleClick={() => setRenaming({ id: note.id, draft: note.title })}
+                >
+                  <strong>{note.title}</strong>
+                  <small>
+                    {formatDate(note.updatedAt, language)}
+                    {note.archivedAt && <span className="archived-tag"> · {t("notes.archivedTag")}</span>}
+                  </small>
+                </button>
+              )}
+              <div className="notes-menu-anchor">
+                <button
+                  type="button"
+                  className="note-menu-trigger"
+                  aria-label={`${t("notes.actions")}: ${note.title}`}
+                  aria-haspopup="menu"
+                  aria-expanded={menuOpenFor === note.id}
+                  onClick={() => setMenuOpenFor((current) => (current === note.id ? undefined : note.id))}
+                >
+                  <Icon name="dots" />
+                </button>
+                {menuOpenFor === note.id && (
+                  <div className="notes-menu" role="menu">
+                    {note.archivedAt ? (
+                      <button type="button" role="menuitem" onClick={() => void setNoteState(note, "restore")}>
+                        <Icon name="restore" />{t("notes.restore")}
+                      </button>
+                    ) : (
+                      <button type="button" role="menuitem" onClick={() => void setNoteState(note, "archive")}>
+                        <Icon name="archive" />{t("notes.archive")}
+                      </button>
+                    )}
+                    <button type="button" role="menuitem" className="danger" onClick={() => { setMenuOpenFor(undefined); setDeleteTarget(note); }}>
+                      <Icon name="trash" />{t("notes.delete")}
+                    </button>
+                  </div>
+                )}
+              </div>
+            </div>
           ))}
         </div>
       </section>);
@@ -210,12 +206,12 @@ export default function NotesPane({ projectId }: { projectId: string }) {
           </button>
         </aside>
       ) : listPanel}
-      {confirmingDelete && (
-        <Modal open alert onClose={() => setConfirmingDelete(false)} labelledBy="note-delete-title">
+      {deleteTarget && (
+        <Modal open alert onClose={() => setDeleteTarget(undefined)} labelledBy="note-delete-title">
           <DialogHead id="note-delete-title" icon="trash" title={t("notes.delete")} body={t("notes.deleteConfirm")} />
           <div className="dialog-foot">
-            <button type="button" className="btn" onClick={() => setConfirmingDelete(false)}>{t("common.cancel")}</button>
-            <button type="button" className="btn danger" onClick={() => void deleteSelected()}>
+            <button type="button" className="btn" onClick={() => setDeleteTarget(undefined)}>{t("common.cancel")}</button>
+            <button type="button" className="btn danger" onClick={() => void deleteNote(deleteTarget)}>
               <Icon name="trash" />{t("common.confirm")}
             </button>
           </div>

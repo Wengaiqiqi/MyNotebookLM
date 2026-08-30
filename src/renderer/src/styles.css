@@ -838,12 +838,25 @@ button:disabled { cursor: not-allowed; opacity: .5; }
 .notes-menu button.danger { color: var(--danger); }
 .notes-menu button svg { width: 14px; height: 14px; }
 .note-rename { min-height: 34px; padding: 6px 10px; font-size: 13px; font-weight: 600; }
+.note-item { position: relative; display: flex; align-items: stretch; border-radius: 10px; }
+.note-item.selected { background: var(--accent-soft); }
 .note-list-item {
-  width: 100%; padding: 11px 12px; border: 0; border-radius: 10px;
+  flex: 1; min-width: 0; padding: 11px 4px 11px 12px; border: 0; border-radius: 10px;
   background: transparent; text-align: left; cursor: pointer;
 }
-.note-list-item:hover { background: var(--surface-2); }
-.note-list-item.selected { background: var(--accent-soft); }
+.note-list-item:hover { background: color-mix(in srgb, var(--ink) 4%, transparent); }
+.note-menu-trigger {
+  align-self: center; flex: none; display: grid; place-items: center;
+  width: 26px; height: 26px; margin-right: 4px; border: 0; border-radius: 7px;
+  background: transparent; color: var(--ink-3);
+  opacity: 0; transition: opacity .1s ease;
+}
+.note-item:hover .note-menu-trigger, .note-menu-trigger[aria-expanded="true"],
+.note-menu-trigger:focus-visible { opacity: 1; }
+.note-menu-trigger:hover { background: color-mix(in srgb, var(--ink) 8%, transparent); color: var(--ink); }
+.note-menu-trigger svg { width: 16px; height: 16px; }
+.notes-menu-anchor { position: static; }
+.note-item .notes-menu { top: calc(100% - 4px); right: 6px; left: auto; }
 .note-list-item strong { display: block; font-size: 13.5px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .note-list-item small { color: var(--ink-3); font-size: 11.5px; display: flex; gap: 6px; margin-top: 2px; }
 .note-list-item .archived-tag { color: var(--warn); }
