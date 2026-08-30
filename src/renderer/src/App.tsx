@@ -4,7 +4,7 @@ import type { DefaultModelRoutesDto } from "../../shared/models";
 import type { ProjectDto } from "../../shared/projects";
 import { changeLanguage, changeTheme, type AppLanguage, type AppTheme } from "./i18n";
 import Sidebar from "./features/sidebar/Sidebar";
-import Workspace from "./features/workspace/Workspace";
+import Workspace, { type Section } from "./features/workspace/Workspace";
 import Onboarding from "./features/onboarding/Onboarding";
 import Settings from "./features/settings/Settings";
 import { ProjectNameDialog, ProjectRemoveDialog, type ProjectDialogState } from "./features/projects/ProjectDialogs";
@@ -24,6 +24,7 @@ export default function App() {
   const [routes, setRoutes] = useState<DefaultModelRoutesDto>({});
   const [busy, setBusy] = useState(false);
   const [dialog, setDialog] = useState<ProjectDialogState>();
+  const [section, setSection] = useState<Section>("research");
   const projects = useProjects(t);
 
   const refreshRoutes = useCallback(async () => {
@@ -127,7 +128,22 @@ export default function App() {
               onTheme={selectTheme}
             />
             <header className="topbar drag">
-              <span className="crumb"><b>{t("app.name")}</b>{crumb ? ` / ${crumb}` : ""}</span>
+              {view === "app" && !settingsOpen && selectedProject && !selectedProject.archived && selectedProject.status === "active" ? (
+                <nav className="tabs" role="tablist" aria-label={t("project.sections")}>
+                  {([
+                    ["research", "chat", t("workspace.research")],
+                    ["notes", "notes", t("notes.titlePage")],
+                    ["studio", "sparkle", t("workspace.studio")]
+                  ] as const).map(([id, icon, label]) => (
+                    <button key={id} type="button" role="tab" aria-selected={section === id} onClick={() => setSection(id)}>
+                      <Icon name={icon} />
+                      {label}
+                    </button>
+                  ))}
+                </nav>
+              ) : (
+                <span className="crumb"><b>{t("app.name")}</b>{crumb ? ` / ${crumb}` : ""}</span>
+              )}
               <span className="spacer" />
             </header>
             <main className="main">
@@ -153,7 +169,8 @@ export default function App() {
                 <Workspace
                   key={selectedProject.id}
                   projectId={selectedProject.id}
-                  projectName={selectedProject.name}
+                  section={section}
+                  onSectionChange={setSection}
                   routes={routes}
                   onOpenSettings={() => setSettingsOpen(true)}
                 />

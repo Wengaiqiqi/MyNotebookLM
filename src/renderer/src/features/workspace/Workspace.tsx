@@ -9,17 +9,17 @@ import NotesPane from "../notes/NotesPane";
 import StudioPane from "../studio/StudioPane";
 import { useTaskFeed } from "../../hooks/useTaskFeed";
 
-type Section = "research" | "notes" | "studio";
+export type Section = "research" | "notes" | "studio";
 
-export default function Workspace({ projectId, projectName, routes, onOpenSettings, onSourcesChanged }: {
+export default function Workspace({ projectId, section, onSectionChange, routes, onOpenSettings, onSourcesChanged }: {
   projectId: string;
-  projectName: string;
+  section: Section;
+  onSectionChange: (section: Section) => void;
   routes: DefaultModelRoutesDto;
   onOpenSettings: () => void;
   onSourcesChanged?: () => void;
 }) {
   const { t } = useTranslation();
-  const [section, setSection] = useState<Section>("research");
   const [sources, setSources] = useState<SourceDto[]>([]);
   const [sourcesVersion, setSourcesVersion] = useState(0);
 
@@ -42,36 +42,8 @@ export default function Workspace({ projectId, projectName, routes, onOpenSettin
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tasks]);
 
-  const sections: Array<{ id: Section; icon: React.ComponentProps<typeof Icon>["name"]; label: string }> = [
-    { id: "research", icon: "chat", label: t("workspace.research") },
-    { id: "notes", icon: "notes", label: t("notes.titlePage") },
-    { id: "studio", icon: "sparkle", label: t("workspace.studio") }
-  ];
-
   return (
     <div className="workspace fade-in">
-      <header className="workspace-head">
-        <div style={{ minWidth: 0 }}>
-          <h1>{projectName}</h1>
-          <p className="sub">{t("workspace.subtitle")}</p>
-        </div>
-        <span className="spacer" />
-        <nav className="tabs" role="tablist" aria-label={t("project.sections")}>
-          {sections.map((item) => (
-            <button
-              key={item.id}
-              type="button"
-              role="tab"
-              aria-selected={section === item.id}
-              onClick={() => setSection(item.id)}
-            >
-              <Icon name={item.icon} />
-              {item.label}
-            </button>
-          ))}
-        </nav>
-      </header>
-
       {section === "research" && (
         <div className="pane research">
           <SourcesPanel
