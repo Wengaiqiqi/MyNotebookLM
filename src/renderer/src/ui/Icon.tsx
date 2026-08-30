@@ -6,7 +6,8 @@ export type IconName =
   | "send" | "stop" | "retry" | "open" | "archive" | "restore" | "link" | "unlink"
   | "sun" | "moon" | "alert" | "check" | "info" | "globe" | "brain" | "database"
   | "key" | "eye" | "eye-off" | "arrow-up" | "arrow-down" | "x" | "layers"
-  | "upload" | "cpu" | "route" | "sliders" | "file";
+  | "upload" | "cpu" | "route" | "sliders" | "file"
+  | "chevrons-left" | "chevrons-right";
 
 const paths: Record<IconName, React.ReactNode> = {
   book: <><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" /><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" /></>,
@@ -51,6 +52,8 @@ const paths: Record<IconName, React.ReactNode> = {
   route: <><circle cx="6" cy="19" r="3" /><circle cx="18" cy="5" r="3" /><path d="M12 19h4.5a3.5 3.5 0 0 0 0-7h-9a3.5 3.5 0 0 1 0-7H12" /></>,
   sliders: <><path d="M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3" /><path d="M1 14h6M9 8h6M17 16h6" /></>,
   file: <><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><path d="M14 2v6h6" /></>,
+  "chevrons-left": <><path d="m11 17-5-5 5-5" /><path d="m18 17-5-5 5-5" /></>,
+  "chevrons-right": <><path d="m6 17 5-5-5-5" /><path d="m13 17 5-5-5-5" /></>,
 };
 
 export default function Icon({ name, className }: { name: IconName; className?: string }) {

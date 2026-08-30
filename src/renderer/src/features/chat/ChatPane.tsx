@@ -30,9 +30,11 @@ export default function ChatPane({ projectId, generationProfileId, sources, onOp
   const [convMenuOpen, setConvMenuOpen] = useState(false);
   const [editingTitle, setEditingTitle] = useState(false);
   const [titleDraft, setTitleDraft] = useState("");
+  const [modelMenuOpen, setModelMenuOpen] = useState(false);
   const [question, setQuestion] = useState("");
   const [activeCitation, setActiveCitation] = useState<CitationDto | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const composerRef = useRef<HTMLTextAreaElement>(null);
   const followRef = useRef(true);
 
   const indexedCount = useMemo(() => sources.filter(sourceReady).length, [sources]);
@@ -87,6 +89,24 @@ export default function ChatPane({ projectId, generationProfileId, sources, onOp
     const list = scrollRef.current;
     if (list && followRef.current) list.scrollTop = list.scrollHeight;
   }, [messages]);
+
+  // Auto-grow composer up to a sane ceiling; starts as a single line.
+  useEffect(() => {
+    const el = composerRef.current;
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = `${Math.min(el.scrollHeight, 132)}px`;
+  }, [question]);
+
+  // Close the model menu on any outside click.
+  useEffect(() => {
+    if (!modelMenuOpen) return;
+    const close = (event: MouseEvent): void => {
+      if (!(event.target as HTMLElement).closest(".model-picker")) setModelMenuOpen(false);
+    };
+    document.addEventListener("mousedown", close);
+    return () => document.removeEventListener("mousedown", close);
+  }, [modelMenuOpen]);
   useEffect(() => { followRef.current = true; }, [conversationId]);
 
   async function send(): Promise<void> {
@@ -310,6 +330,7 @@ export default function ChatPane({ projectId, generationProfileId, sources, onOp
       <div className="composer-wrap">
         <div className="composer">
           <textarea
+            ref={composerRef}
             value={question}
             onChange={(event) => setQuestion(event.target.value)}
             onKeyDown={(event) => {
@@ -317,19 +338,46 @@ export default function ChatPane({ projectId, generationProfileId, sources, onOp
             }}
             placeholder={t("chat.ui.askPlaceholder")}
             aria-label={t("research.ask")}
-            rows={2}
+            rows={1}
           />
           <div className="composer-bar">
-            {profiles.length > 1 ? (
-              <select
-                className="select model-select"
-                aria-label={t("chat.ui.model")}
-                value={selectedProfileId}
-                onChange={(event) => setSelectedProfileId(event.target.value)}
-              >
-                {profiles.map((profile) => <option key={profile.id} value={profile.id}>{profile.modelId}</option>)}
-              </select>
-            ) : null}
+            {profiles.length > 0 && (
+              <div className="model-picker">
+                <button
+                  type="button"
+                  className="model-pill"
+                  aria-haspopup="menu"
+                  aria-expanded={modelMenuOpen}
+                  aria-label={t("chat.ui.model")}
+                  onClick={() => setModelMenuOpen((value) => !value)}
+                >
+                  <Icon name="cpu" />
+                  <span className="model-pill-name">
+                    {profiles.find((profile) => profile.id === selectedProfileId)?.modelId ?? t("chat.ui.noModel")}
+                  </span>
+                  <Icon name={modelMenuOpen ? "chevron-up" : "chevron-down"} className="conv-caret" />
+                </button>
+                {modelMenuOpen && (
+                  <div className="model-menu" role="menu" aria-label={t("chat.ui.model")}>
+                    {profiles.map((profile) => (
+                      <button
+                        key={profile.id}
+                        type="button"
+                        role="menuitem"
+                        className={`model-option${profile.id === selectedProfileId ? " selected" : ""}`}
+                        onClick={() => { setSelectedProfileId(profile.id); setModelMenuOpen(false); }}
+                      >
+                        <span className="model-option-copy">
+                          <strong>{profile.modelId}</strong>
+                          <small>{t(`model.providers.${profile.provider}`)}</small>
+                        </span>
+                        {profile.id === selectedProfileId && <Icon name="check" />}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
             <span className="spacer" />
             <span className="kbd" aria-hidden="true">Enter</span>
             {stream.state === "streaming"
@@ -406,11 +454,26 @@ export function CitationsPanel({ projectId, citations, active, onSelect }: {
     else toast.success(t("chat.ui.opened", { kind: result.value.opened }));
   }
 
+  const [collapsed, setCollapsed] = useState(false);
+  if (collapsed) {
+    return (
+      <aside className="panel rail rail-right" aria-label={t("chat.ui.citationTitle")}>
+        <button type="button" className="icon-btn" title={t("chat.citeExpand")} aria-label={t("chat.citeExpand")} onClick={() => setCollapsed(false)}>
+          <Icon name="chevrons-left" />
+        </button>
+      </aside>
+    );
+  }
+
   return (
     <aside className="panel cite-panel" aria-label={t("chat.ui.citationTitle")}>
       <header className="panel-head">
         <h2>{t("chat.ui.citationTitle")}</h2>
         <span className="count">{unique.length}</span>
+        <span className="spacer" />
+        <button type="button" className="icon-btn" title={t("chat.citeCollapse")} aria-label={t("chat.citeCollapse")} onClick={() => setCollapsed(true)}>
+          <Icon name="chevrons-right" />
+        </button>
       </header>
       <div className="panel-body">
         {unique.length === 0 ? (

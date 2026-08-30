@@ -18,6 +18,8 @@ export default function SourcesPanel({ projectId, onImported, onOpenSettings }: 
   const [sources, setSources] = useState<SourceDto[]>([]);
   const [loaded, setLoaded] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
+  const [collapsed, setCollapsed] = useState(false);
+  const [batch, setBatch] = useState<{ total: number; done: number } | undefined>();
 
   const tasks = useTaskFeed(
     projectId,
@@ -43,12 +45,18 @@ export default function SourcesPanel({ projectId, onImported, onOpenSettings }: 
     if (settled) void refresh();
   }, [tasks, refresh]);
 
-  const activeTasks = useMemo(() => tasks.filter((task) => task.state === "queued" || task.state === "running"), [tasks]);
+  // Tasks belonging to sources that no longer exist (removed mid-flight or
+  // deleted later) must not keep rendering their progress/error cards.
+  const knownSource = useCallback((sourceId: string | null) =>
+    sourceId === null || sources.some((item) => item.id === sourceId), [sources]);
+  const activeTasks = useMemo(() =>
+    tasks.filter((task) => (task.state === "queued" || task.state === "running") && knownSource(task.sourceId)),
+  [tasks, knownSource]);
   const recentFailed = useMemo(() =>
-    tasks.filter((task) => task.state === "failed" && !activeTasks.some((active) => active.sourceId === task.sourceId))
+    tasks.filter((task) => task.state === "failed" && knownSource(task.sourceId))
       .filter((task, index, all) => all.findIndex((candidate) => candidate.sourceId === task.sourceId) === index)
       .slice(0, 3),
-  [tasks, activeTasks]);
+  [tasks, knownSource]);
 
   async function remove(source: SourceDto): Promise<void> {
     const result = await api().sources.remove({ projectId, sourceId: source.id });
@@ -74,12 +82,25 @@ export default function SourcesPanel({ projectId, onImported, onOpenSettings }: 
 
   const readyCount = sources.filter(sourceReady).length;
 
+  if (collapsed) {
+    return (
+      <aside className="panel rail rail-left" aria-label={t("research.sources")}>
+        <button type="button" className="icon-btn" title={t("research.expandPanel")} aria-label={t("research.expandPanel")} onClick={() => setCollapsed(false)}>
+          <Icon name="chevrons-right" />
+        </button>
+      </aside>
+    );
+  }
+
   return (
     <section className="panel" aria-label={t("research.sources")}>
       <header className="panel-head">
         <h2>{t("research.sources")}</h2>
         <span className="count">{readyCount}/{sources.length} {t("chat.ui.indexedLabel")}</span>
         <span className="spacer" />
+        <button type="button" className="icon-btn" title={t("research.collapsePanel")} aria-label={t("research.collapsePanel")} onClick={() => setCollapsed(true)}>
+          <Icon name="chevrons-left" />
+        </button>
         <button type="button" className="btn primary sm" onClick={() => setImportOpen(true)}>
           <Icon name="plus" />{t("research.importSources")}
         </button>
@@ -154,8 +175,15 @@ export default function SourcesPanel({ projectId, onImported, onOpenSettings }: 
       {importOpen && (
         <ImportDialog
           projectId={projectId}
-          onClose={() => setImportOpen(false)}
-          onImported={() => { void refresh(); onImported?.(); }}
+          batch={batch}
+          onClose={() => { setBatch(undefined); setImportOpen(false); }}
+          onBatchStart={(total) => setBatch({ total, done: 0 })}
+          onFileDone={() => {
+            setBatch((current) => current ? { ...current, done: current.done + 1 } : current);
+            void refresh();
+            onImported?.();
+          }}
+          onBatchEnd={() => { setBatch(undefined); void refresh(); onImported?.(); }}
         />
       )}
     </section>
@@ -184,10 +212,13 @@ function TaskCard({ task, onCancel, onRetry }: { task: TaskDto; onCancel?: () =>
   );
 }
 
-function ImportDialog({ projectId, onClose, onImported }: {
+function ImportDialog({ projectId, batch, onClose, onBatchStart, onFileDone, onBatchEnd }: {
   projectId: string;
+  batch?: { total: number; done: number } | undefined;
   onClose: () => void;
-  onImported: () => void;
+  onBatchStart: (total: number) => void;
+  onFileDone: () => void;
+  onBatchEnd: () => void;
 }) {
   const { t } = useTranslation();
   const [url, setUrl] = useState("");
@@ -199,11 +230,15 @@ function ImportDialog({ projectId, onClose, onImported }: {
     try {
       const tokens = await api().sources.chooseFiles({ projectId });
       if (!tokens) { setBusy(false); return; }
+      if (tokens.length > 0) onBatchStart(tokens.length);
       for (const dialogToken of tokens) {
         const result = await api().sources.importFile({ projectId, dialogToken });
-        if (!result.ok) { setError(errorText(result, t)); setBusy(false); return; }
+        if (!result.ok) { setError(errorText(result, t)); setBusy(false); onBatchEnd(); return; }
+        // Each finished file updates the shared counter and refreshes the
+        // list, so earlier sources show their own status as soon as ready.
+        onFileDone();
       }
-      onImported();
+      onBatchEnd();
       onClose();
     } catch {
       setError(t("research.importError"));
@@ -218,49 +253,55 @@ function ImportDialog({ projectId, onClose, onImported }: {
     const result = await api().sources.importUrl({ projectId, url: url.trim() }).catch(() => undefined);
     setBusy(false);
     if (!result?.ok) { setError(result ? errorText(result, t) : t("research.importError")); return; }
-    onImported();
+    onBatchEnd();
     onClose();
   }
 
-  const formats = ["PDF", "DOCX", "PPTX", "XLSX", "TXT", "MD", "CSV", "URL"];
+  const formats = ["PDF", "DOCX", "PPTX", "XLSX", "TXT", "MD", "CSV"];
+  const batchPercent = batch ? Math.round((batch.done / batch.total) * 100) : 0;
 
   return (
-    <Modal open wide onClose={onClose} labelledBy="import-dialog-title">
-      <DialogHead id="import-dialog-title" icon="upload" accent title={t("research.importSources")} body={t("research.formats")} />
-      <button type="button" className="btn outline" disabled={busy} onClick={() => void importFiles()}>
-        {busy ? <span className="spinner" aria-hidden="true" /> : <Icon name="file" />}
-        {busy ? t("research.importing") : t("research.chooseFiles")}
+    <Modal open onClose={onClose} labelledBy="import-dialog-title">
+      <button type="button" className="dialog-close" aria-label={t("common.close")} disabled={busy} onClick={onClose}>
+        <Icon name="x" />
       </button>
-      <div className="format-chips" aria-hidden="true">
-        {formats.map((format) => <span key={format}>{format}</span>)}
+      <DialogHead id="import-dialog-title" icon="upload" accent title={t("research.importSources")} body={t("research.importSubtitle")} />
+
+      <button type="button" className="dropzone" disabled={busy} onClick={() => void importFiles()}>
+        <span className="dropzone-icon" aria-hidden="true"><Icon name="upload" /></span>
+        <strong>{busy && batch ? t("research.importProgress", { done: batch.done, total: batch.total }) : t("research.chooseFiles")}</strong>
+        <span className="format-chips" aria-hidden="true">
+          {formats.map((format) => <span key={format}>{format}</span>)}
+        </span>
+        {busy && batch && (
+          <span className="progress" style={{ width: "100%" }}>
+            <i style={{ width: `${batchPercent}%` }} />
+          </span>
+        )}
+      </button>
+
+      <div className="or-divider" role="separator">
+        <span /><em>{t("research.orDivider")}</em><span />
       </div>
-      <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-        <span style={{ flex: 1, height: 1, background: "var(--line)" }} aria-hidden="true" />
-        <span style={{ color: "var(--ink-3)", fontSize: 12 }}>{t("research.orDivider")}</span>
-        <span style={{ flex: 1, height: 1, background: "var(--line)" }} aria-hidden="true" />
-      </div>
-      <form onSubmit={(event) => void submitUrl(event)} style={{ display: "grid", gap: 12 }}>
-        <label className="field" htmlFor="import-url-input">
-          {t("research.webAddress")}
+
+      <form onSubmit={(event) => void submitUrl(event)}>
+        <div className="input-row">
           <input
-            id="import-url-input"
             className="input"
             type="url"
             placeholder="https://example.com/article"
             value={url}
             onChange={(event) => setUrl(event.target.value)}
+            aria-label={t("research.webAddress")}
             required
             disabled={busy}
           />
-        </label>
-        {error && <p className="form-error" role="alert"><Icon name="alert" />{error}</p>}
-        <div className="dialog-foot">
-          <button type="button" className="btn" disabled={busy} onClick={onClose}>{t("common.cancel")}</button>
           <button type="submit" className="btn primary" disabled={busy || !url.trim()}>
-            {busy ? <span className="spinner light" aria-hidden="true" /> : <Icon name="globe" />}
+            {busy && !batch ? <span className="spinner light" aria-hidden="true" /> : <Icon name="globe" />}
             {t("research.importUrl")}
           </button>
         </div>
+        {error && <p className="form-error" role="alert"><Icon name="alert" />{error}</p>}
       </form>
     </Modal>
   );
