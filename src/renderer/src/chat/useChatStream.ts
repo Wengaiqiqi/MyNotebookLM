@@ -17,10 +17,10 @@ export interface UseChatStreamResult {
   error: AppErrorDto | null;
   fallback: Extract<ChatRequestEvent, { type: "fallback" }> | null;
   canSend: boolean;
-  send(question: string, options?: { thinking?: "enabled" | "disabled" }): Promise<boolean>;
+  send(question: string, options?: { thinking?: "off" | "low" | "medium" | "high" }): Promise<boolean>;
   stop(): Promise<boolean>;
-  regenerate(messageId: string, options?: { thinking?: "enabled" | "disabled" }): Promise<boolean>;
-  repair(options?: { thinking?: "enabled" | "disabled" }): Promise<boolean>;
+  regenerate(messageId: string, options?: { thinking?: "off" | "low" | "medium" | "high" }): Promise<boolean>;
+  repair(options?: { thinking?: "off" | "low" | "medium" | "high" }): Promise<boolean>;
 }
 
 /**
@@ -164,7 +164,7 @@ export function useChatStream(
     }
   }, [chat, applyEvent, teardown, conversationId]);
 
-  const send = useCallback((question: string, options?: { thinking?: "enabled" | "disabled" }): Promise<boolean> => {
+  const send = useCallback((question: string, options?: { thinking?: "off" | "low" | "medium" | "high" }): Promise<boolean> => {
     setError(null);
     setFallback(null);
     setRepairableMessageId(null);
@@ -195,7 +195,7 @@ export function useChatStream(
     });
   }, [runTurn, chat, projectId, conversationId, generationProfileId]);
 
-  const regenerate = useCallback((messageId: string, options?: { thinking?: "enabled" | "disabled" }): Promise<boolean> => {
+  const regenerate = useCallback((messageId: string, options?: { thinking?: "off" | "low" | "medium" | "high" }): Promise<boolean> => {
     setError(null);
     return runTurn((requestId) => chat.regenerate({ requestId, projectId, conversationId, messageId, ...(options?.thinking ? { thinking: options.thinking } : {}) }));
   }, [runTurn, chat, projectId, conversationId]);
@@ -207,7 +207,7 @@ export function useChatStream(
     return result.ok ? result.value : false;
   }, [chat, projectId]);
 
-  const repair = useCallback((options?: { thinking?: "enabled" | "disabled" }): Promise<boolean> => {
+  const repair = useCallback((options?: { thinking?: "off" | "low" | "medium" | "high" }): Promise<boolean> => {
     const target = repairableMessageId;
     return target ? regenerate(target, options) : Promise.resolve(false);
   }, [regenerate, repairableMessageId]);

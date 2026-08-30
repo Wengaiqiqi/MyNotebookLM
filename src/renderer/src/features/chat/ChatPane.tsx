@@ -31,8 +31,19 @@ export default function ChatPane({ projectId, generationProfileId, sources, onOp
   const [editingTitle, setEditingTitle] = useState(false);
   const [titleDraft, setTitleDraft] = useState("");
   const [modelMenuOpen, setModelMenuOpen] = useState(false);
-  const [thinking, setThinking] = useState<"enabled" | "disabled">(() =>
-    localStorage.getItem("mynotebooklm.thinking") === "enabled" ? "enabled" : "disabled");
+  const [thinking, setThinking] = useState<"off" | "low" | "medium" | "high">(() => {
+    const stored = localStorage.getItem("mynotebooklm.thinking");
+    return stored === "low" || stored === "medium" || stored === "high" ? stored : "off";
+  });
+  const [thinkingMenuOpen, setThinkingMenuOpen] = useState(false);
+  useEffect(() => {
+    if (!thinkingMenuOpen) return;
+    const close = (event: MouseEvent): void => {
+      if (!(event.target as HTMLElement).closest(".thinking-picker")) setThinkingMenuOpen(false);
+    };
+    document.addEventListener("mousedown", close);
+    return () => document.removeEventListener("mousedown", close);
+  }, [thinkingMenuOpen]);
   const [question, setQuestion] = useState("");
   const [activeCitation, setActiveCitation] = useState<CitationDto | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -111,10 +122,10 @@ export default function ChatPane({ projectId, generationProfileId, sources, onOp
   }, [modelMenuOpen]);
   useEffect(() => { followRef.current = true; }, [conversationId]);
 
-  function toggleThinking(): void {
-    const next = thinking === "enabled" ? "disabled" : "enabled";
-    setThinking(next);
-    localStorage.setItem("mynotebooklm.thinking", next);
+  function chooseThinking(level: "off" | "low" | "medium" | "high"): void {
+    setThinking(level);
+    localStorage.setItem("mynotebooklm.thinking", level);
+    setThinkingMenuOpen(false);
   }
 
   async function send(): Promise<void> {
@@ -349,15 +360,36 @@ export default function ChatPane({ projectId, generationProfileId, sources, onOp
             rows={1}
           />
           <div className="composer-bar">
-            <button
-              type="button"
-              className="thinking-toggle"
-              aria-pressed={thinking === "enabled"}
-              title={t("chat.thinkingHint")}
-              onClick={toggleThinking}
-            >
-              <Icon name="brain" />{t("chat.thinking")}
-            </button>
+            <div className="model-picker thinking-picker">
+              <button
+                type="button"
+                className="model-pill"
+                aria-haspopup="menu"
+                aria-expanded={thinkingMenuOpen}
+                title={t("chat.thinkingHint")}
+                onClick={() => setThinkingMenuOpen((value) => !value)}
+              >
+                <Icon name="brain" />
+                <span className="model-pill-name">{t(`chat.thinkingLevel.${thinking}`)}</span>
+                <Icon name={thinkingMenuOpen ? "chevron-up" : "chevron-down"} className="conv-caret" />
+              </button>
+              {thinkingMenuOpen && (
+                <div className="model-menu" role="menu" aria-label={t("chat.thinking")}>
+                  {([["off", "chat.thinkingLevel.off"], ["low", "chat.thinkingLevel.low"], ["medium", "chat.thinkingLevel.medium"], ["high", "chat.thinkingLevel.high"]] as const).map(([level, labelKey]) => (
+                    <button
+                      key={level}
+                      type="button"
+                      role="menuitem"
+                      className={`model-option${thinking === level ? " selected" : ""}`}
+                      onClick={() => chooseThinking(level)}
+                    >
+                      <span className="model-option-copy"><strong>{t(labelKey)}</strong></span>
+                      {thinking === level && <Icon name="check" />}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
             {profiles.length > 0 && (
               <div className="model-picker">
                 <button

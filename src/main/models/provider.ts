@@ -17,8 +17,8 @@ export interface GenerateRequest {
   messages: ChatTurn[];
   temperature?: number;
   maxTokens?: number;
-  /** Provider-specific reasoning switch (e.g. GLM thinking); omit to use the model default. */
-  thinking?: "enabled" | "disabled";
+  /** Reasoning level; each provider family maps this to its own wire format. */
+  thinking?: "off" | "low" | "medium" | "high";
 }
 
 export interface EmbeddingRequest {

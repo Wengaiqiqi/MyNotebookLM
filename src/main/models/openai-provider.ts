@@ -1,4 +1,4 @@
-import { ProviderHttpClient } from "./http-client";
+import { ProviderHttpClient, ProviderRequestError } from "./http-client";
 import { isRecord, malformedResponse, optionalFiniteNumber } from "./provider-guards";
 import type {
   EmbeddingRequest,
@@ -10,6 +10,27 @@ import type {
 
 export const OPENAI_BASE_URL = "https://api.openai.com/v1";
 
+export type ThinkingLevel = "off" | "low" | "medium" | "high";
+export type ThinkingDialect = "glm" | "effort" | "qwen";
+
+/** Wire-format dialects for the OpenAI-compatible ecosystem. */
+export function thinkingCandidates(level: ThinkingLevel, model: string): ThinkingDialect[] {
+  const id = model.toLowerCase();
+  if (/^(glm|doubao|ep-)/.test(id)) return ["glm"];
+  if (/^(o[134]|gpt-5)/.test(id)) return ["effort"];
+  if (/^(qwen|qwq)/.test(id)) return ["qwen"];
+  // Unknown model: try the most common dialects, then a plain request.
+  return level === "off" ? ["glm", "qwen"] : ["glm", "effort", "qwen"];
+}
+
+export function thinkingBody(dialect: ThinkingDialect, level: ThinkingLevel): Record<string, unknown> {
+  switch (dialect) {
+    case "glm": return { thinking: { type: level === "off" ? "disabled" : "enabled" } };
+    case "effort": return { reasoning_effort: level === "off" ? "low" : level };
+    case "qwen": return level === "off" ? { enable_thinking: false } : { enable_thinking: true };
+  }
+}
+
 export type OpenAiProviderOptions = Readonly<{
   baseUrl?: string;
   apiKey?: string;
@@ -19,6 +40,8 @@ export class OpenAiProvider implements ModelProvider {
   readonly baseUrl: string;
   private readonly apiKey: string | undefined;
   private readonly client: ProviderHttpClient;
+  /** Resolved thinking dialect per endpoint+model; "plain" means thinking is unsupported. */
+  private readonly thinkingDialects = new Map<string, "glm" | "effort" | "qwen" | "plain">();
 
   constructor(options: OpenAiProviderOptions = {}) {
     this.baseUrl = options.baseUrl ?? OPENAI_BASE_URL;
@@ -45,6 +68,45 @@ export class OpenAiProvider implements ModelProvider {
   }
 
   async *generate(request: GenerateRequest, signal: AbortSignal): AsyncIterable<GenerationEvent> {
+    const { thinking, ...rest } = request;
+    const key = `${this.baseUrl}::${request.model}`;
+    if (!thinking) {
+      yield* this.streamOnce(rest, undefined, signal);
+      return;
+    }
+    // A dialect resolved earlier (including "plain") is reused directly.
+    const resolved = this.thinkingDialects.get(key);
+    if (resolved) {
+      const extra = resolved === "plain" ? undefined : thinkingBody(resolved, thinking);
+      yield* this.streamOnce(rest, extra, signal);
+      return;
+    }
+    // Probe dialects, degrading on request-level rejections (HTTP 4xx), and
+    // finally fall back to a plain request when thinking is unsupported.
+    let emitted = false;
+    let lastError: unknown;
+    for (const dialect of [...thinkingCandidates(thinking, request.model), "plain" as const]) {
+      const extra = dialect === "plain" ? undefined : thinkingBody(dialect, thinking);
+      try {
+        for await (const event of this.streamOnce(rest, extra, signal)) {
+          emitted = true;
+          yield event;
+        }
+        this.thinkingDialects.set(key, dialect);
+        return;
+      } catch (error) {
+        if (emitted) throw error;
+        const rejected = error instanceof ProviderRequestError
+          && error.failure.error.code === "PROVIDER"
+          && !error.failure.fallbackEligible;
+        if (!rejected) throw error;
+        lastError = error;
+      }
+    }
+    throw lastError;
+  }
+
+  private async *streamOnce(request: Omit<GenerateRequest, "thinking">, extra: Record<string, unknown> | undefined, signal: AbortSignal): AsyncIterable<GenerationEvent> {
     const body = {
       model: request.model,
       messages: request.messages,
@@ -52,7 +114,7 @@ export class OpenAiProvider implements ModelProvider {
       stream_options: { include_usage: true },
       ...(request.temperature === undefined ? {} : { temperature: request.temperature }),
       ...(request.maxTokens === undefined ? {} : { max_tokens: request.maxTokens }),
-      ...(request.thinking === undefined ? {} : { thinking: { type: request.thinking } })
+      ...(extra ?? {})
     };
     let finishReason: string | undefined;
     for await (const chunk of this.client.sse<unknown>(this.baseUrl, "/chat/completions", {

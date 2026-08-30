@@ -78,6 +78,112 @@ describe("OpenAI-compatible provider", () => {
     });
   });
 
+  it("maps thinking levels onto the GLM dialect for glm models", async () => {
+    const fake = await server((request, response) => {
+      response.writeHead(200, { "content-type": "text/event-stream" });
+      response.end('data: {"choices":[{"delta":{"content":"ok"},"finish_reason":null}]}\n\n' + 'data: {"choices":[{"delta":{},"finish_reason":"stop"}]}\n\n');
+    });
+    const events = [];
+    for await (const event of new OpenAiProvider({ baseUrl: fake.baseUrl }).generate({
+      model: "glm-5.3-flash", messages: [{ role: "user", content: "Hi" }], thinking: "high"
+    }, new AbortController().signal)) events.push(event);
+
+    expect(events).toEqual([
+      { type: "text-delta", text: "ok" },
+      { type: "done", finishReason: "stop" }
+    ]);
+    expect(JSON.parse((fake.requests[0]?.body ?? "{}") as string).thinking).toEqual({ type: "enabled" });
+  });
+
+  it("maps thinking off to reasoning_effort low on reasoning-effort models", async () => {
+    const fake = await server((request, response) => {
+      response.writeHead(200, { "content-type": "text/event-stream" });
+      response.end('data: {"choices":[{"delta":{"content":"ok"},"finish_reason":null}]}\n\n' + 'data: {"choices":[{"delta":{},"finish_reason":"stop"}]}\n\n');
+    });
+    const events = [];
+    for await (const event of new OpenAiProvider({ baseUrl: fake.baseUrl }).generate({
+      model: "o4-mini", messages: [{ role: "user", content: "Hi" }], thinking: "off"
+    }, new AbortController().signal)) events.push(event);
+
+    expect(JSON.parse((fake.requests[0]?.body ?? "{}") as string).reasoning_effort).toBe("low");
+    expect(events).toEqual([
+      { type: "text-delta", text: "ok" },
+      { type: "done", finishReason: "stop" }
+    ]);
+  });
+
+  it("probes dialects on unknown models, degrades to plain, and remembers", async () => {
+    const bodies: string[] = [];
+    const fake = await server((request, response) => {
+      bodies.push(request.body as string);
+      if (bodies.length < 4) {
+        response.writeHead(400, { "content-type": "application/json" });
+        response.end(JSON.stringify({ error: { message: "unknown parameter" } }));
+        return;
+      }
+      response.writeHead(200, { "content-type": "text/event-stream" });
+      response.end('data: {"choices":[{"delta":{"content":"ok"},"finish_reason":null}]}\n\n' + 'data: {"choices":[{"delta":{},"finish_reason":"stop"}]}\n\n');
+    });
+    const provider = new OpenAiProvider({ baseUrl: fake.baseUrl });
+    const events = [];
+    for await (const event of provider.generate({
+      model: "mystery-model", messages: [{ role: "user", content: "Hi" }], thinking: "medium"
+    }, new AbortController().signal)) events.push(event);
+
+    expect(events).toEqual([
+      { type: "text-delta", text: "ok" },
+      { type: "done", finishReason: "stop" }
+    ]);
+    // glm-style, then reasoning_effort, then enable_thinking, then plain.
+    expect(bodies).toHaveLength(4);
+    expect(JSON.parse(bodies[0]!).thinking).toEqual({ type: "enabled" });
+    expect(JSON.parse(bodies[1]!).reasoning_effort).toBe("medium");
+    expect(JSON.parse(bodies[2]!).enable_thinking).toBe(true);
+    expect(JSON.parse(bodies[3]!)).not.toHaveProperty("thinking");
+    expect(JSON.parse(bodies[3]!)).not.toHaveProperty("reasoning_effort");
+    expect(JSON.parse(bodies[3]!)).not.toHaveProperty("enable_thinking");
+
+    // The resolved dialect ("plain") is remembered for the session.
+    events.length = 0;
+    for await (const event of provider.generate({
+      model: "mystery-model", messages: [{ role: "user", content: "Hi again" }], thinking: "high"
+    }, new AbortController().signal)) events.push(event);
+    expect(bodies).toHaveLength(5);
+    expect(JSON.parse(bodies[4]!)).not.toHaveProperty("thinking");
+  });
+
+  it("remembers a working dialect instead of re-probing every turn", async () => {
+    const bodies: string[] = [];
+    const fake = await server((request, response) => {
+      bodies.push(request.body as string);
+      const parsed = JSON.parse(request.body as string);
+      if (parsed.reasoning_effort === undefined) {
+        response.writeHead(400, { "content-type": "application/json" });
+        response.end(JSON.stringify({ error: { message: "unknown parameter" } }));
+        return;
+      }
+      response.writeHead(200, { "content-type": "text/event-stream" });
+      response.end('data: {"choices":[{"delta":{"content":"ok"},"finish_reason":null}]}\n\n' + 'data: {"choices":[{"delta":{},"finish_reason":"stop"}]}\n\n');
+    });
+    const provider = new OpenAiProvider({ baseUrl: fake.baseUrl });
+    for await (const _event of provider.generate({
+      model: "mystery-model", messages: [{ role: "user", content: "Hi" }], thinking: "low"
+    }, new AbortController().signal)) { /* drain */ }
+
+    const events = [];
+    for await (const event of provider.generate({
+      model: "mystery-model", messages: [{ role: "user", content: "Hi again" }], thinking: "medium"
+    }, new AbortController().signal)) events.push(event);
+
+    // Turn one probed glm (rejected), then landed on reasoning_effort.
+    // Second turn: straight to the working dialect, no probing.
+    expect(bodies).toHaveLength(3);
+    expect(JSON.parse(bodies[0]!).reasoning_effort).toBeUndefined();
+    expect(JSON.parse(bodies[1]!).reasoning_effort).toBe("low");
+    expect(JSON.parse(bodies[2]!).reasoning_effort).toBe("medium");
+    expect(events.map((event) => event.type)).toEqual(["text-delta", "done"]);
+  });
+
   it("rejects malformed usage without emitting completion", async () => {
     const fake = await server((_request, response) => {
       response.writeHead(200, { "content-type": "text/event-stream" });

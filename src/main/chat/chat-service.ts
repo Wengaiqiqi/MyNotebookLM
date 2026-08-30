@@ -30,8 +30,8 @@ export type ChatSendDeps = {
   randomId?: (n: number) => string;
 };
 
-export type SendInput = { requestId: string; projectId: string; conversationId: string; question: string; generationProfileId?: string; thinking?: "enabled" | "disabled" };
-export type RegenerateInput = { requestId: string; projectId: string; conversationId: string; messageId: string; thinking?: "enabled" | "disabled" };
+export type SendInput = { requestId: string; projectId: string; conversationId: string; question: string; generationProfileId?: string; thinking?: "off" | "low" | "medium" | "high" };
+export type RegenerateInput = { requestId: string; projectId: string; conversationId: string; messageId: string; thinking?: "off" | "low" | "medium" | "high" };
 type ConversationQuery = { projectId: string; conversationId: string };
 
 type StreamEvent =
@@ -65,7 +65,7 @@ type TurnContext = {
   /** When set, this turn replaces an earlier assistant reply instead of appending after a fresh user message. */
   supersedesMessageId: string | null;
   generationProfileId?: string | undefined;
-  thinking?: "enabled" | "disabled" | undefined;
+  thinking?: "off" | "low" | "medium" | "high" | undefined;
   emit: (event: StreamEvent) => void;
 };
 
@@ -250,7 +250,7 @@ export class ChatService {
     turn: ConversationQuery;
     profile: ModelProfileDto;
     generationProfileId?: string | undefined;
-    thinking?: "enabled" | "disabled" | undefined;
+    thinking?: "off" | "low" | "medium" | "high" | undefined;
     retrievals: Record<string, RetrievedCitation>;
     contextMessages: ChatTurn[];
     assistantId: string;

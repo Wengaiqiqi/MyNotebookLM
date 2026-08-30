@@ -222,8 +222,9 @@ const en = {
       repair: "Repair answer"
     },
     renameHint: "Click to switch, double-click to rename",
-    thinking: "Thinking",
-    thinkingHint: "Deep thinking is slower; keep it off for routine Q&A",
+    thinking: "Thinking level",
+    thinkingHint: "Higher levels reason more but respond slower; unsupported models degrade automatically",
+    thinkingLevel: { off: "Thinking: off", low: "Thinking: low", medium: "Thinking: medium", high: "Thinking: high" },
     retryBusyHint: "An answer is streaming. Wait for it to finish or stop it first",
     ui: {
       conversations: "Conversations", rename: "Rename", remove: "Delete", saveTitle: "Save conversation title", noConversations: "No conversations yet.", conversationTitle: "Conversation title", viewDetails: "View source",
