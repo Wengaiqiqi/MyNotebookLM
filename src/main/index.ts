@@ -205,7 +205,10 @@ app.whenReady().then(async () => {
         const current = taskService.getById?.(task.id);
         if (current?.state === "queued" || current?.state === "running") taskService.cancel(task.id);
       }
-      else taskService.fail(task.id, { code: "INTERNAL", messageKey: "errors.internal", recoverable: false });
+      else {
+        console.error(`[task:${task.kind}] ${task.id} failed:`, error);
+        taskService.fail(task.id, { code: "INTERNAL", messageKey: "errors.internal", recoverable: false });
+      }
     });
     return task;
   };

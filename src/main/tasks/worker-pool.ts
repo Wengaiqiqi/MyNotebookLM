@@ -35,7 +35,7 @@ export class WorkerPool {
   private readonly queue: Array<{ taskId: string; revisionId: string; kind: string; data: Uint8Array; resolve: (r: WorkerResult) => void; reject: (e: Error) => void }> = [];
   private durablePayload: DurablePayloadLoader | undefined;
   private onProgress: ((taskId: string, value: number) => void) | undefined;
-  constructor(concurrency = defaultWorkerConcurrency(), private readonly workerUrl = new URL("./ingestionWorker.js", import.meta.url), private readonly factory: () => PoolWorker = () => new Worker(this.workerUrl) as PoolWorker, durablePayload?: DurablePayloadLoader, onProgress?: (taskId: string, value: number) => void) { this.concurrency = Math.max(1, concurrency); this.durablePayload = durablePayload; this.onProgress = onProgress; }
+  constructor(concurrency = defaultWorkerConcurrency(), private readonly workerUrl = new URL("../ingestionWorker.js", import.meta.url), private readonly factory: () => PoolWorker = () => new Worker(this.workerUrl) as PoolWorker, durablePayload?: DurablePayloadLoader, onProgress?: (taskId: string, value: number) => void) { this.concurrency = Math.max(1, concurrency); this.durablePayload = durablePayload; this.onProgress = onProgress; }
   setDurablePayloadLoader(loader: DurablePayloadLoader): void { this.durablePayload = loader; }
   setProgressCallback(callback: (taskId: string, value: number) => void): void { this.onProgress = callback; }
   start(taskId: string, revisionId: string, kind: string, data: Uint8Array): Promise<WorkerResult> { return new Promise((resolve, reject) => { this.queue.push({ taskId, revisionId, kind, data, resolve, reject }); this.pump(); }); }
