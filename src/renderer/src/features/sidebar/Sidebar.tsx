@@ -105,6 +105,11 @@ export default function Sidebar(props: SidebarProps) {
                 aria-current={project.id === props.selectedId ? "page" : undefined}
                 disabled={props.busy || props.onboarding}
                 onClick={() => props.onSelect(project.id)}
+                onDoubleClick={(event) => {
+                  if (!project.archived && project.status === "active") {
+                    props.onMenuAction("rename", project, event.currentTarget);
+                  }
+                }}
               >
                 <span className="project-icon" aria-hidden="true"><Icon name="book" /></span>
                 <span className="project-item-copy">
@@ -160,11 +165,6 @@ export default function Sidebar(props: SidebarProps) {
         <>
           <div className="menu-pop-veil" onMouseDown={() => setMenu(undefined)} />
           <div className="menu-pop" role="menu" style={{ top: menu.top, left: menu.left }}>
-            {!menu.project.archived && menu.project.status === "active" && (
-              <button type="button" role="menuitem" onClick={() => menuAction("rename")}>
-                <Icon name="edit" />{t("project.rename")}
-              </button>
-            )}
             {!menu.project.archived && menu.project.status === "active" && (
               <button type="button" role="menuitem" onClick={() => menuAction("archive")}>
                 <Icon name="archive" />{t("project.archive")}
