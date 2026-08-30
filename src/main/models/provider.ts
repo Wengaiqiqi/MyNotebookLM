@@ -17,6 +17,8 @@ export interface GenerateRequest {
   messages: ChatTurn[];
   temperature?: number;
   maxTokens?: number;
+  /** Provider-specific reasoning switch (e.g. GLM thinking); omit to use the model default. */
+  thinking?: "enabled" | "disabled";
 }
 
 export interface EmbeddingRequest {

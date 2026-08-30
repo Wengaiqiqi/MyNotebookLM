@@ -222,6 +222,8 @@ const zhCN = {
       repair: "修复回答"
     },
     renameHint: "单击切换对话，双击重命名",
+    thinking: "深度思考",
+    thinkingHint: "深度思考更严谨但明显更慢；常规问答建议关闭",
     retryBusyHint: "正在生成回答，请等待完成或停止后再重试",
     ui: {
       conversations: "对话", rename: "重命名", remove: "删除", saveTitle: "保存对话标题", noConversations: "暂无对话。", conversationTitle: "对话标题", viewDetails: "查看原文",

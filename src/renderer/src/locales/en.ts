@@ -222,6 +222,8 @@ const en = {
       repair: "Repair answer"
     },
     renameHint: "Click to switch, double-click to rename",
+    thinking: "Thinking",
+    thinkingHint: "Deep thinking is slower; keep it off for routine Q&A",
     retryBusyHint: "An answer is streaming. Wait for it to finish or stop it first",
     ui: {
       conversations: "Conversations", rename: "Rename", remove: "Delete", saveTitle: "Save conversation title", noConversations: "No conversations yet.", conversationTitle: "Conversation title", viewDetails: "View source",

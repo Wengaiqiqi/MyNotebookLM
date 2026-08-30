@@ -51,7 +51,8 @@ export class OpenAiProvider implements ModelProvider {
       stream: true,
       stream_options: { include_usage: true },
       ...(request.temperature === undefined ? {} : { temperature: request.temperature }),
-      ...(request.maxTokens === undefined ? {} : { max_tokens: request.maxTokens })
+      ...(request.maxTokens === undefined ? {} : { max_tokens: request.maxTokens }),
+      ...(request.thinking === undefined ? {} : { thinking: { type: request.thinking } })
     };
     let finishReason: string | undefined;
     for await (const chunk of this.client.sse<unknown>(this.baseUrl, "/chat/completions", {

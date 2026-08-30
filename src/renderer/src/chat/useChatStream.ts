@@ -17,10 +17,10 @@ export interface UseChatStreamResult {
   error: AppErrorDto | null;
   fallback: Extract<ChatRequestEvent, { type: "fallback" }> | null;
   canSend: boolean;
-  send(question: string): Promise<boolean>;
+  send(question: string, options?: { thinking?: "enabled" | "disabled" }): Promise<boolean>;
   stop(): Promise<boolean>;
-  regenerate(messageId: string): Promise<boolean>;
-  repair(): Promise<boolean>;
+  regenerate(messageId: string, options?: { thinking?: "enabled" | "disabled" }): Promise<boolean>;
+  repair(options?: { thinking?: "enabled" | "disabled" }): Promise<boolean>;
 }
 
 /**
@@ -164,7 +164,7 @@ export function useChatStream(
     }
   }, [chat, applyEvent, teardown, conversationId]);
 
-  const send = useCallback((question: string): Promise<boolean> => {
+  const send = useCallback((question: string, options?: { thinking?: "enabled" | "disabled" }): Promise<boolean> => {
     setError(null);
     setFallback(null);
     setRepairableMessageId(null);
@@ -191,13 +191,13 @@ export function useChatStream(
     setMessages((prev) => [...prev, localUserMessage]);
     return runTurn((requestId) => {
       optimisticUserRef.current.set(requestId, localUserMessage.id);
-      return chat.send({ requestId, projectId, conversationId, question, ...(generationProfileId ? { generationProfileId } : {}) });
+      return chat.send({ requestId, projectId, conversationId, question, ...(generationProfileId ? { generationProfileId } : {}), ...(options?.thinking ? { thinking: options.thinking } : {}) });
     });
   }, [runTurn, chat, projectId, conversationId, generationProfileId]);
 
-  const regenerate = useCallback((messageId: string): Promise<boolean> => {
+  const regenerate = useCallback((messageId: string, options?: { thinking?: "enabled" | "disabled" }): Promise<boolean> => {
     setError(null);
-    return runTurn((requestId) => chat.regenerate({ requestId, projectId, conversationId, messageId }));
+    return runTurn((requestId) => chat.regenerate({ requestId, projectId, conversationId, messageId, ...(options?.thinking ? { thinking: options.thinking } : {}) }));
   }, [runTurn, chat, projectId, conversationId]);
 
   const stop = useCallback(async (): Promise<boolean> => {
@@ -207,9 +207,9 @@ export function useChatStream(
     return result.ok ? result.value : false;
   }, [chat, projectId]);
 
-  const repair = useCallback((): Promise<boolean> => {
+  const repair = useCallback((options?: { thinking?: "enabled" | "disabled" }): Promise<boolean> => {
     const target = repairableMessageId;
-    return target ? regenerate(target) : Promise.resolve(false);
+    return target ? regenerate(target, options) : Promise.resolve(false);
   }, [regenerate, repairableMessageId]);
 
   // Unmount cleanup: drop subscription so late provider events are ignored.

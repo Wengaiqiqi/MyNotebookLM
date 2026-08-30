@@ -30,8 +30,8 @@ export type ChatSendDeps = {
   randomId?: (n: number) => string;
 };
 
-export type SendInput = { requestId: string; projectId: string; conversationId: string; question: string; generationProfileId?: string };
-export type RegenerateInput = { requestId: string; projectId: string; conversationId: string; messageId: string };
+export type SendInput = { requestId: string; projectId: string; conversationId: string; question: string; generationProfileId?: string; thinking?: "enabled" | "disabled" };
+export type RegenerateInput = { requestId: string; projectId: string; conversationId: string; messageId: string; thinking?: "enabled" | "disabled" };
 type ConversationQuery = { projectId: string; conversationId: string };
 
 type StreamEvent =
@@ -65,6 +65,7 @@ type TurnContext = {
   /** When set, this turn replaces an earlier assistant reply instead of appending after a fresh user message. */
   supersedesMessageId: string | null;
   generationProfileId?: string | undefined;
+  thinking?: "enabled" | "disabled" | undefined;
   emit: (event: StreamEvent) => void;
 };
 
@@ -139,7 +140,7 @@ export class ChatService {
         content: input.question,
         createdAt: this.clock().toISOString()
       });
-      return await this.runTurn({ requestId: input.requestId, turn: input, repo, profile, owner, nextId, userMessage, supersedesMessageId: null, ...(input.generationProfileId ? { generationProfileId: input.generationProfileId } : {}), emit });
+      return await this.runTurn({ requestId: input.requestId, turn: input, repo, profile, owner, nextId, userMessage, supersedesMessageId: null, ...(input.generationProfileId ? { generationProfileId: input.generationProfileId } : {}), ...(input.thinking ? { thinking: input.thinking } : {}), emit });
     } catch (reason) {
       return internalResult(reason);
     }
@@ -165,7 +166,7 @@ export class ChatService {
       }
       let counter = 0;
       const nextId = (): string => (this.deps.randomId ? this.deps.randomId(++counter) : crypto.randomUUID());
-      return await this.runTurn({ requestId: input.requestId, turn: input, repo, profile, owner, nextId, userMessage, supersedesMessageId: old.id, emit });
+      return await this.runTurn({ requestId: input.requestId, turn: input, repo, profile, owner, nextId, userMessage, supersedesMessageId: old.id, ...(input.thinking ? { thinking: input.thinking } : {}), emit });
     } catch (reason) {
       return internalResult(reason);
     }
@@ -177,7 +178,7 @@ export class ChatService {
    * existing user/assistant pair, so no duplicate user row can be created.
    */
   private async runTurn(args: TurnContext): Promise<Result<{ requestId: string; assistantMessageId: string }>> {
-    const { turn, repo, profile, owner, nextId, userMessage, supersedesMessageId, generationProfileId, emit } = args;
+    const { turn, repo, profile, owner, nextId, userMessage, supersedesMessageId, generationProfileId, thinking, emit } = args;
     let retrieved: RetrievableChunk[];
     try {
       retrieved = await this.deps.retrieval({ projectId: turn.projectId, question: userMessage.content });
@@ -238,7 +239,7 @@ export class ChatService {
     this.inFlightConversations.add(turn.conversationId);
     emit({ type: "started", requestId, messageId: assistant.id });
 
-    const outcome = await this.runGeneration({ repo, turn, profile, generationProfileId, retrievals: retrievalsByLabel, contextMessages: context.messages, assistantId: assistant.id, requestId, signal, emit });
+    const outcome = await this.runGeneration({ repo, turn, profile, generationProfileId, ...(thinking ? { thinking } : {}), retrievals: retrievalsByLabel, contextMessages: context.messages, assistantId: assistant.id, requestId, signal, emit });
     this.registry.complete(requestId, owner);
     this.inFlightConversations.delete(turn.conversationId);
     return outcome;
@@ -249,6 +250,7 @@ export class ChatService {
     turn: ConversationQuery;
     profile: ModelProfileDto;
     generationProfileId?: string | undefined;
+    thinking?: "enabled" | "disabled" | undefined;
     retrievals: Record<string, RetrievedCitation>;
     contextMessages: ChatTurn[];
     assistantId: string;
@@ -256,7 +258,7 @@ export class ChatService {
     signal: AbortSignal;
     emit: (event: StreamEvent) => void;
   }): Promise<Result<{ requestId: string; assistantMessageId: string }>> {
-    const { repo, turn, profile, generationProfileId, retrievals, contextMessages, assistantId, requestId, signal, emit } = args;
+    const { repo, turn, profile, generationProfileId, thinking, retrievals, contextMessages, assistantId, requestId, signal, emit } = args;
     const now = this.clock.bind(this);
     let fullText = "";
     let lastCheckpointAt = now().getTime();
@@ -280,7 +282,7 @@ export class ChatService {
     };
 
     try {
-      const routedRequest = { projectId: turn.projectId, operationId: requestId, model: profile.modelId, messages: contextMessages };
+      const routedRequest = { projectId: turn.projectId, operationId: requestId, model: profile.modelId, messages: contextMessages, ...(thinking === undefined ? {} : { thinking }) };
       for await (const event of generateRouted(this.routedDeps(), "chat", routedRequest, generationProfileId, signal)) {
         if (event.type === "attempt-started") {
           continue;

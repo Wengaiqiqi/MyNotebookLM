@@ -31,6 +31,8 @@ export default function ChatPane({ projectId, generationProfileId, sources, onOp
   const [editingTitle, setEditingTitle] = useState(false);
   const [titleDraft, setTitleDraft] = useState("");
   const [modelMenuOpen, setModelMenuOpen] = useState(false);
+  const [thinking, setThinking] = useState<"enabled" | "disabled">(() =>
+    localStorage.getItem("mynotebooklm.thinking") === "enabled" ? "enabled" : "disabled");
   const [question, setQuestion] = useState("");
   const [activeCitation, setActiveCitation] = useState<CitationDto | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -109,6 +111,12 @@ export default function ChatPane({ projectId, generationProfileId, sources, onOp
   }, [modelMenuOpen]);
   useEffect(() => { followRef.current = true; }, [conversationId]);
 
+  function toggleThinking(): void {
+    const next = thinking === "enabled" ? "disabled" : "enabled";
+    setThinking(next);
+    localStorage.setItem("mynotebooklm.thinking", next);
+  }
+
   async function send(): Promise<void> {
     const text = question.trim();
     if (!text || !stream.canSend) return;
@@ -129,7 +137,7 @@ export default function ChatPane({ projectId, generationProfileId, sources, onOp
           .catch(() => undefined);
       }
     }
-    await stream.send(text);
+    await stream.send(text, { thinking });
   }
 
   function onScroll(event: React.UIEvent<HTMLDivElement>): void {
@@ -263,7 +271,7 @@ export default function ChatPane({ projectId, generationProfileId, sources, onOp
         <p className="chat-note error" role="alert">
           {t(stream.error.messageKey, stream.error.messageKey)}
           {stream.repairableMessageId && (
-            <button type="button" onClick={() => void stream.repair()}>{t("chat.ui.retryAnswer")}</button>
+            <button type="button" onClick={() => void stream.repair({ thinking })}>{t("chat.ui.retryAnswer")}</button>
           )}
         </p>
       )}
@@ -305,18 +313,18 @@ export default function ChatPane({ projectId, generationProfileId, sources, onOp
                         <button type="button" onClick={() => { void navigator.clipboard?.writeText(message.content); toast.success(t("chat.copied")); }}>
                           <Icon name="copy" />{t("chat.ui.copy")}
                         </button>
-                        <button type="button" disabled={stream.state === "streaming"} title={t("chat.retryBusyHint")} onClick={() => void stream.regenerate(message.id)}>
+                        <button type="button" disabled={stream.state === "streaming"} title={t("chat.retryBusyHint")} onClick={() => void stream.regenerate(message.id, { thinking })}>
                           <Icon name="retry" />{t("chat.ui.regenerate")}
                         </button>
                       </>
                     )}
                     {message.state === "cancelled" && (
-                      <button type="button" disabled={stream.state === "streaming"} title={t("chat.retryBusyHint")} onClick={() => void stream.regenerate(message.id)}>
+                      <button type="button" disabled={stream.state === "streaming"} title={t("chat.retryBusyHint")} onClick={() => void stream.regenerate(message.id, { thinking })}>
                         <Icon name="retry" />{t("chat.ui.regenerate")}
                       </button>
                     )}
                     {message.state === "failed" && (
-                      <button type="button" disabled={stream.state === "streaming"} title={t("chat.retryBusyHint")} onClick={() => void stream.regenerate(message.id)}>
+                      <button type="button" disabled={stream.state === "streaming"} title={t("chat.retryBusyHint")} onClick={() => void stream.regenerate(message.id, { thinking })}>
                         <Icon name="retry" />{t("chat.ui.retryAnswer")}
                       </button>
                     )}
@@ -341,6 +349,15 @@ export default function ChatPane({ projectId, generationProfileId, sources, onOp
             rows={1}
           />
           <div className="composer-bar">
+            <button
+              type="button"
+              className="thinking-toggle"
+              aria-pressed={thinking === "enabled"}
+              title={t("chat.thinkingHint")}
+              onClick={toggleThinking}
+            >
+              <Icon name="brain" />{t("chat.thinking")}
+            </button>
             {profiles.length > 0 && (
               <div className="model-picker">
                 <button

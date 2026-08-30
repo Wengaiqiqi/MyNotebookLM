@@ -696,6 +696,16 @@ button:disabled { cursor: not-allowed; opacity: .5; }
 }
 .composer textarea:focus { outline: none; }
 .composer-bar { display: flex; align-items: center; gap: 8px; padding: 4px 8px 6px; }
+.thinking-toggle {
+  display: inline-flex; align-items: center; gap: 6px;
+  min-height: 30px; padding: 3px 10px;
+  border: 0; border-radius: 999px; background: transparent;
+  color: var(--ink-3); font-size: 12.5px; font-weight: 550;
+  transition: background .12s ease, color .12s ease;
+}
+.thinking-toggle:hover { background: var(--surface-2); color: var(--ink); }
+.thinking-toggle[aria-pressed="true"] { background: var(--accent-soft); color: var(--accent); }
+.thinking-toggle svg { width: 13px; height: 13px; }
 .model-picker { position: relative; }
 .model-pill {
   display: inline-flex; align-items: center; gap: 7px;

@@ -123,9 +123,9 @@ export const chatCreateConversationInputSchema = z.object({ projectId: z.uuid(),
 export const chatRenameConversationInputSchema = z.object({ projectId: z.uuid(), conversationId: z.uuid(), title: chatTitleSchema }).strict();
 export const chatConversationInputSchema = z.object({ projectId: z.uuid(), conversationId: z.uuid() }).strict();
 export const chatListMessagesInputSchema = z.object({ projectId: z.uuid(), conversationId: z.uuid() }).strict();
-  export const chatSendInputSchema = z.object({ requestId: z.uuid(), projectId: z.uuid(), conversationId: z.uuid(), question: z.string().trim().min(1).max(20_000), generationProfileId: z.uuid().optional() }).strict();
+  export const chatSendInputSchema = z.object({ requestId: z.uuid(), projectId: z.uuid(), conversationId: z.uuid(), question: z.string().trim().min(1).max(20_000), generationProfileId: z.uuid().optional(), thinking: z.enum(["enabled", "disabled"]).optional() }).strict();
 export const chatStopInputSchema = z.object({ projectId: z.uuid(), requestId: z.uuid() }).strict();
-export const chatRegenerateInputSchema = z.object({ requestId: z.uuid(), projectId: z.uuid(), conversationId: z.uuid(), messageId: z.string().min(1).max(128) }).strict();
+export const chatRegenerateInputSchema = z.object({ requestId: z.uuid(), projectId: z.uuid(), conversationId: z.uuid(), messageId: z.string().min(1).max(128), thinking: z.enum(["enabled", "disabled"]).optional() }).strict();
 export const chatRequestIdInputSchema = z.object({ requestId: z.uuid() }).strict();
 export const citationOpenInputSchema = z.object({ projectId: z.uuid(), citationId: z.string().trim().min(1).max(256) }).strict();
 
