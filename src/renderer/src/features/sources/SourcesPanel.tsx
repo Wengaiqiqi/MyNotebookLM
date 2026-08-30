@@ -193,15 +193,15 @@ export default function SourcesPanel({ projectId, embeddingProfileId, onImported
                     </button>
                   </div>
                 )}
-                {!activeTask && failedTask && (
+                {!activeTask && (failedTask || source.currentRevisionState === "failed") && (
                   <div className="source-task failed" role="alert">
-                    <p className="source-task-error">{t(failedTask.error?.messageKey ?? "errors.internal", failedTask.error?.messageKey ?? "")}</p>
-                    {failedTask.error?.recoverable && (
-                      <button type="button" className="btn ghost sm source-task-action" onClick={() => void retry(source.id)}>
-                        {t("research.task.retry")}
-                      </button>
+                    {failedTask && (
+                      <p className="source-task-error">{t(failedTask.error?.messageKey ?? "errors.internal", failedTask.error?.messageKey ?? "")}</p>
                     )}
-                    {failedTask.error?.code === "INDEX_UNAVAILABLE" && embeddingProfileId && (
+                    <button type="button" className="btn ghost sm source-task-action" onClick={() => void retry(source.id)}>
+                      <Icon name="retry" />{t("research.task.retry")}
+                    </button>
+                    {failedTask?.error?.code === "INDEX_UNAVAILABLE" && embeddingProfileId && (
                       <button
                         type="button"
                         className="btn ghost sm source-task-action"
