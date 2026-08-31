@@ -2,10 +2,10 @@ import { createHash } from "node:crypto";
 import type { SourceLocator } from "../../shared/sources";
 import type { DocumentBlock, PreparedChunk } from "./types";
 
-export const CHUNKING_VERSION = "blocks-900-150-v1";
+export const CHUNKING_VERSION = "blocks-480-80-v3";
 
-export const DEFAULT_TARGET_TOKENS = 900;
-export const DEFAULT_OVERLAP_TOKENS = 150;
+export const DEFAULT_TARGET_TOKENS = 480;
+export const DEFAULT_OVERLAP_TOKENS = 80;
 
 const CJK_CODE_POINT =
   /[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uac00-\ud7af\uf900-\ufaff]/;
@@ -154,9 +154,11 @@ function joinFragments(fragments: Fragment[]): string {
     if (i > 0) {
       const prev = fragments[i - 1]!;
       const next = fragments[i]!;
-      const tight = prev.block.kind === "list" || prev.block.kind === "sheet-row" ||
-        next.block.kind === "list" || next.block.kind === "sheet-row";
-      out += tight ? "\n" : "\n\n";
+      if (prev.block !== next.block) {
+        const tight = prev.block.kind === "list" || prev.block.kind === "sheet-row" ||
+          next.block.kind === "list" || next.block.kind === "sheet-row";
+        out += tight ? "\n" : "\n\n";
+      }
     }
     out += fragments[i]!.text;
   }
@@ -285,7 +287,7 @@ export function chunkBlocks(
 function splitSentences(text: string): string[] {
   const trimmed = text.trim();
   if (trimmed.length === 0) return [text];
-  const parts = trimmed.split(/(?<=[.!?。！？])\s+/);
+  const parts = trimmed.split(/(?<=[。！？])|(?<=[.!?])(?=\s)/u);
   return parts.length > 0 ? parts : [text];
 }
 

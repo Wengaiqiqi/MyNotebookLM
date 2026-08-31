@@ -104,11 +104,13 @@ describe("useChatStream", () => {
     expect(users[0]?.content).toBe("What does the report say?");
     expect(result.current.messages.at(-1)?.role).toBe("assistant");
 
-    // Terminal reconciliation drops the temporary user row once the persisted
-    // transcript arrives via completed, keeping exactly one copy.
-    await emitAsync(h, REQUEST_ID, { type: "completed", requestId: REQUEST_ID, messageId: MESSAGE_ID, message: makeMessage({}) });
-    expect(result.current.messages.filter((m) => m.role === "user").length).toBe(0);
-    expect(result.current.messages.length).toBe(1);
+    // Terminal reconciliation keeps the visible question and adopts its
+    // authoritative persisted id from the assistant reply.
+    await emitAsync(h, REQUEST_ID, { type: "completed", requestId: REQUEST_ID, messageId: MESSAGE_ID, message: makeMessage({ replyToMessageId: "persisted-user-1" }) });
+    const usersAfterCompletion = result.current.messages.filter((m) => m.role === "user");
+    expect(usersAfterCompletion).toHaveLength(1);
+    expect(usersAfterCompletion[0]).toMatchObject({ id: "persisted-user-1", content: "What does the report say?" });
+    expect(result.current.messages.length).toBe(2);
   });
 
   it("sends a question and renders live text deltas into streaming state", async () => {
@@ -149,17 +151,36 @@ describe("useChatStream", () => {
     await act(async () => { stopResult = await result.current.stop(); });
     expect(h.stop).toHaveBeenCalledWith({ projectId: PROJECT_ID, requestId: REQUEST_ID });
     expect(stopResult).toBe(true);
+    expect(result.current.state).toBe("cancelled");
+    expect(result.current.streamingMessageId).toBeNull();
+    expect(result.current.messages.at(-1)?.state).toBe("cancelled");
+    expect(result.current.canSend).toBe(false);
 
     // Terminal cancelled event reconciles the draft and closes the stream.
     await emitAsync(h, REQUEST_ID, {
       type: "cancelled",
       requestId: REQUEST_ID,
       messageId: MESSAGE_ID,
-      message: makeMessage({ state: "cancelled", content: "partial answer kept" })
+      message: makeMessage({ state: "cancelled", content: "partial answer kept", replyToMessageId: "persisted-user-1" })
     });
     expect(result.current.state).toBe("idle");
+    expect(result.current.messages.find((message) => message.role === "user")).toMatchObject({ id: "persisted-user-1", content: "q" });
     expect(result.current.messages.at(-1)?.state).toBe("cancelled");
     expect(result.current.messages.at(-1)?.content).toBe("partial answer kept");
+  });
+
+  it("restores streaming state when main rejects a stale stop request", async () => {
+    const h = createApi();
+    h.send.mockResolvedValue(makeOk(REQUEST_ID, MESSAGE_ID));
+    h.stop.mockResolvedValueOnce({ ok: true, value: false });
+    const { result } = renderHook(() => useChatStream(h.api.chat, PROJECT_ID, CONVERSATION_ID, []));
+    await act(async () => { await result.current.send("q"); });
+    await emitAsync(h, REQUEST_ID, { type: "text-delta", requestId: REQUEST_ID, messageId: MESSAGE_ID, text: "still running" });
+
+    await act(async () => { await expect(result.current.stop()).resolves.toBe(false); });
+    expect(result.current.state).toBe("streaming");
+    expect(result.current.streamingMessageId).toBe(MESSAGE_ID);
+    expect(result.current.messages.at(-1)?.state).toBe("streaming");
   });
 
   it("surfaces a failed stream with a repair action that regenerates the same turn", async () => {
@@ -203,17 +224,33 @@ describe("useChatStream", () => {
     expect(result.current.canSend).toBe(true);
   });
 
+  it("clears stale restored messages on the first switch to a new conversation", () => {
+    const h = createApi();
+    const old = [makeMessage({ id: "old", content: "old conversation" })];
+    const { result, rerender } = renderHook(
+      ({ id, messages }: { id: string; messages: MessageDto[] }) => useChatStream(h.api.chat, PROJECT_ID, id, messages),
+      { initialProps: { id: CONVERSATION_ID, messages: old } }
+    );
+
+    rerender({ id: "new-conversation", messages: old });
+    expect(result.current.messages).toEqual([]);
+  });
+
   it("regenerates from a completed assistant reply without duplicating the user message", async () => {
     const h = createApi();
     h.regenerate.mockResolvedValue({ ok: true as const, value: { requestId: REQUEST_ID, assistantMessageId: MESSAGE_ID } });
-    const withHistory = [makeMessage({ id: "u1", sequence: 1, role: "user", content: "q", provider: null, profileId: null, model: null })];
+    const withHistory = [
+      makeMessage({ id: "u1", sequence: 1, role: "user", content: "q", provider: null, profileId: null, model: null }),
+      makeMessage({ id: "a1", sequence: 2, state: "cancelled", replyToMessageId: "u1" })
+    ];
     const { result } = renderHook(() => useChatStream(h.api.chat, PROJECT_ID, CONVERSATION_ID, withHistory));
 
-    await act(async () => { await result.current.regenerate("a1"); });
-    expect(h.regenerate).toHaveBeenCalledWith(expect.objectContaining({ projectId: PROJECT_ID, conversationId: CONVERSATION_ID, messageId: "a1", requestId: expect.any(String) }));
+    await act(async () => { await result.current.regenerate("a1", { question: "edited q" }); });
+    expect(h.regenerate).toHaveBeenCalledWith(expect.objectContaining({ projectId: PROJECT_ID, conversationId: CONVERSATION_ID, messageId: "a1", question: "edited q", requestId: expect.any(String) }));
     expect(result.current.streamingMessageId).toBe(MESSAGE_ID);
     // Only the historical user message exists; no duplicate user row was appended.
     expect(result.current.messages.filter((m) => m.role === "user").length).toBe(1);
+    expect(result.current.messages.find((m) => m.id === "u1")?.content).toBe("edited q");
   });
 
   it("subscribes before a pending send, receives deltas, and can stop it", async () => {

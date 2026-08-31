@@ -293,7 +293,14 @@ export function createDesktopApi(ipc: IpcInvoker): DesktopApi {
         await awaitSubscription(parsed.data.requestId);
         return invokeResult(ipc, CHAT_CHANNELS.send, chatSendInputSchema, resultSchema(chatSendResultValueSchema), parsed.data);
       },
-      stop: (input) => invokeResult(ipc, CHAT_CHANNELS.stop, chatStopInputSchema, resultSchema(z.boolean()), input),
+      stop: async (input) => {
+        const parsed = chatStopInputSchema.safeParse(input);
+        if (!parsed.success) return validationFailure();
+        // A click can happen while send() is still waiting for subscription
+        // registration. Queue stop behind the same gate so main sees send first.
+        await awaitSubscription(parsed.data.requestId);
+        return invokeResult(ipc, CHAT_CHANNELS.stop, chatStopInputSchema, resultSchema(z.boolean()), parsed.data);
+      },
       regenerate: async (input) => {
         const parsed = chatRegenerateInputSchema.safeParse(input);
         if (!parsed.success) return validationFailure();

@@ -56,4 +56,19 @@ describe("SourcePreview", () => {
     expect(merged?.getAttribute("style")).toContain("background-color");
     expect((await screen.findByText("42")).closest("td")?.className).toContain("citation-sheet-target");
   });
+
+  it("renders a DOCX table without spreadsheet row and column furniture", async () => {
+    render(<SourcePreview kind="docx" data={null} text="flattened fallback" locator={{ kind: "cell", sheet: "document", cellRef: "A1:D3" }} sheet={{
+      name: "Table 1",
+      columns: [{ number: 1, width: 120 }, { number: 2, width: 160 }],
+      rows: [
+        { number: 1, cells: [{ column: 1, text: "竞赛级别" }, { column: 2, text: "一等奖" }] },
+        { number: 2, cells: [{ column: 1, text: "注：合并说明", colSpan: 2 }] }
+      ]
+    }} />);
+
+    expect((await screen.findByText("注：合并说明")).closest("td")?.getAttribute("colspan")).toBe("2");
+    expect(document.querySelector(".citation-document-table")).not.toBeNull();
+    expect(screen.queryByText("A")).toBeNull();
+  });
 });

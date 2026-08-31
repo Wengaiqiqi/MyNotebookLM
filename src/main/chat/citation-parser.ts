@@ -94,10 +94,10 @@ function findMarkers(text: string): { valid: ParsedCitation[]; invalid: boolean 
     while ((m = MARKER_RE.exec(region.text)) !== null) {
       const n = Number(m[1]);
       const start = region.start + m.index;
-      if (n >= 1 && n <= 12) {
+      if (n >= 1 && n <= 99) {
         valid.push({ label: `S${n}`, start, end: start + m[0].length });
       } else {
-        // Well-formed but outside S1..S12.
+        // Well-formed but outside the supported two-digit label range.
         invalid = true;
       }
     }

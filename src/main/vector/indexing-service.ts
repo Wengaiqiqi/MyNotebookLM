@@ -2,6 +2,7 @@ import type Database from "better-sqlite3";
 import { createHash } from "node:crypto";
 import type { EmbeddingProvider } from "./embedding-provider";
 import type { LanceRow, LanceSpace, LanceStore } from "./lance-store";
+import { CHUNKING_VERSION } from "../../workers/ingestion/chunker";
 
 type Chunk = { id: string; ordinal: number; content_hash: string; text: string; locator_json: string };
 type Input = { taskId: string; revisionId: string; space: LanceSpace; batchSize?: number; signal?: AbortSignal; now?: string };
@@ -140,7 +141,8 @@ export class IndexingService {
     const source = persisted;
     const provider = withOversizeGuard(await this.resolveAndValidateProvider(input.revisionId, input.space, persisted));
     let chunks = this.db.prepare("SELECT id, ordinal, content_hash, text, locator_json FROM source_chunks WHERE revision_id = ? ORDER BY ordinal").all(input.revisionId) as Chunk[];
-    if (chunks.length === 0 && this.recoverChunks) { await this.recoverChunks(input.revisionId); }
+    const revision = this.db.prepare("SELECT chunking_version FROM source_revisions WHERE id = ?").get(input.revisionId) as { chunking_version?: string } | undefined;
+    if (this.recoverChunks && (chunks.length === 0 || revision?.chunking_version !== CHUNKING_VERSION)) await this.recoverChunks(input.revisionId);
     chunks = this.db.prepare("SELECT id, ordinal, content_hash, text, locator_json FROM source_chunks WHERE revision_id = ? ORDER BY ordinal").all(input.revisionId) as Chunk[];
     if (chunks.length === 0) throw Object.assign(new Error("No SQLite source_chunks available for rebuild and no recoverable managed original was supplied"), { code: "SPACE_REBUILD_SOURCE_UNRECOVERABLE", recoverable: false });
     await this.lance.createSpace?.(input.space);

@@ -38,6 +38,15 @@ describe("finalizeCitations", () => {
     expect(result.hasInvalidCitations).toBe(true);
   });
 
+  it("resolves citation labels beyond the old twelve-item ceiling", () => {
+    const result = finalizeCitations("Expanded evidence [S13]", {
+      ...retrievals,
+      S13: { ...retrievals.S1!, label: "S13", chunkId: "c13" },
+    });
+    expect(result.citations.map((citation) => citation.label)).toEqual(["S13"]);
+    expect(result.hasInvalidCitations).toBe(false);
+  });
+
   it("rejoins markers split across stream chunks for recognition", () => {
     const buffer = new CitationStreamBuffer();
     const shown = ['Fact [', 'S1', '] end'].map((c) => buffer.push(c));

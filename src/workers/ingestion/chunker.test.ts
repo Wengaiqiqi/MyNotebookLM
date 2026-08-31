@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import type { DocumentBlock } from "./types";
-import { CHUNKING_VERSION, chunkBlocks, estimateTokens } from "./chunker";
+import { CHUNKING_VERSION, DEFAULT_TARGET_TOKENS, chunkBlocks, estimateTokens } from "./chunker";
 
 const FIXTURE_PATH = fileURLToPath(
   new URL("../../test/fixtures/text/bilingual-sample.txt", import.meta.url)
@@ -88,8 +88,8 @@ describe("estimateTokens", () => {
 });
 
 describe("CHUNKING_VERSION", () => {
-  it("records the blocks-900-150-v1 contract", () => {
-    expect(CHUNKING_VERSION).toBe("blocks-900-150-v1");
+  it("records the blocks-480-80-v3 contract", () => {
+    expect(CHUNKING_VERSION).toBe("blocks-480-80-v3");
   });
 });
 
@@ -152,17 +152,17 @@ describe("chunkBlocks table boundaries", () => {
   });
 });
 
-describe("chunkBlocks 900-token target", () => {
-  it("keeps paragraph-only chunks inside the 900-token target with no empty chunk", () => {
+describe("chunkBlocks default token target", () => {
+  it("keeps paragraph-only chunks inside the target with no empty chunk", () => {
     const blocks = makeParagraphs(60, 25);
     const chunks = chunkBlocks(blocks);
     expect(chunks.length).toBeGreaterThan(1);
-    expect(chunks.every((c) => c.tokenEstimate <= 900)).toBe(true);
+    expect(chunks.every((c) => c.tokenEstimate <= DEFAULT_TARGET_TOKENS)).toBe(true);
     expect(chunks.every((c) => c.text.trim().length > 0 && c.tokenEstimate > 0)).toBe(true);
   });
 });
 
-describe("chunkBlocks 150-token overlap", () => {
+describe("chunkBlocks default overlap", () => {
   it("re-includes trailing blocks of a chunk at the head of the next by default", () => {
     // Blocks stay well under the chunk target so each block remains whole
     // even with the digit/symbol-aware estimator.
@@ -221,15 +221,15 @@ describe("chunkBlocks determinism", () => {
   });
 });
 
-describe("chunkBlocks 900-token ceiling for unspaced CJK", () => {
-  it("splits a long CJK paragraph with no spaces into chunks at or below 900 tokens", () => {
+describe("chunkBlocks default token ceiling for unspaced CJK", () => {
+  it("splits a long CJK paragraph with no spaces into chunks at or below the target", () => {
     const longCjk = Array.from({ length: 1200 }, () => "中").join("");
     const blocks: DocumentBlock[] = [
       { kind: "paragraph", text: longCjk, locator: { kind: "paragraph", paragraph: 1 } }
     ];
     const chunks = chunkBlocks(blocks);
     expect(chunks.length).toBeGreaterThan(1);
-    expect(chunks.every((c) => c.tokenEstimate <= 900)).toBe(true);
+    expect(chunks.every((c) => c.tokenEstimate <= DEFAULT_TARGET_TOKENS)).toBe(true);
     expect(chunks.every((c) => c.text.trim().length > 0)).toBe(true);
   });
 });
@@ -243,7 +243,7 @@ describe("chunkBlocks over-limit heading followed by body", () => {
     ];
     const chunks = chunkBlocks(blocks);
     expect(chunks.length).toBeGreaterThan(1);
-    expect(chunks.every((c) => c.tokenEstimate <= 900)).toBe(true);
+    expect(chunks.every((c) => c.tokenEstimate <= DEFAULT_TARGET_TOKENS)).toBe(true);
     const joined = chunks.map((c) => c.text).join("");
     expect(joined).toContain("unique body sentinel");
     expect(joined).toContain("正文保留");
@@ -259,7 +259,7 @@ describe("chunkBlocks table over-limit", () => {
     ];
     const chunks = chunkBlocks(blocks);
     expect(chunks.length).toBeGreaterThan(1);
-    expect(chunks.every((c) => c.tokenEstimate <= 900)).toBe(true);
+    expect(chunks.every((c) => c.tokenEstimate <= DEFAULT_TARGET_TOKENS)).toBe(true);
   });
 });
 
@@ -304,7 +304,7 @@ describe("chunkBlocks heading context respects token budget", () => {
       { kind: "paragraph", text: paragraphText, locator: { kind: "paragraph", paragraph: 1 } }
     ];
     const chunks = chunkBlocks(blocks);
-    expect(chunks.every((c) => c.tokenEstimate <= 900)).toBe(true);
+    expect(chunks.every((c) => c.tokenEstimate <= DEFAULT_TARGET_TOKENS)).toBe(true);
   });
 });
 
@@ -316,7 +316,16 @@ describe("chunkBlocks over-limit heading", () => {
     ];
     const chunks = chunkBlocks(blocks);
     expect(chunks.length).toBeGreaterThan(1);
-    expect(chunks.every((c) => c.tokenEstimate <= 900)).toBe(true);
+    expect(chunks.every((c) => c.tokenEstimate <= DEFAULT_TARGET_TOKENS)).toBe(true);
     expect(chunks.every((c) => c.text.trim().length > 0)).toBe(true);
+  });
+});
+
+describe("chunkBlocks CJK sentence boundaries", () => {
+  it("splits unspaced Chinese at sentence endings before falling back to characters", () => {
+    const chunks = chunkBlocks([
+      { kind: "paragraph", text: "甲乙丙丁。戊己庚辛。", locator: { kind: "paragraph", paragraph: 1 } }
+    ], { targetTokens: 8, overlapTokens: 0 });
+    expect(chunks.map((chunk) => chunk.text)).toEqual(["甲乙丙丁。", "戊己庚辛。"]);
   });
 });

@@ -13,6 +13,7 @@ import { registerChatHandlers } from "./ipc/register-chat-handlers";
 import { registerNoteHandlers } from "./ipc/register-note-handlers";
 import { registerTransformationHandlers } from "./ipc/register-transformation-handlers";
 import { ChatService, recoverInterruptedStreams, type RetrievableChunk } from "./chat/chat-service";
+import { MAX_CITED_CHUNKS } from "./chat/context-builder";
 import { CitationOpener } from "./chat/citation-opener";
 import { ModelService } from "./models/model-service";
 import { getAppPaths } from "./platform/paths";
@@ -345,7 +346,7 @@ app.whenReady().then(async () => {
     router: modelRouter,
     providerFactory,
     retrieval: async ({ projectId, question }) => {
-      const result = await retrieval.search({ projectId, query: question, limit: 12 });
+      const result = await retrieval.search({ projectId, query: question, limit: MAX_CITED_CHUNKS });
       if (!result.ok) throw new Error(result.error.code);
       const rows = result.value as Array<{ chunkId: string; text: string; locator: Record<string, unknown> }>;
       const lookups = rows.map((hit) => {

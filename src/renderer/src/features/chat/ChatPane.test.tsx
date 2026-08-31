@@ -2,7 +2,7 @@
 
 import React from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import ChatPane, { CitationsPanel } from "./ChatPane";
 import "../../i18n";
 import type { DesktopApi } from "../../../../shared/ipc";
@@ -99,6 +99,13 @@ describe("ChatPane conversation creation", () => {
 
   it("switches to the blank new conversation immediately after creating it", async () => {
     const api = mockApi();
+    const oldMessage: MessageDto = {
+      id: "old-user", conversationId: existingId, sequence: 1, role: "user", content: "旧对话内容",
+      state: "completed", replyToMessageId: null, supersedesMessageId: null, superseded: false,
+      provider: null, profileId: null, model: null, usage: null, errorCode: null, completionReason: null,
+      createdAt: "2026-08-30T07:00:00.000Z", updatedAt: "2026-08-30T07:00:00.000Z", citations: []
+    };
+    vi.mocked(api.conversations.listMessages).mockImplementation(async ({ conversationId }) => ({ ok: true, value: conversationId === existingId ? [oldMessage] : [] }));
     render(
       <ChatPane
         projectId={projectId}
@@ -109,12 +116,15 @@ describe("ChatPane conversation creation", () => {
       />
     );
 
+    expect(await screen.findByText("旧对话内容")).toBeTruthy();
+
     // open the conversation menu
     fireEvent.click(await screen.findByRole("button", { name: /旧对话/ }));
     fireEvent.click(screen.getByRole("menuitem", { name: "新对话" }));
 
     // the toolbar must switch to the new conversation at once
     expect(await screen.findByRole("button", { name: /新对话/ })).toBeTruthy();
+    await waitFor(() => expect(screen.queryByText("旧对话内容")).toBeNull());
     expect(api.conversations.create).toHaveBeenCalledTimes(1);
     expect(api.conversations.list).toHaveBeenCalledTimes(1); // no refetch storm
     await waitFor(() => expect(api.conversations.listMessages).toHaveBeenCalledWith({
@@ -126,6 +136,50 @@ describe("ChatPane conversation creation", () => {
     expect(screen.getByText("旧对话")).toBeTruthy();
     const selected = document.querySelector(".conv-item.selected strong");
     expect(selected?.textContent).toBe("新对话");
+  });
+
+  it("edits a cancelled question in its original bubble and resends it in place", async () => {
+    const user: MessageDto = {
+      id: "user-cancelled", conversationId: existingId, sequence: 1, role: "user", content: "原来的问题",
+      state: "completed", replyToMessageId: null, supersedesMessageId: null, superseded: false,
+      provider: null, profileId: null, model: null, usage: null, errorCode: null, completionReason: null,
+      createdAt: "2026-08-30T07:00:00.000Z", updatedAt: "2026-08-30T07:00:00.000Z", citations: []
+    };
+    const cancelled: MessageDto = {
+      ...user, id: "assistant-cancelled", sequence: 2, role: "assistant", content: "未完成回答",
+      state: "cancelled", replyToMessageId: user.id, completionReason: "user_abort"
+    };
+    const api = mockApi([user, cancelled]);
+    vi.mocked(api.chat.regenerate).mockResolvedValueOnce({
+      ok: true,
+      value: { requestId: "8a8a8888-8888-4888-8888-888888888888", assistantMessageId: "assistant-new" }
+    });
+    render(
+      <ChatPane
+        projectId={projectId}
+        generationProfileId="9a9a9999-9999-4999-8999-999999999999"
+        sources={readySources}
+        onOpenSettings={() => undefined}
+        onImport={() => undefined}
+      />
+    );
+
+    fireEvent.click(await screen.findByRole("button", { name: "编辑并重新发送" }));
+    const editor = screen.getByRole("textbox", { name: "编辑并重新发送" });
+    const userMessage = editor.closest(".msg.user") as HTMLElement;
+    expect(editor.closest(".bubble")).toBeTruthy();
+    expect((editor as HTMLTextAreaElement).value).toBe("原来的问题");
+    expect((screen.getByRole("textbox", { name: "针对这个项目提问" }) as HTMLTextAreaElement).value).toBe("");
+    fireEvent.change(editor, { target: { value: "修改后的问题" } });
+    fireEvent.click(within(userMessage).getByRole("button", { name: "发送" }));
+
+    await waitFor(() => expect(api.chat.regenerate).toHaveBeenCalledWith(expect.objectContaining({
+      projectId,
+      conversationId: existingId,
+      messageId: cancelled.id,
+      question: "修改后的问题"
+    })));
+    expect(api.chat.send).not.toHaveBeenCalled();
   });
 });
 

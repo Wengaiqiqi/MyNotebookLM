@@ -1,14 +1,22 @@
 import type { ChatTurn } from "../models/provider";
 import { buildSystemPrompt, type PromptLocale } from "./prompts";
 
-export const MAX_CITED_CHUNKS = 12;
+export const MAX_CITED_CHUNKS = 32;
 const DEFAULT_CONTEXT_TOKENS = 16_000;
 const OUTPUT_RESERVE_RATIO = 0.2;
 const MIN_OUTPUT_TOKEN_RESERVE = 1_024;
 const OVERHEAD_RATIO = 0.1;
 const NON_CJK_TOKENS_PER_WORD = 1.3;
 const CJK_PATTERN = /[\p{Script=Han}\u3000-\u303f\u3040-\u30ff\uac00-\ud7af]/gu;
-type RetrievedChunk = { chunkId: string; sourceDisplayName: string; locatorSummary: string; text: string };
+type RetrievedChunk = {
+  chunkId: string;
+  sourceId?: string;
+  sourceDisplayName: string;
+  sourceKind?: string;
+  locator?: Record<string, unknown>;
+  locatorSummary: string;
+  text: string;
+};
 export type TokenBudget = { contextTokens: number; outputTokenReserve: number; inputTokenTarget: number };
 export type ContextCitation = { label: string; chunkId: string; sourceDisplayName: string; locatorSummary: string };
 export type AssembledContext = { messages: ChatTurn[]; citations: ContextCitation[]; tokenBudget: TokenBudget };
@@ -44,6 +52,36 @@ function evidenceBlock(label: string, chunk: RetrievedChunk): string {
   const safeText = escapeEvidenceText(chunk.text);
   return [`<evidence id="${label}">`, `Source: ${chunk.sourceDisplayName}`, `Location: ${chunk.locatorSummary}`, "```", safeText, "```", "</evidence>"].join("\n");
 }
+function evidenceTarget(chunk: RetrievedChunk): string {
+  const source = chunk.sourceId ?? chunk.sourceDisplayName;
+  const locator = chunk.locator;
+  const table = /(?:^|\n)\s*((?:表|table)\s*\d+)/i.exec(chunk.text)?.[1]?.replace(/\s+/g, "").toLowerCase();
+  if (table) return `${source}:table:${table}`;
+  if (!locator) return `${source}:chunk:${chunk.chunkId}`;
+  if (locator.kind === "page") return `${source}:page:${String(locator.page)}`;
+  if (locator.kind === "slide") return `${source}:slide:${String(locator.slide)}`;
+  if (locator.kind === "sheet") return `${source}:sheet:${String(locator.sheet)}`;
+  if (locator.kind === "cell") {
+    const sheet = String(locator.sheet).replace(/\s+/g, "").toLowerCase();
+    return chunk.sourceKind === "docx" ? `${source}:table:${sheet}` : `${source}:cell:${sheet}:${String(locator.cellRef)}`;
+  }
+  return `${source}:${JSON.stringify(locator)}`;
+}
+function deduplicateTargets(chunks: RetrievedChunk[]): RetrievedChunk[] {
+  const unique: RetrievedChunk[] = [];
+  const positions = new Map<string, number>();
+  for (const chunk of chunks) {
+    const key = evidenceTarget(chunk);
+    const position = positions.get(key);
+    if (position === undefined) {
+      positions.set(key, unique.length);
+      unique.push(chunk);
+    } else if (chunk.sourceKind === "docx" && chunk.locator?.kind === "cell" && unique[position]?.locator?.kind !== "cell") {
+      unique[position] = chunk;
+    }
+  }
+  return unique;
+}
 export function assembleContext(input: { question: string; retrieved: RetrievedChunk[]; priorTurns?: ChatTurn[]; locale?: PromptLocale; contextTokens?: number }): AssembledContext {
   const budget = computeBudget(input.contextTokens);
   const systemPrompt = buildSystemPrompt(input.locale ?? "en");
@@ -51,7 +89,7 @@ export function assembleContext(input: { question: string; retrieved: RetrievedC
   let remaining = Math.max(0, budget.inputTokenTarget - fixedTokens);
   const citations: ContextCitation[] = [];
   const blocks: string[] = [];
-  for (const chunk of input.retrieved.slice(0, MAX_CITED_CHUNKS)) {
+  for (const chunk of deduplicateTargets(input.retrieved).slice(0, MAX_CITED_CHUNKS)) {
     if (remaining <= 0) break;
     const label = `S${citations.length + 1}`;
     const header = `Source: ${chunk.sourceDisplayName}\nLocation: ${chunk.locatorSummary}\n`;
@@ -68,7 +106,7 @@ export function assembleContext(input: { question: string; retrieved: RetrievedC
     blocks.push(block);
   }
   const retrievalSection = blocks.length > 0 ? ["<retrieved-evidence>", ...blocks, "</retrieved-evidence>"].join("\n") : "<retrieved-evidence>(no retrieved sources available)</retrieved-evidence>";
-  const historyBudget = Math.max(0, remaining - estimateTokens(retrievalSection));
+  const historyBudget = remaining;
   const includedTurns: ChatTurn[] = [];
   let historyUsed = 0;
   for (const turn of [...(input.priorTurns ?? [])].reverse()) {

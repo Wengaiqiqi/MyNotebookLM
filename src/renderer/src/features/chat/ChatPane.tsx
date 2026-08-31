@@ -47,6 +47,8 @@ export default function ChatPane({ projectId, generationProfileId, sources, onOp
     return () => document.removeEventListener("mousedown", close);
   }, [thinkingMenuOpen]);
   const [question, setQuestion] = useState("");
+  const [editingMessageId, setEditingMessageId] = useState("");
+  const [editDraft, setEditDraft] = useState("");
   const [activeCitation, setActiveCitation] = useState<CitationDto | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const composerRef = useRef<HTMLTextAreaElement>(null);
@@ -124,7 +126,7 @@ export default function ChatPane({ projectId, generationProfileId, sources, onOp
     document.addEventListener("mousedown", close);
     return () => document.removeEventListener("mousedown", close);
   }, [modelMenuOpen]);
-  useEffect(() => { followRef.current = true; }, [conversationId]);
+  useEffect(() => { followRef.current = true; setEditingMessageId(""); }, [conversationId]);
 
   function chooseThinking(level: "off" | "low" | "medium" | "high"): void {
     setThinking(level);
@@ -301,11 +303,40 @@ export default function ChatPane({ projectId, generationProfileId, sources, onOp
             <p>{t("chat.emptyBody")}</p>
           </div>
         )}
-        {messages.map((message) => (
-          message.role === "user"
+        {messages.map((message, index) => {
+          const reply = messages[index + 1];
+          const canEditAndResend = message.role === "user" && reply?.role === "assistant" && reply.state === "cancelled";
+          const editing = editingMessageId === message.id;
+          return message.role === "user"
             ? (
               <article className="msg user" key={message.id}>
-                <div className="bubble">{message.content}</div>
+                <div className={`bubble${editing ? " editing" : ""}`}>
+                  {editing
+                    ? <textarea autoFocus aria-label={t("chat.ui.editAndResend")} value={editDraft} onChange={(event) => setEditDraft(event.target.value)} />
+                    : message.content}
+                </div>
+                {canEditAndResend && (
+                  <div className="meta">
+                    {editing ? (
+                      <>
+                        <button type="button" onClick={() => setEditingMessageId("")}>{t("common.cancel")}</button>
+                        <button type="button" disabled={!stream.canSend || !editDraft.trim()} onClick={() => {
+                          const text = editDraft.trim();
+                          if (!text) return;
+                          setEditingMessageId("");
+                          void stream.regenerate(reply.id, { thinking, question: text });
+                        }}><Icon name="send" />{t("chat.ui.send")}</button>
+                      </>
+                    ) : (
+                      <button type="button" disabled={!stream.canSend} title={t("chat.retryBusyHint")} onClick={() => {
+                        setEditDraft(message.content);
+                        setEditingMessageId(message.id);
+                      }}>
+                        <Icon name="edit" />{t("chat.ui.editAndResend")}
+                      </button>
+                    )}
+                  </div>
+                )}
               </article>
             )
             : (
@@ -330,26 +361,26 @@ export default function ChatPane({ projectId, generationProfileId, sources, onOp
                         <button type="button" onClick={() => { void navigator.clipboard?.writeText(message.content); toast.success(t("chat.copied")); }}>
                           <Icon name="copy" />{t("chat.ui.copy")}
                         </button>
-                        <button type="button" disabled={stream.state === "streaming"} title={t("chat.retryBusyHint")} onClick={() => void stream.regenerate(message.id, { thinking })}>
+                        <button type="button" disabled={!stream.canSend} title={t("chat.retryBusyHint")} onClick={() => void stream.regenerate(message.id, { thinking })}>
                           <Icon name="retry" />{t("chat.ui.regenerate")}
                         </button>
                       </>
                     )}
                     {message.state === "cancelled" && (
-                      <button type="button" disabled={stream.state === "streaming"} title={t("chat.retryBusyHint")} onClick={() => void stream.regenerate(message.id, { thinking })}>
+                      <button type="button" disabled={!stream.canSend} title={t("chat.retryBusyHint")} onClick={() => void stream.regenerate(message.id, { thinking })}>
                         <Icon name="retry" />{t("chat.ui.regenerate")}
                       </button>
                     )}
                     {message.state === "failed" && (
-                      <button type="button" disabled={stream.state === "streaming"} title={t("chat.retryBusyHint")} onClick={() => void stream.regenerate(message.id, { thinking })}>
+                      <button type="button" disabled={!stream.canSend} title={t("chat.retryBusyHint")} onClick={() => void stream.regenerate(message.id, { thinking })}>
                         <Icon name="retry" />{t("chat.ui.retryAnswer")}
                       </button>
                     )}
                   </div>
                 )}
               </article>
-            )
-        ))}
+            );
+        })}
       </div>
 
       <div className="composer-wrap">

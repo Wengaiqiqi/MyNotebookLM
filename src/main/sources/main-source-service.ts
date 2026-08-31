@@ -14,6 +14,7 @@ import { removeProjectFiles, stageFile } from "./managed-files";
 import { parseSafeUrl } from "./url-policy";
 import { UnsupportedContentTypeError, type UrlSource, UrlFetchError } from "./url-source";
 import { validateFile } from "./file-preflight";
+import { CHUNKING_VERSION } from "../../workers/ingestion/chunker";
 
 type Row = Record<string, unknown>;
 const ERROR_CODES = new Set<TaskErrorSummaryDto["code"]>([
@@ -51,7 +52,7 @@ export class MainSourceService {
     const storedPath = staged?.path ?? originalPath, hash = staged?.hash ?? createHash("sha256").update(bytes).digest("hex");
     const created = this.db.transaction(() => {
       this.db.prepare("INSERT INTO sources(id, project_id, kind, display_name, status) VALUES (?, ?, ?, ?, 'active')").run(sourceId, projectId, kind, name);
-      this.db.prepare("INSERT INTO source_revisions(id, source_id, original_path, stored_path, source_hash, locator_kind, chunking_version, state) VALUES (?, ?, ?, ?, ?, 'offset', 'v1', 'parsing')").run(revisionId, sourceId, originalPath, storedPath, hash);
+      this.db.prepare("INSERT INTO source_revisions(id, source_id, original_path, stored_path, source_hash, locator_kind, chunking_version, state) VALUES (?, ?, ?, ?, ?, 'offset', ?, 'parsing')").run(revisionId, sourceId, originalPath, storedPath, hash, CHUNKING_VERSION);
       const task = this.tasks.createTask({ projectId, sourceId, kind: "ingest", idempotencyKey: hash + ":" + sourceId });
       this.db.prepare("UPDATE tasks SET state = 'running', stage = 'parsing', updated_at = ? WHERE id = ?").run(now, task.id);
       return task;

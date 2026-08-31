@@ -3,11 +3,11 @@ import type { ModelProfileDto } from "../../shared/models";
 import type Database from "better-sqlite3";
 import { openAppDatabase, type AppDatabase } from "../db/database";
 import { ConversationRepository } from "./conversation-repository";
-import { ChatService, recoverInterruptedStreams, sendChatMessage, type ChatSendDeps } from "./chat-service";
+import { ChatService, recoverInterruptedStreams, sendChatMessage, type ChatSendDeps, type RetrievableChunk } from "./chat-service";
 import { CitationOpener } from "./citation-opener";
 import type { CitationDto } from "../../shared/chat";
 import type { Result } from "../../shared/app-errors";
-import type { GenerationEvent } from "../models/provider";
+import type { GenerateRequest, GenerationEvent } from "../models/provider";
 import { ProviderRequestError } from "../models/http-client";
 import { classifyProviderError } from "../models/provider-errors";
 import { SettingsRepository } from "../settings/settings-repository";
@@ -177,7 +177,7 @@ function expectOk(result: Result<{ requestId: string; assistantMessageId: string
     const events: Array<Record<string, unknown>> = [];
     const pending = service.send({ requestId: REQUEST_ID, projectId: PROJECT_ID, conversationId: world.conversationId, question: "cancel" }, (event) => events.push(event as Record<string, unknown>));
     await vi.waitFor(() => expect(events.some((event) => event.type === "delta")).toBe(true));
-    expect(service.stopRequest(REQUEST_ID, { projectId: PROJECT_ID, userId: "owner" })).toBe(true);
+    expect(service.stopRequest(REQUEST_ID, { projectId: PROJECT_ID })).toBe(true);
     release();
     expect((await pending).ok).toBe(true);
     expect(world.repository.listMessages(PROJECT_ID, world.conversationId).at(-1)?.state).toBe("cancelled");
@@ -195,12 +195,47 @@ function expectOk(result: Result<{ requestId: string; assistantMessageId: string
     });
   });
 
+  it("registers cancellation before retrieval finishes and never starts the provider", async () => {
+    const original = await baseDeps().retrieval({ projectId: PROJECT_ID, question: "cancel during retrieval" });
+    let releaseRetrieval!: () => void;
+    const retrievalGate = new Promise<RetrievableChunk[]>((resolve) => { releaseRetrieval = () => resolve(original); });
+    const generate = vi.fn(fakeProvider().generate);
+    const service = new ChatService(baseDeps({
+      retrieval: async () => retrievalGate,
+      providerFactory: () => ({ ...fakeProvider(), generate })
+    }));
+    const events: Array<Record<string, unknown>> = [];
+    const pending = service.send({ requestId: REQUEST_ID, projectId: PROJECT_ID, conversationId: world.conversationId, question: "cancel during retrieval" }, (event) => events.push(event as Record<string, unknown>));
+
+    expect(service.activeRequests()).toContain(REQUEST_ID);
+    expect(events).toEqual([expect.objectContaining({ type: "started", requestId: REQUEST_ID })]);
+    expect(service.stopRequest(REQUEST_ID, { projectId: PROJECT_ID })).toBe(true);
+    releaseRetrieval();
+
+    expect((await pending).ok).toBe(true);
+    expect(generate).not.toHaveBeenCalled();
+    expect(events.at(-1)).toMatchObject({ type: "cancelled", requestId: REQUEST_ID, message: { state: "cancelled" } });
+  });
+
   it("handles empty retrieval without changing the success path", async () => {
     const deps = baseDeps({ retrieval: async () => [] });
     const { result, events } = await collectEvents(deps, { requestId: REQUEST_ID, projectId: PROJECT_ID, conversationId: world.conversationId, question: "?" });
     expect(result.ok).toBe(true);
     const last = events.at(-1)! as { type: string };
     expect(last.type).toBe("completed");
+  });
+
+  it("rejects citations to candidates that did not fit the context budget", async () => {
+    const base = (await baseDeps().retrieval({ projectId: PROJECT_ID, question: "?" }))[0]!;
+    const deps = baseDeps({
+      providerFactory: () => fakeProvider(["Unsupported candidate [S2]"]),
+      retrieval: async () => [
+        { ...base, label: "S1", text: "evidence ".repeat(40_000) },
+        { ...base, label: "S2", text: "candidate excluded by the budget" },
+      ],
+    });
+    const { events } = await collectEvents(deps, { requestId: REQUEST_ID, projectId: PROJECT_ID, conversationId: world.conversationId, question: "?" });
+    expect(events.at(-1)).toMatchObject({ type: "completed", message: { citations: [] } });
   });
 
   it("fails before user persistence when no enabled generation profile exists", async () => {
@@ -261,7 +296,7 @@ function expectOk(result: Result<{ requestId: string; assistantMessageId: string
     }, { timeout: 5000 });
     const startedEvent = events.find((e) => e.type === "started") as { requestId?: string } | undefined;
     expect(startedEvent?.requestId).toBeTruthy();
-    expect(service.stopRequest(startedEvent!.requestId!, { projectId: PROJECT_ID, userId: "owner" })).toBe(true);
+    expect(service.stopRequest(startedEvent!.requestId!, { projectId: PROJECT_ID })).toBe(true);
     stopNow = true;
     const result = await sendPromise;
     expect(result.ok).toBe(true);
@@ -332,12 +367,12 @@ function expectOk(result: Result<{ requestId: string; assistantMessageId: string
     const startedEvent = events.find((e) => e.type === "started") as { requestId?: string } | undefined;
     const requestId = startedEvent?.requestId as string;
     expect(requestId).toBeTruthy();
-    expect(service.stopRequest(requestId!, { projectId: PROJECT_ID, userId: "owner" })).toBe(true);
-    expect(service.stopRequest(requestId!, { projectId: "other-project", userId: "attacker" })).toBe(false);
+    expect(service.stopRequest(requestId!, { projectId: PROJECT_ID })).toBe(true);
+    expect(service.stopRequest(requestId!, { projectId: "other-project" })).toBe(false);
     expectOk(await startedPromise);
     const last = world.repository.listMessages(PROJECT_ID, world.conversationId).at(-1)!;
     expect(last.state).toBe("cancelled");
-    expect(last.content.length).toBeGreaterThan(0);
+    expect(last.content).toBe("");
   });
 
   it("checkpoint recovery resumes nothing but persists clean interrupted state on startup", () => {
@@ -433,6 +468,37 @@ describe("ChatService conversation operations and retrieval failure", () => {
     expect(newAssistant.supersedesMessageId).toBe(assistantId);
     expect(newAssistant.replyToMessageId).toBe(oldAssistant.replyToMessageId);
     expect(messages.filter((m) => m.role === "assistant" && !m.superseded)).toHaveLength(1);
+  });
+
+  it("edits a cancelled question in place and includes earlier completed turns", async () => {
+    await collectEvents(baseDeps({ retrieval: async () => [] }), { requestId: REQUEST_ID, projectId: PROJECT_ID, conversationId: world.conversationId, question: "Original context" });
+    const cancelledUser = world.repository.appendUserMessage({ projectId: PROJECT_ID, conversationId: world.conversationId, id: "cancelled-user", content: "Old follow-up", createdAt: AT });
+    world.repository.startAssistantMessage({ projectId: PROJECT_ID, conversationId: world.conversationId, id: "cancelled-assistant", replyToMessageId: cancelledUser.id, provider: "openai", profileId: makeProfile().id, model: "gpt-test", createdAt: AT });
+    world.repository.cancelAssistantMessage({ projectId: PROJECT_ID, messageId: "cancelled-assistant", updatedAt: AT });
+    const requests: GenerateRequest[] = [];
+    const provider = fakeProvider();
+    const generate = provider.generate.bind(provider);
+    provider.generate = async function* (request, signal) {
+      requests.push(request as GenerateRequest);
+      yield* generate(request, signal);
+    };
+
+    const result = await service({ providerFactory: () => provider, retrieval: async () => [] }).regenerate({
+      requestId: "55555555-5555-4555-8555-555555555555",
+      projectId: PROJECT_ID,
+      conversationId: world.conversationId,
+      messageId: "cancelled-assistant",
+      question: "Edited follow-up"
+    }, () => undefined);
+
+    expect(result.ok).toBe(true);
+    expect(world.repository.getMessage(PROJECT_ID, cancelledUser.id)?.content).toBe("Edited follow-up");
+    expect(world.repository.listMessages(PROJECT_ID, world.conversationId).filter((message) => message.role === "user")).toHaveLength(2);
+    expect(requests[0]?.messages).toEqual(expect.arrayContaining([
+      expect.objectContaining({ role: "user", content: "Original context" }),
+      expect.objectContaining({ role: "assistant", content: expect.stringContaining("Grounded answer") }),
+      expect.objectContaining({ role: "user", content: "Edited follow-up" })
+    ]));
   });
 
   it("refuses regeneration for an archived conversation", async () => {

@@ -632,6 +632,12 @@ button:disabled { cursor: not-allowed; opacity: .5; }
   background: var(--accent); color: var(--accent-ink);
   white-space: pre-wrap; overflow-wrap: anywhere;
 }
+.msg.user .bubble.editing { padding: 8px 10px; }
+.msg.user .bubble textarea {
+  display: block; width: min(520px, 58vw); min-height: 72px; max-height: 180px;
+  border: 0; outline: 0; resize: vertical; background: transparent; color: inherit;
+  font: inherit; line-height: 1.5; caret-color: currentColor;
+}
 .msg.assistant { align-self: flex-start; align-items: stretch; }
 .msg.assistant .bubble {
   padding: 0 2px;
@@ -838,6 +844,9 @@ button:disabled { cursor: not-allowed; opacity: .5; }
 .citation-sheet tbody th { position: sticky; left: 0; z-index: 1; width: 42px; background: #f2f4f7; color: #5c6470; text-align: center; font-weight: 500; }
 .citation-sheet thead th:first-child { left: 0; z-index: 3; }
 .citation-sheet .citation-sheet-target { box-shadow: inset 0 0 0 2px var(--accent); background-image: linear-gradient(var(--accent-soft), var(--accent-soft)); }
+.citation-document { max-height: min(68vh, 700px); overflow: auto; padding: 24px; background: #fff; }
+.citation-document-table { width: max-content; min-width: min(100%, 680px); max-width: 100%; margin: 0 auto; border-collapse: collapse; table-layout: fixed; color: #111; background: #fff; font: 14px/1.55 "Microsoft YaHei", "Segoe UI", sans-serif; }
+.citation-document-table td { min-width: 56px; padding: 7px 10px; border: 1px solid #303030; overflow-wrap: anywhere; white-space: pre-wrap; }
 
 /* ------------------------------------------------------------
    Notes

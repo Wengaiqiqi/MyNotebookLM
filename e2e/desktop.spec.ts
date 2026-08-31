@@ -797,7 +797,7 @@ test("Task 8 real Electron RAG with fake provider and 200% chat zoom evidence", 
     expect(chatRequest!.body).toMatchObject({ model: "gpt-e2e" });
     const chatMessages = chatRequest!.body?.messages as Array<{ role: string; content: string }>;
     expect(chatMessages).toEqual(expect.arrayContaining([
-      expect.objectContaining({ role: "system", content: expect.stringContaining("only cite markers S1..S12") }),
+      expect.objectContaining({ role: "system", content: expect.stringContaining("only cite markers that appear in the evidence section") }),
       expect.objectContaining({ role: "user", content: expect.stringContaining('<evidence id="S1">') }),
       expect.objectContaining({ role: "user", content: expect.stringContaining("alpha evidence") })
     ]));

@@ -10,16 +10,42 @@ function chunk(ordinal: number, text: string) {
 const QUESTION = "What does the report conclude?";
 
 describe("assembleContext", () => {
-  it("assigns deterministic citation ids in retrieval order and caps at twelve", () => {
+  it("assigns deterministic citation ids in retrieval order and caps the candidate pool at 32", () => {
     const first = assembleContext({ question: QUESTION, retrieved: [chunk(1, "alpha"), chunk(2, "beta")] });
     const second = assembleContext({ question: QUESTION, retrieved: [chunk(1, "alpha"), chunk(2, "beta")] });
     expect(first.citations.map((c) => c.label)).toEqual(["S1", "S2"]);
     expect(second.citations.map((c) => c.label)).toEqual(["S1", "S2"]);
     expect(first.citations[0]).toMatchObject({ chunkId: "chunk-1", sourceDisplayName: "Source 1", locatorSummary: "page 1" });
 
-    const over = assembleContext({ question: QUESTION, retrieved: Array.from({ length: 15 }, (_, i) => chunk(i + 1, `t${i}`)) });
-    expect(MAX_CITED_CHUNKS).toBe(12);
-    expect(over.citations.map((c) => c.label)).toEqual(Array.from({ length: 12 }, (_, i) => `S${i + 1}`));
+    const over = assembleContext({ question: QUESTION, retrieved: Array.from({ length: 40 }, (_, i) => chunk(i + 1, `t${i}`)) });
+    expect(MAX_CITED_CHUNKS).toBe(32);
+    expect(over.citations.map((c) => c.label)).toEqual(Array.from({ length: 32 }, (_, i) => `S${i + 1}`));
+  });
+
+  it("uses the token budget instead of always forcing all 32 candidates into the prompt", () => {
+    const result = assembleContext({
+      question: QUESTION,
+      retrieved: Array.from({ length: 32 }, (_, i) => chunk(i + 1, "evidence ".repeat(200))),
+      contextTokens: 3_000,
+    });
+    expect(result.citations.length).toBeGreaterThan(0);
+    expect(result.citations.length).toBeLessThan(32);
+  });
+
+  it("keeps one citation target per rendered DOCX table and prefers the table block", () => {
+    const common = { sourceId: "doc-1", sourceDisplayName: "rules.docx", sourceKind: "docx", locatorSummary: "table" };
+    const result = assembleContext({
+      question: "How many tables?",
+      retrieved: [
+        { ...common, chunkId: "table-1-caption", text: "前文\n表1 学科竞赛", locator: { kind: "paragraph", paragraph: 10 } },
+        { ...common, chunkId: "table-1", text: "表1 学科竞赛\n奖项 | 分数", locator: { kind: "cell", sheet: "Table 1", cellRef: "A1:B2" } },
+        { ...common, chunkId: "table-2-caption", text: "前文\n表2 创新大赛", locator: { kind: "paragraph", paragraph: 20 } },
+        { ...common, chunkId: "table-2", text: "表2 创新大赛\n奖项 | 分数", locator: { kind: "cell", sheet: "Table 2", cellRef: "A1:B2" } }
+      ]
+    });
+
+    expect(result.citations.map((citation) => citation.chunkId)).toEqual(["table-1", "table-2"]);
+    expect(result.messages.at(-2)?.content.match(/<evidence id=/g)).toHaveLength(2);
   });
 
   it("keeps source and user text as data, never as system instructions", () => {

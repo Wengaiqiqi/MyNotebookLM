@@ -187,7 +187,7 @@ describe("RAG integration with real LanceDB and streaming chat", () => {
     const requestBody = JSON.parse(chatRequest!.body) as { model: string; messages: Array<{ role: string; content: string }> };
     expect(requestBody.model).toBe("gpt-test");
     expect(requestBody.messages).toEqual(expect.arrayContaining([
-      expect.objectContaining({ role: "system", content: expect.stringContaining("only cite markers S1..S12") }),
+      expect.objectContaining({ role: "system", content: expect.stringContaining("only cite markers that appear in the evidence section") }),
       expect.objectContaining({ role: "user", content: expect.stringContaining('<evidence id="S1">') }),
       expect.objectContaining({ role: "user", content: expect.stringContaining("alpha evidence") })
     ]));
@@ -219,11 +219,11 @@ describe("RAG integration with real LanceDB and streaming chat", () => {
       if (!started?.requestId) throw new Error("not started yet");
       return started.requestId;
     });
-    expect(service.stopRequest(requestId, { projectId: PROJECT_ID, userId: "owner" })).toBe(true);
+    expect(service.stopRequest(requestId, { projectId: PROJECT_ID })).toBe(true);
     await pending;
     const last = service.listMessages({ projectId: PROJECT_ID, conversationId: conversation.id }).at(-1)!;
     expect(last.state).toBe("cancelled");
-    expect(last.content.length).toBeGreaterThan(0);
+    expect(last.content).toBe("");
     expect(events.map((event) => event.type)).not.toContain("completed");
   });
 

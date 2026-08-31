@@ -6,6 +6,7 @@ import { parseSafeUrl } from "../sources/url-policy";
 import type { Result } from "../../shared/app-errors";
 import type { CitationDetailResultValue, CitationSheetPreview } from "../../shared/ipc";
 import { sourceLocatorSchema, type SourceKind, type SourceLocator } from "../../shared/sources";
+import { previewDocxTable } from "../../workers/ingestion/parsers/docx-parser";
 
 type ShellLike = {
   openPath(path: string): Promise<string>;
@@ -49,8 +50,8 @@ export class CitationOpener {
   async getCitationDetail(input: { projectId: string; citationId: string }): Promise<Result<CitationDetailResultValue>> {
     try {
       const row = this.db.prepare(
-        "SELECT CASE WHEN sr.id IS NULL THEN NULL ELSE sc.text END AS text, s.kind, mc.locator_json, CASE WHEN sr.id IS NULL THEN NULL ELSE sr.stored_path END AS stored_path FROM message_citations mc JOIN messages m ON m.id = mc.message_id JOIN conversations c ON c.id = m.conversation_id JOIN sources s ON s.id = mc.source_id AND s.project_id = c.project_id LEFT JOIN source_chunks sc ON sc.id = mc.source_chunk_id LEFT JOIN source_revisions sr ON sr.id = sc.revision_id AND sr.source_id = s.id WHERE mc.id = ? AND c.project_id = ?"
-      ).get(input.citationId, input.projectId) as { text: string | null; kind: SourceKind; locator_json: string; stored_path: string | null } | undefined;
+        "SELECT CASE WHEN sr.id IS NULL THEN NULL ELSE sc.text END AS text, m.content AS message_content, mc.start, s.kind, mc.locator_json, CASE WHEN sr.id IS NULL THEN NULL ELSE sr.stored_path END AS stored_path FROM message_citations mc JOIN messages m ON m.id = mc.message_id JOIN conversations c ON c.id = m.conversation_id JOIN sources s ON s.id = mc.source_id AND s.project_id = c.project_id LEFT JOIN source_chunks sc ON sc.id = mc.source_chunk_id LEFT JOIN source_revisions sr ON sr.id = sc.revision_id AND sr.source_id = s.id WHERE mc.id = ? AND c.project_id = ?"
+      ).get(input.citationId, input.projectId) as { text: string | null; message_content: string; start: number; kind: SourceKind; locator_json: string; stored_path: string | null } | undefined;
       if (!row) return this.failure("NOT_FOUND", "errors.notFound");
       let data: CitationDetailResultValue["data"] = null;
       let sheet: CitationSheetPreview | null = null;
@@ -65,6 +66,13 @@ export class CitationOpener {
         const bytes = await this.readManagedFile(row.stored_path).catch(() => null);
         const locator = sourceLocatorSchema.safeParse(JSON.parse(row.locator_json));
         if (bytes && locator.success) sheet = await workbookPreview(bytes, locator.data).catch(() => null);
+      }
+      if (row.stored_path && row.kind === "docx") {
+        const bytes = await this.readManagedFile(row.stored_path).catch(() => null);
+        const locator = sourceLocatorSchema.safeParse(JSON.parse(row.locator_json));
+        const tableName = locator.success && locator.data.kind === "cell" && /^Table \d+$/.test(locator.data.sheet) ? locator.data.sheet : undefined;
+        const claim = citationClaim(row.message_content, row.start);
+        if (bytes && locator.success) sheet = await previewDocxTable(bytes, claim || row.text || "", tableName).catch(() => null);
       }
       return { ok: true, value: { text: row.text, kind: row.kind, data, sheet } };
     } catch {
@@ -130,6 +138,12 @@ export class CitationOpener {
   private failure(code: "NOT_FOUND" | "UNSAFE_INPUT" | "INTERNAL", messageKey: string): Result<never> {
     return { ok: false, error: { code, messageKey, recoverable: code === "INTERNAL" } };
   }
+}
+
+function citationClaim(content: string, start: number): string {
+  const before = content.slice(0, Math.max(0, start));
+  const boundary = Math.max(before.lastIndexOf("\n"), before.lastIndexOf("。"), before.lastIndexOf("！"), before.lastIndexOf("？"));
+  return before.slice(boundary + 1).trim();
 }
 
 async function workbookPreview(data: Uint8Array, locator: SourceLocator): Promise<CitationSheetPreview | null> {

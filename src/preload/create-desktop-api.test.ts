@@ -466,6 +466,31 @@ describe("createDesktopApi", () => {
     expect(invoke).toHaveBeenNthCalledWith(2, CHAT_CHANNELS.send, { requestId: chatRequestId, projectId: chatProjectId, conversationId: chatConversationId, question: "Hi" });
   });
 
+  it("queues an immediate stop behind the send registration gate", async () => {
+    let releaseRegistration!: (value: unknown) => void;
+    let releaseSend!: (value: unknown) => void;
+    const registration = new Promise<unknown>((resolve) => { releaseRegistration = resolve; });
+    const pendingSend = new Promise<unknown>((resolve) => { releaseSend = resolve; });
+    const invoke = vi.fn((channel: string) => {
+      if (channel === CHAT_CHANNELS.subscribeRequest) return registration;
+      if (channel === CHAT_CHANNELS.send) return pendingSend;
+      if (channel === CHAT_CHANNELS.stop) return Promise.resolve(ok(true));
+      return Promise.resolve(ok(undefined));
+    });
+    const api = createDesktopApi({ invoke, on: vi.fn(), removeListener: vi.fn() });
+    api.chat.subscribe(chatRequestId, vi.fn());
+    const send = api.chat.send({ requestId: chatRequestId, projectId: chatProjectId, conversationId: chatConversationId, question: "Hi" });
+    const stop = api.chat.stop({ projectId: chatProjectId, requestId: chatRequestId });
+    expect(invoke).toHaveBeenCalledTimes(1);
+
+    releaseRegistration(ok(undefined));
+    await stop;
+    expect(invoke).toHaveBeenNthCalledWith(2, CHAT_CHANNELS.send, { requestId: chatRequestId, projectId: chatProjectId, conversationId: chatConversationId, question: "Hi" });
+    expect(invoke).toHaveBeenNthCalledWith(3, CHAT_CHANNELS.stop, { projectId: chatProjectId, requestId: chatRequestId });
+    releaseSend(ok({ requestId: chatRequestId, assistantMessageId: "assistant-1" }));
+    await send;
+  });
+
   it("routes notes, transformation tasks and ordered model routes through validated IPC", async () => {
     const note = { id: "44444444-4444-4444-8444-444444444444", projectId: project.id, title: "N", body: "B", version: 1, archivedAt: null, deletedAt: null, createdAt: "2026-08-28T00:00:00.000Z", updatedAt: "2026-08-28T00:00:00.000Z" };
     const task = { id: "55555555-5555-4555-8555-555555555555", projectId: project.id, sourceId: null, kind: "transformation" as const, state: "queued" as const, stage: "preparing" as const, progress: 0, attempt: 0, error: null, idempotencyKey: null, createdAt: note.createdAt, updatedAt: note.updatedAt };

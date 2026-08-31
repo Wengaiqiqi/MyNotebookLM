@@ -13,6 +13,7 @@ export default function SourcePreview({ kind, data, text, locator, sheet }: {
 }) {
   if (kind === "pdf" && data) return <PdfPreview data={data} page={locator.kind === "page" ? locator.page : 1} />;
   if (kind === "xlsx" && sheet) return <WorkbookPreview sheet={sheet} locator={locator} />;
+  if (kind === "docx" && sheet) return <DocumentTablePreview table={sheet} />;
   return <TextPreview text={text} />;
 }
 
@@ -85,6 +86,21 @@ function PdfPreview({ data, page }: { data: Uint8Array; page: number }) {
 
 function WorkbookPreview({ sheet, locator }: { sheet: CitationSheetPreview; locator: SourceLocator }) {
   return <div className="citation-workbook"><SheetTable sheet={sheet} locator={locator} /></div>;
+}
+
+function DocumentTablePreview({ table }: { table: CitationSheetPreview }) {
+  return (
+    <div className="citation-document">
+      <table className="citation-document-table">
+        <colgroup>{table.columns.map((column) => <col key={column.number} style={{ width: column.width }} />)}</colgroup>
+        <tbody>{table.rows.map((row) => (
+          <tr key={row.number}>{row.cells.map((cell) => (
+            <td key={cell.column} colSpan={cell.colSpan} rowSpan={cell.rowSpan} style={cell.style}>{cell.text}</td>
+          ))}</tr>
+        ))}</tbody>
+      </table>
+    </div>
+  );
 }
 
 function SheetTable({ sheet, locator }: { sheet: CitationSheetPreview; locator: SourceLocator }) {

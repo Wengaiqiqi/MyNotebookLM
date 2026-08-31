@@ -46,6 +46,7 @@ describe("Space lifecycle real restart recovery", () => {
     c.prepare("INSERT INTO sources(id,project_id,kind,display_name) VALUES(?,?,?,?)").run("src", "p", "text", "x");
     const managedPath = path.join(root, "managed.txt"); const content = "managed original bytes"; await writeFile(managedPath, content);
     c.prepare("INSERT INTO source_revisions(id,source_id,original_path,stored_path,source_hash,locator_kind,chunking_version,state) VALUES(?,?,?,?,?,?,?,?)").run("rev", "src", managedPath, managedPath, "h", "offset", "v1", "awaiting_embedding");
+    c.prepare("INSERT INTO source_chunks(id,revision_id,ordinal,content_hash,text,locator_json) VALUES(?,?,?,?,?,?)").run("stale", "rev", 0, "stale", "stale parser output", "{}");
     let seen: Uint8Array | undefined; const pool = { start: async (_task: string, _rev: string, _kind: string, bytes: Uint8Array) => { seen = bytes; return { version: 1 as const, type: "result" as const, taskId: "parse", chunks: [{ ordinal: 0, text: content, locator: { end: content.length, kind: "offset" as const, start: 0 }, contentHash: "hash", tokenEstimate: 3 }] }; }, cancel: () => {} };
     const ingestion = new IngestionService(pool, c); const lance = await LanceStore.open(path.join(root, "vectors")); const repo = new SpaceRepository(c, undefined, undefined, lance); const shadow = repo.createOrReuse(validSpec("p")); await lance.createSpace(shadow);
     const indexing = new IndexingService(c, provider(async () => [[1, 0]]), lance); indexing.setChunkRecovery((revisionId) => ingestion.reparseRevision(revisionId));

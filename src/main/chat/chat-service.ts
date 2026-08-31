@@ -31,7 +31,7 @@ export type ChatSendDeps = {
 };
 
 export type SendInput = { requestId: string; projectId: string; conversationId: string; question: string; generationProfileId?: string; thinking?: "off" | "low" | "medium" | "high" };
-export type RegenerateInput = { requestId: string; projectId: string; conversationId: string; messageId: string; thinking?: "off" | "low" | "medium" | "high" };
+export type RegenerateInput = { requestId: string; projectId: string; conversationId: string; messageId: string; question?: string; thinking?: "off" | "low" | "medium" | "high" };
 type ConversationQuery = { projectId: string; conversationId: string };
 
 type StreamEvent =
@@ -79,8 +79,8 @@ export class ChatService {
     return this.registry.activeRequests();
   }
 
-  stopRequest(requestId: string, caller: SessionOwner): boolean {
-    return this.registry.cancel(requestId, caller);
+  stopRequest(requestId: string, caller: Pick<SessionOwner, "projectId">): boolean {
+    return this.registry.cancel(requestId, { projectId: caller.projectId, userId: SESSION_USER });
   }
 
   // ---------- Conversation operations (Task 5) ----------
@@ -157,9 +157,14 @@ export class ChatService {
       const old = repo.getMessage(input.projectId, input.messageId);
       if (!old || old.role !== "assistant" || !old.replyToMessageId) return { ok: false, error: appError("NOT_FOUND", "errors.notFound") };
       if (old.superseded) return { ok: false, error: appError("CONFLICT", "errors.chatRegenerateSuperseded") };
-      const userMessage = repo.getMessage(input.projectId, old.replyToMessageId);
+      let userMessage = repo.getMessage(input.projectId, old.replyToMessageId);
       if (!userMessage || userMessage.role !== "user" || userMessage.content === "") {
         return { ok: false, error: appError("NOT_FOUND", "errors.notFound") };
+      }
+      if (input.question !== undefined) {
+        const question = input.question.trim();
+        if (!question) return { ok: false, error: appError("VALIDATION", "errors.validation") };
+        userMessage = repo.updateUserMessage({ projectId: input.projectId, id: userMessage.id, content: question, updatedAt: this.clock().toISOString() });
       }
       if (this.inFlightConversations.has(input.conversationId)) {
         return { ok: false, error: appError("CONFLICT", "errors.chatSendInFlight", true) };
@@ -179,40 +184,14 @@ export class ChatService {
    */
   private async runTurn(args: TurnContext): Promise<Result<{ requestId: string; assistantMessageId: string }>> {
     const { turn, repo, profile, owner, nextId, userMessage, supersedesMessageId, generationProfileId, thinking, emit } = args;
-    let retrieved: RetrievableChunk[];
-    try {
-      retrieved = await this.deps.retrieval({ projectId: turn.projectId, question: userMessage.content });
-    } catch {
-      // Retrieval outage must surface as a repairable failure, never as a no-evidence answer.
-      const indexError = appError("INDEX_UNAVAILABLE", "errors.indexUnavailable", true);
-      const draft = repo.startAssistantMessage({
-        projectId: turn.projectId,
-        conversationId: turn.conversationId,
-        id: nextId(),
-        replyToMessageId: userMessage.id,
-        provider: profile.provider,
-        profileId: profile.id,
-        model: profile.modelId,
-        createdAt: this.clock().toISOString()
-      });
-      repo.failAssistantMessage({ projectId: turn.projectId, messageId: draft.id, errorCode: indexError.code, updatedAt: this.clock().toISOString() });
-      emit({ type: "failed", requestId: turn.requestId, messageId: draft.id, error: { code: indexError.code, messageKey: indexError.messageKey, recoverable: indexError.recoverable } });
-      return { ok: false, error: indexError };
-    }
-    const retrievalsByLabel: Record<string, RetrievedCitation> = {};
-    for (const item of retrieved) retrievalsByLabel[item.label] = item;
-
-    const context = assembleContext({ question: userMessage.content, retrieved, priorTurns: [], locale: "en" });
-    // Context builder owns deterministic S-labels; align the citation map to what it issued.
-    for (const c of context.citations) {
-      const match = retrieved.find((r) => r.chunkId === c.chunkId);
-      if (match) retrievalsByLabel[c.label] = match;
-    }
-
+    const requestId = turn.requestId;
+    const { signal } = this.registry.register(requestId, owner);
+    this.inFlightConversations.add(turn.conversationId);
     const startedAt = this.clock().toISOString();
     const draftId = nextId();
-    const assistant = supersedesMessageId
-      ? repo.regenerateAssistantMessage({
+    try {
+      const assistant = supersedesMessageId
+        ? repo.regenerateAssistantMessage({
           projectId: turn.projectId,
           conversationId: turn.conversationId,
           id: draftId,
@@ -221,8 +200,8 @@ export class ChatService {
           model: profile.modelId,
           supersedesMessageId,
           createdAt: startedAt
-        })
-      : repo.startAssistantMessage({
+          })
+        : repo.startAssistantMessage({
           projectId: turn.projectId,
           conversationId: turn.conversationId,
           id: draftId,
@@ -231,18 +210,45 @@ export class ChatService {
           profileId: profile.id,
           model: profile.modelId,
           createdAt: startedAt
-        });
+          });
+      emit({ type: "started", requestId, messageId: assistant.id });
 
-    const requestId = turn.requestId;
-    // Reserve BEFORE generation work so stop/conflict see a consistent state.
-    const { signal } = this.registry.register(requestId, owner);
-    this.inFlightConversations.add(turn.conversationId);
-    emit({ type: "started", requestId, messageId: assistant.id });
+      let retrieved: RetrievableChunk[];
+      try {
+        retrieved = await this.deps.retrieval({ projectId: turn.projectId, question: userMessage.content });
+      } catch {
+        if (signal.aborted) retrieved = [];
+        else {
+          // Retrieval outage must surface as a repairable failure, never as a no-evidence answer.
+          const indexError = appError("INDEX_UNAVAILABLE", "errors.indexUnavailable", true);
+          repo.failAssistantMessage({ projectId: turn.projectId, messageId: assistant.id, errorCode: indexError.code, updatedAt: this.clock().toISOString() });
+          emit({ type: "failed", requestId, messageId: assistant.id, error: { code: indexError.code, messageKey: indexError.messageKey, recoverable: indexError.recoverable } });
+          return { ok: false, error: indexError };
+        }
+      }
 
-    const outcome = await this.runGeneration({ repo, turn, profile, generationProfileId, ...(thinking ? { thinking } : {}), retrievals: retrievalsByLabel, contextMessages: context.messages, assistantId: assistant.id, requestId, signal, emit });
-    this.registry.complete(requestId, owner);
-    this.inFlightConversations.delete(turn.conversationId);
-    return outcome;
+      if (signal.aborted) {
+        const cancelled = repo.cancelAssistantMessage({ projectId: turn.projectId, messageId: assistant.id, updatedAt: this.clock().toISOString() });
+        emit({ type: "cancelled", requestId, messageId: assistant.id, message: cancelled });
+        return { ok: true, value: { requestId, assistantMessageId: assistant.id } };
+      }
+
+      const retrievalsByLabel: Record<string, RetrievedCitation> = {};
+      const priorTurns: ChatTurn[] = repo.listMessages(turn.projectId, turn.conversationId)
+        .filter((message) => message.id !== userMessage.id && !message.superseded && message.state === "completed" && message.content !== "")
+        .map((message) => ({ role: message.role, content: message.content }));
+      const context = assembleContext({ question: userMessage.content, retrieved, priorTurns, locale: "en" });
+      // Context builder owns deterministic S-labels; align the citation map to what it issued.
+      for (const c of context.citations) {
+        const match = retrieved.find((r) => r.chunkId === c.chunkId);
+        if (match) retrievalsByLabel[c.label] = match;
+      }
+
+      return await this.runGeneration({ repo, turn, profile, generationProfileId, ...(thinking ? { thinking } : {}), retrievals: retrievalsByLabel, contextMessages: context.messages, assistantId: assistant.id, requestId, signal, emit });
+    } finally {
+      this.registry.complete(requestId, owner);
+      this.inFlightConversations.delete(turn.conversationId);
+    }
   }
 
   private async runGeneration(args: {
