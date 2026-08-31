@@ -72,7 +72,7 @@ describe("document fixture matrix (all 8 source kinds)", () => {
       { kind: "heading", text: "Chapter", locator: { kind: "heading", depth: 1, headingPath: "Chapter" } },
       { kind: "paragraph", text: "Body", locator: { kind: "paragraph", paragraph: 1 } },
       { kind: "list", text: "Item", locator: { kind: "paragraph", paragraph: 2 } },
-      { kind: "table", text: "A | B", locator: { kind: "cell", sheet: "Chapter", cellRef: "A1:A2" } }
+      { kind: "table", text: "A | B", locator: { kind: "cell", sheet: "Table 1", cellRef: "A1:B1" } }
     ]);
     void expectChunkLocatorKinds(blocks, ["heading", "paragraph", "cell"]);
   });

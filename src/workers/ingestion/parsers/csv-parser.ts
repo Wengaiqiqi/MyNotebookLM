@@ -3,7 +3,7 @@ import type { DocumentBlock } from "../types";
 
 export function parseCsv(input: string | Uint8Array): DocumentBlock[] {
   const text = typeof input === "string" ? input : new TextDecoder("utf-8", { fatal: true }).decode(input);
-  const clean = text.replace(/^\uFEFF/, "");
+  const clean = text.replace(/^\uFEFF/, "").replace(/\r\n?/g, "\n");
   const delimiter = [",", "\t", ";", "|"] .map((candidate, order) => {
     try {
       const rows = parse(clean, { delimiter: candidate, skip_empty_lines: false, relax_column_count: true }) as string[][];
