@@ -36,9 +36,12 @@ export function useChatStream(
   restoredMessages: MessageDto[] = [],
   generationProfileId?: string
 ): UseChatStreamResult {
-  const [messages, setMessages] = useState<MessageDto[]>(restoredMessages);
+  const [messagesByConversation, setMessagesByConversation] = useState<Record<string, MessageDto[]>>({
+    [conversationId]: restoredMessages
+  });
   const [streamingMessageId, setStreamingMessageId] = useState<string | null>(null);
   const [state, setState] = useState<ChatStreamState>("idle");
+  const [statusConversationId, setStatusConversationId] = useState(conversationId);
   const [error, setError] = useState<AppErrorDto | null>(null);
   const [fallback, setFallback] = useState<Extract<ChatRequestEvent, { type: "fallback" }> | null>(null);
   const [repairableMessageId, setRepairableMessageId] = useState<string | null>(null);
@@ -46,21 +49,32 @@ export function useChatStream(
   // can drop them once the persisted transcript arrives, preventing duplicates.
   const optimisticUserRef = useRef<Map<string, string>>(new Map());
   // Live turn info in a ref so the event sink never goes stale mid-stream.
-  const turnRef = useRef<{ requestId: string; messageId?: string } | null>(null);
+  const turnRef = useRef<{ requestId: string; conversationId: string; messageId?: string } | null>(null);
   const unsubscribeRef = useRef<(() => void) | null>(null);
   const prevConversationRef = useRef(conversationId);
+  const restoredRef = useRef(new Map([[conversationId, restoredMessages]]));
 
-  // Restart hydration: replace transcript when conversation switches or restored
-  // history arrives. A fresh-but-empty array identity (e.g. default param) must
-  // not wipe an in-flight draft.
+  const updateMessages = useCallback((targetConversationId: string, update: (messages: MessageDto[]) => MessageDto[]): void => {
+    setMessagesByConversation((current) => ({
+      ...current,
+      [targetConversationId]: update(current[targetConversationId] ?? [])
+    }));
+  }, []);
+
+  // Each conversation keeps its own live transcript, so switching views cannot
+  // redirect an older request's deltas into the newly selected conversation.
   useEffect(() => {
     if (prevConversationRef.current !== conversationId) {
       prevConversationRef.current = conversationId;
-      setMessages([]);
+      restoredRef.current.set(conversationId, restoredMessages);
+      setMessagesByConversation((current) => conversationId in current ? current : { ...current, [conversationId]: [] });
       return;
     }
-    if (restoredMessages.length > 0 && !turnRef.current) {
-      setMessages(restoredMessages);
+    const previous = restoredRef.current.get(conversationId);
+    if (previous === restoredMessages || (previous?.length === 0 && restoredMessages.length === 0)) return;
+    restoredRef.current.set(conversationId, restoredMessages);
+    if (turnRef.current?.conversationId !== conversationId) {
+      setMessagesByConversation((current) => ({ ...current, [conversationId]: restoredMessages }));
     }
   }, [conversationId, restoredMessages]);
 
@@ -71,9 +85,9 @@ export function useChatStream(
     setStreamingMessageId(null);
   }, []);
 
-  const applyEvent = useCallback((event: ChatRequestEvent): void => {
+  const applyEvent = useCallback((targetConversationId: string, event: ChatRequestEvent): void => {
     const reconcileTerminal = (requestId: string, assistant: MessageDto): void => {
-      setMessages((prev) => {
+      updateMessages(targetConversationId, (prev) => {
         const optimisticUserId = optimisticUserRef.current.get(requestId);
         const persistedUserId = assistant.replyToMessageId;
         const alreadyPersisted = persistedUserId !== null && prev.some((message) => message.id === persistedUserId);
@@ -88,7 +102,7 @@ export function useChatStream(
     };
     switch (event.type) {
       case "text-delta":
-        setMessages((prev) => prev.map((m) => (m.id === event.messageId ? { ...m, content: m.content + event.text } : m)));
+        updateMessages(targetConversationId, (prev) => prev.map((m) => (m.id === event.messageId ? { ...m, content: m.content + event.text } : m)));
         break;
       case "completed":
         reconcileTerminal(event.requestId, event.message);
@@ -121,30 +135,29 @@ export function useChatStream(
       default:
         break;
     }
-  }, []);
+  }, [updateMessages]);
+
+  const addAssistantDraft = useCallback((targetConversationId: string, messageId: string): void => {
+    updateMessages(targetConversationId, (prev) => prev.some((message) => message.id === messageId) ? prev : [...prev, {
+      id: messageId, conversationId: targetConversationId, sequence: (prev.at(-1)?.sequence ?? 0) + 1, role: "assistant", content: "", state: "streaming", replyToMessageId: null, supersedesMessageId: null, superseded: false, provider: null, profileId: null, model: null, usage: null, errorCode: null, completionReason: null, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), citations: []
+    }]);
+  }, [updateMessages]);
 
   /** Run one IPC call, then subscribe to its requestId-scoped stream. */
-  const runTurn = useCallback(async (invoke: (requestId: string) => Promise<SendResult>): Promise<boolean> => {
+  const runTurn = useCallback(async (targetConversationId: string, invoke: (requestId: string) => Promise<SendResult>): Promise<boolean> => {
     if (turnRef.current) return false; // one live turn at a time
     try {
       const requestId = crypto.randomUUID();
-      turnRef.current = { requestId };
+      turnRef.current = { requestId, conversationId: targetConversationId };
+      setStatusConversationId(targetConversationId);
       const sink = (event: ChatRequestEvent): void => {
         if (!turnRef.current || event.requestId !== turnRef.current.requestId) return;
         if ("messageId" in event) turnRef.current.messageId = event.messageId;
-        if ((event.type === "text-delta" || event.type === "cancelled" || event.type === "failed") && event.type !== "failed" && event.type !== "cancelled") {
+        if (event.type === "text-delta" || event.type === "started") {
           setStreamingMessageId(event.messageId);
-          setMessages((prev) => prev.some((m) => m.id === event.messageId) ? prev : [...prev, {
-            id: event.messageId, conversationId, sequence: (prev.at(-1)?.sequence ?? 0) + 1, role: "assistant", content: "", state: "streaming", replyToMessageId: null, supersedesMessageId: null, superseded: false, provider: null, profileId: null, model: null, usage: null, errorCode: null, completionReason: null, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), citations: []
-          }]);
+          addAssistantDraft(targetConversationId, event.messageId);
         }
-        if (event.type === "started") {
-          setStreamingMessageId(event.messageId);
-          setMessages((prev) => prev.some((m) => m.id === event.messageId) ? prev : [...prev, {
-            id: event.messageId, conversationId, sequence: (prev.at(-1)?.sequence ?? 0) + 1, role: "assistant", content: "", state: "streaming", replyToMessageId: null, supersedesMessageId: null, superseded: false, provider: null, profileId: null, model: null, usage: null, errorCode: null, completionReason: null, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), citations: []
-          }]);
-        }
-        applyEvent(event);
+        applyEvent(targetConversationId, event);
         if (event.type === "completed" || event.type === "cancelled" || event.type === "failed") teardown();
       };
       unsubscribeRef.current = chat.subscribe(requestId, sink);
@@ -156,9 +169,7 @@ export function useChatStream(
       const draftId = result.value.assistantMessageId;
       turnRef.current.messageId = draftId;
       setStreamingMessageId(draftId);
-      setMessages((prev) => prev.some((m) => m.id === draftId) ? prev : [...prev, {
-        id: draftId, conversationId, sequence: (prev.at(-1)?.sequence ?? 0) + 1, role: "assistant", content: "", state: "streaming", replyToMessageId: null, supersedesMessageId: null, superseded: false, provider: null, profileId: null, model: null, usage: null, errorCode: null, completionReason: null, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), citations: []
-      }]);
+      addAssistantDraft(targetConversationId, draftId);
       return true;
     } catch {
       teardown();
@@ -170,7 +181,7 @@ export function useChatStream(
       });
       return false;
     }
-  }, [chat, applyEvent, teardown, conversationId]);
+  }, [chat, addAssistantDraft, applyEvent, teardown]);
 
   const send = useCallback((question: string, options?: { thinking?: "off" | "low" | "medium" | "high"; conversationId?: string }): Promise<boolean> => {
     setError(null);
@@ -197,23 +208,23 @@ export function useChatStream(
       updatedAt: new Date().toISOString(),
       citations: []
     };
-    setMessages((prev) => [...prev, localUserMessage]);
-    return runTurn((requestId) => {
+    updateMessages(targetConversationId, (prev) => [...prev, localUserMessage]);
+    return runTurn(targetConversationId, (requestId) => {
       optimisticUserRef.current.set(requestId, localUserMessage.id);
       return chat.send({ requestId, projectId, conversationId: targetConversationId, question, ...(generationProfileId ? { generationProfileId } : {}), ...(options?.thinking ? { thinking: options.thinking } : {}) });
     });
-  }, [runTurn, chat, projectId, conversationId, generationProfileId]);
+  }, [runTurn, chat, projectId, conversationId, generationProfileId, updateMessages]);
 
   const regenerate = useCallback((messageId: string, options?: { thinking?: "off" | "low" | "medium" | "high"; question?: string }): Promise<boolean> => {
     setError(null);
     if (options?.question) {
-      setMessages((current) => {
+      updateMessages(conversationId, (current) => {
         const userId = current.find((message) => message.id === messageId)?.replyToMessageId;
         return current.map((message) => message.id === userId ? { ...message, content: options.question! } : message);
       });
     }
-    return runTurn((requestId) => chat.regenerate({ requestId, projectId, conversationId, messageId, ...(options?.question ? { question: options.question } : {}), ...(options?.thinking ? { thinking: options.thinking } : {}) }));
-  }, [runTurn, chat, projectId, conversationId]);
+    return runTurn(conversationId, (requestId) => chat.regenerate({ requestId, projectId, conversationId, messageId, ...(options?.question ? { question: options.question } : {}), ...(options?.thinking ? { thinking: options.thinking } : {}) }));
+  }, [runTurn, chat, projectId, conversationId, updateMessages]);
 
   const stop = useCallback(async (): Promise<boolean> => {
     const current = turnRef.current;
@@ -221,7 +232,7 @@ export function useChatStream(
     setState("cancelled");
     setStreamingMessageId(null);
     if (current.messageId) {
-      setMessages((prev) => prev.map((message) => message.id === current.messageId
+      updateMessages(current.conversationId, (prev) => prev.map((message) => message.id === current.messageId
         ? { ...message, state: "cancelled", completionReason: "user_abort" }
         : message));
     }
@@ -231,13 +242,13 @@ export function useChatStream(
       setState("streaming");
       if (current.messageId) {
         setStreamingMessageId(current.messageId);
-        setMessages((prev) => prev.map((message) => message.id === current.messageId
+        updateMessages(current.conversationId, (prev) => prev.map((message) => message.id === current.messageId
           ? { ...message, state: "streaming", completionReason: null }
           : message));
       }
     }
     return stopped;
-  }, [chat, projectId]);
+  }, [chat, projectId, updateMessages]);
 
   const repair = useCallback((options?: { thinking?: "off" | "low" | "medium" | "high" }): Promise<boolean> => {
     const target = repairableMessageId;
@@ -251,18 +262,21 @@ export function useChatStream(
     turnRef.current = null;
   }, []);
 
-  const canSend = state === "idle" && !turnRef.current;
+  const ownsStatus = statusConversationId === conversationId;
+  const visibleState = ownsStatus ? state : "idle";
+  const canSend = !turnRef.current && (!ownsStatus || state === "idle");
+  const messages = messagesByConversation[conversationId] ?? [];
   return useMemo(() => ({
     messages,
-    streamingMessageId,
-    repairableMessageId,
-    state,
-    error,
-    fallback,
+    streamingMessageId: ownsStatus ? streamingMessageId : null,
+    repairableMessageId: ownsStatus ? repairableMessageId : null,
+    state: visibleState,
+    error: ownsStatus ? error : null,
+    fallback: ownsStatus ? fallback : null,
     canSend,
     send,
     stop,
     regenerate,
     repair
-  }), [messages, streamingMessageId, repairableMessageId, state, error, fallback, canSend, send, stop, regenerate, repair]);
+  }), [messages, ownsStatus, streamingMessageId, repairableMessageId, visibleState, error, fallback, canSend, send, stop, regenerate, repair]);
 }

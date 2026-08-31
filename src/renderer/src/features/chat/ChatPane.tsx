@@ -263,6 +263,7 @@ export default function ChatPane({ projectId, generationProfileId, sources, onOp
                   <button
                     type="button"
                     className="icon-btn danger"
+                    disabled={!stream.canSend}
                     aria-label={`${t("chat.ui.remove")}: ${item.title}`}
                     onClick={async () => {
                       const result = await window.myNotebook.conversations.delete({ projectId, conversationId: item.id });

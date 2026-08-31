@@ -2,7 +2,7 @@
 
 import React from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import ChatPane, { CitationsPanel } from "./ChatPane";
 import "../../i18n";
 import type { DesktopApi } from "../../../../shared/ipc";
@@ -136,6 +136,78 @@ describe("ChatPane conversation creation", () => {
     expect(screen.getByText("旧对话")).toBeTruthy();
     const selected = document.querySelector(".conv-item.selected strong");
     expect(selected?.textContent).toBe("新对话");
+  });
+
+  it("keeps an old conversation streaming while a new conversation is open", async () => {
+    const api = mockApi();
+    let sink: ((event: any) => void) | undefined;
+    let finishSend: ((value: any) => void) | undefined;
+    let persisted: MessageDto[] = [];
+    vi.mocked(api.conversations.listMessages).mockImplementation(async ({ conversationId }) => ({
+      ok: true,
+      value: conversationId === existingId ? persisted : []
+    }));
+    vi.mocked(api.chat.subscribe).mockImplementation((_requestId, listener) => { sink = listener; return () => undefined; });
+    vi.mocked(api.chat.send).mockReturnValue(new Promise((resolve) => { finishSend = resolve; }));
+    render(
+      <ChatPane
+        projectId={projectId}
+        generationProfileId="9a9a9999-9999-4999-8999-999999999999"
+        sources={readySources}
+        onOpenSettings={() => undefined}
+        onImport={() => undefined}
+      />
+    );
+
+    const conversationButton = await screen.findByRole("button", { name: /旧对话/ });
+    fireEvent.click(conversationButton);
+    fireEvent.change(screen.getByRole("textbox", { name: "针对这个项目提问" }), { target: { value: "不能丢失的问题" } });
+    fireEvent.click(screen.getByRole("button", { name: "发送" }));
+
+    fireEvent.click(screen.getByRole("menuitem", { name: "新对话" }));
+    expect(await screen.findByRole("button", { name: /新对话/ })).toBeTruthy();
+    expect(api.conversations.create).toHaveBeenCalledTimes(1);
+    expect(screen.queryByText("不能丢失的问题")).toBeNull();
+
+    const requestId = vi.mocked(api.chat.send).mock.calls[0]![0].requestId;
+    await act(async () => {
+      sink?.({ type: "started", requestId, messageId: "assistant-stream" });
+      sink?.({ type: "text-delta", requestId, messageId: "assistant-stream", text: "仍在后台流式输出" });
+      await Promise.resolve();
+    });
+    expect(screen.queryByText("仍在后台流式输出")).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: /新对话/ }));
+    fireEvent.click(screen.getByRole("menuitem", { name: /旧对话/ }));
+    expect(await screen.findByText("不能丢失的问题")).toBeTruthy();
+    expect(screen.getByText("仍在后台流式输出")).toBeTruthy();
+
+    const completed: MessageDto = {
+      id: "assistant-stream", conversationId: existingId, sequence: 2, role: "assistant", content: "不会丢失的回复",
+      state: "completed", replyToMessageId: "persisted-user", supersedesMessageId: null, superseded: false,
+      provider: "openai-compatible", profileId: null, model: "test", usage: null, errorCode: null, completionReason: "stop",
+      createdAt: "2026-08-30T07:00:00.000Z", updatedAt: "2026-08-30T07:00:00.000Z", citations: []
+    };
+    persisted = [{
+      id: "persisted-user", conversationId: existingId, sequence: 1, role: "user", content: "不能丢失的问题",
+      state: "completed", replyToMessageId: null, supersedesMessageId: null, superseded: false,
+      provider: null, profileId: null, model: null, usage: null, errorCode: null, completionReason: null,
+      createdAt: completed.createdAt, updatedAt: completed.updatedAt, citations: []
+    }, completed];
+    await act(async () => {
+      sink?.({ type: "completed", requestId, messageId: completed.id, message: completed });
+      finishSend?.({ ok: true, value: { requestId, assistantMessageId: completed.id } });
+      await Promise.resolve();
+    });
+
+    expect(await screen.findByText("不会丢失的回复")).toBeTruthy();
+    expect(screen.getByText("不能丢失的问题")).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: /旧对话/ }));
+    fireEvent.click([...document.querySelectorAll<HTMLButtonElement>(".conv-open")].find((button) => button.textContent?.includes("新对话"))!);
+    fireEvent.click(await screen.findByRole("button", { name: /新对话/ }));
+    fireEvent.click(screen.getByRole("menuitem", { name: /旧对话/ }));
+    expect(await screen.findByText("不会丢失的回复")).toBeTruthy();
   });
 
   it("edits a cancelled question in its original bubble and resends it in place", async () => {

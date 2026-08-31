@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { ChatTurn } from "../models/provider";
+import { citationLabelSchema } from "../../shared/chat";
 import { assembleContext, estimateTokens, MAX_CITED_CHUNKS } from "./context-builder";
 import { buildSystemPrompt } from "./prompts";
 
@@ -19,6 +20,8 @@ describe("assembleContext", () => {
 
     const over = assembleContext({ question: QUESTION, retrieved: Array.from({ length: 40 }, (_, i) => chunk(i + 1, `t${i}`)) });
     expect(MAX_CITED_CHUNKS).toBe(32);
+    expect(citationLabelSchema.parse(`S${MAX_CITED_CHUNKS}`)).toBe("S32");
+    expect(citationLabelSchema.safeParse("S33").success).toBe(false);
     expect(over.citations.map((c) => c.label)).toEqual(Array.from({ length: 32 }, (_, i) => `S${i + 1}`));
   });
 

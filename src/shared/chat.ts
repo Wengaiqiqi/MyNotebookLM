@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { sourceLocatorSchema } from "./sources";
 export const messageStateSchema=z.enum(["streaming","completed","cancelled","failed"]);
-export const citationLabelSchema=z.string().regex(/^S(?:[1-9]|1[0-2])$/);
+export const citationLabelSchema=z.string().regex(/^S(?:[1-9]|[12]\d|3[0-2])$/);
 // Chat citations persist the source chunk locator verbatim; validating against the
 // same schema that governs chunk locators prevents drift (real PDFs carry endPage).
 export const citationLocatorSchema=sourceLocatorSchema;
