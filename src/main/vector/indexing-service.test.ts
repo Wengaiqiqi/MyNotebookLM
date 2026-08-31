@@ -61,9 +61,12 @@ describe("IndexingService", () => {
     const db = { prepare: vi.fn(() => ({ all: () => chunks, get: () => ({ project_id: "p1", source_id: "s1", ...persistedSpace }), run: vi.fn(() => ({ changes: 1 })) })), transaction: (fn: () => unknown) => () => fn() } as any;
     const provider = describedProvider;
     const lance = { upsert: vi.fn(), count: vi.fn(async () => 2), rows: vi.fn(async () => chunks.map(c => stored(c.id, c.content_hash))), vectorSearch: vi.fn(async () => [stored("c0", "c0")]), deleteRevision: vi.fn() };
-    await new IndexingService(db, provider as never, lance as never).index({ taskId: "t1", revisionId: "r1", space: { id: "space", dimension: 2 }, batchSize: 1 });
+    const onCompleted = vi.fn();
+    await new IndexingService(db, provider as never, lance as never, onCompleted).index({ taskId: "t1", revisionId: "r1", space: { id: "space", dimension: 2 }, batchSize: 1 });
     expect(provider.embedBatch).toHaveBeenCalledTimes(3); expect(lance.vectorSearch).toHaveBeenCalled();
     expect(lance.count).toHaveBeenCalledWith({ id: "space", dimension: 2 }, { revisionId: "r1" });
+    expect(onCompleted).toHaveBeenCalledOnce();
+    expect(onCompleted).toHaveBeenCalledWith("t1");
   });
 
   it("creates the Lance Space before the first indexing write", async () => {

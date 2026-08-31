@@ -1,17 +1,19 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { CitationDto, ConversationDto, MessageDto } from "../../../../shared/chat";
+import type { CitationDetailResultValue } from "../../../../shared/ipc";
 import type { ModelProfileDto } from "../../../../shared/models";
 import type { SourceDto } from "../../../../shared/sources";
 import SafeMarkdown from "../../chat/SafeMarkdown";
 import { useChatStream } from "../../chat/useChatStream";
+import SourcePreview from "./SourcePreview";
 import Icon from "../../ui/Icon";
+import Modal, { DialogHead } from "../../ui/Modal";
 import { toast } from "../../ui/Toast";
 import { errorText, formatDateTime, sourceReady } from "../../lib/format";
 
 type ConversationsApi = typeof window.myNotebook.conversations;
 type ChatApi = typeof window.myNotebook.chat;
-type CitationsApi = typeof window.myNotebook.citations;
 
 export default function ChatPane({ projectId, generationProfileId, sources, onOpenSettings, onImport }: {
   projectId: string;
@@ -134,11 +136,13 @@ export default function ChatPane({ projectId, generationProfileId, sources, onOp
     const text = question.trim();
     if (!text || !stream.canSend) return;
     setQuestion("");
-    if (!conversationId) {
+    let targetConversationId = conversationId;
+    if (!targetConversationId) {
       const created = await window.myNotebook.conversations.create({ projectId, title: text.slice(0, 60) || t("chat.newConversation") });
       if (!created.ok) { toast.error(errorText(created, t)); return; }
       setConversations((current) => [created.value, ...current]);
       setConversationId(created.value.id);
+      targetConversationId = created.value.id;
     } else {
       // A fresh "新对话" takes its title from the first question sent.
       const current = conversations.find((item) => item.id === conversationId);
@@ -150,7 +154,7 @@ export default function ChatPane({ projectId, generationProfileId, sources, onOp
           .catch(() => undefined);
       }
     }
-    await stream.send(text, { thinking });
+    await stream.send(text, { thinking, conversationId: targetConversationId });
   }
 
   function onScroll(event: React.UIEvent<HTMLDivElement>): void {
@@ -489,6 +493,10 @@ export function CitationsPanel({ projectId, citations, active, onSelect }: {
   onSelect: (citation: CitationDto) => void;
 }) {
   const { t } = useTranslation();
+  const [detail, setDetail] = useState<{
+    citation: CitationDto;
+    value: CitationDetailResultValue | null | undefined;
+  } | null>(null);
   const cardRefs = useRef(new Map<string, HTMLElement>());
   const unique = useMemo(() => {
     const seen = new Set<string>();
@@ -499,10 +507,18 @@ export function CitationsPanel({ projectId, citations, active, onSelect }: {
     });
   }, [citations]);
 
-  async function open(citation: CitationDto): Promise<void> {
-    const result = await (window.myNotebook.citations as CitationsApi).open({ projectId, citationId: citation.id });
-    if (!result.ok) toast.error(errorText(result, t));
-    else toast.success(t("chat.ui.opened", { kind: result.value.opened }));
+  async function showDetail(citation: CitationDto): Promise<void> {
+    setDetail({ citation, value: undefined });
+    try {
+      const result = await window.myNotebook.citations.detail({ projectId, citationId: citation.id });
+      if (!result.ok) toast.error(errorText(result, t));
+      setDetail((current) => current?.citation.id === citation.id
+        ? { citation, value: result.ok ? result.value : null }
+        : current);
+    } catch {
+      toast.error(t("errors.citationDetailFailed"));
+      setDetail((current) => current?.citation.id === citation.id ? { citation, value: null } : current);
+    }
   }
 
   const [collapsed, setCollapsed] = useState(false);
@@ -528,6 +544,7 @@ export function CitationsPanel({ projectId, citations, active, onSelect }: {
   }
 
   return (
+    <>
     <aside className="panel cite-panel" aria-label={t("chat.ui.citationTitle")}>
       <header className="panel-head">
         <h2>{t("chat.ui.citationTitle")}</h2>
@@ -557,12 +574,11 @@ export function CitationsPanel({ projectId, citations, active, onSelect }: {
               <span className="cite-num" aria-hidden="true">{citation.label.replace("S", "")}</span>
               <span className="copy">
                 <strong title={citation.sourceDisplayName}>{citation.sourceDisplayName}</strong>
-                <small>{locatorText(citation, t)}</small>
               </span>
             </div>
             {citation.quote && <blockquote className="cite-quote">{citation.quote}</blockquote>}
             <div className="foot">
-              <button type="button" onClick={(event) => { event.stopPropagation(); void open(citation); }}>
+              <button type="button" onClick={(event) => { event.stopPropagation(); void showDetail(citation); }}>
                 <Icon name="open" />{t("chat.ui.viewDetails")}
               </button>
             </div>
@@ -570,22 +586,29 @@ export function CitationsPanel({ projectId, citations, active, onSelect }: {
         ))}
       </div>
     </aside>
+    <Modal open={detail !== null} wide onClose={() => setDetail(null)} labelledBy="citation-detail-title">
+      {detail && (
+        <>
+          <button type="button" className="dialog-close" aria-label={t("common.close")} onClick={() => setDetail(null)}>
+            <Icon name="close" />
+          </button>
+          <DialogHead
+            id="citation-detail-title"
+            icon="file"
+            accent
+            title={t("chat.ui.sourceExcerptTitle")}
+            body={detail.citation.sourceDisplayName}
+          />
+          <div className="citation-source">
+            {detail.value === undefined
+              ? <p className="citation-source-empty">{t("common.loading")}</p>
+              : detail.value
+                ? <SourcePreview kind={detail.value.kind} data={detail.value.data} text={detail.value.text} sheet={detail.value.sheet} locator={detail.citation.locator} />
+                : <p className="citation-source-empty">{t("chat.ui.sourceExcerptUnavailable")}</p>}
+          </div>
+        </>
+      )}
+    </Modal>
+    </>
   );
 }
-
-function locatorText(citation: CitationDto, t: (key: string) => string): string {
-  const locator = citation.locator;
-  switch (locator.kind) {
-    case "page": return `${t("chat.ui.page")} ${locator.page}${locator.endPage && locator.endPage !== locator.page ? "–" + locator.endPage : ""}`;
-    case "slide": return `${t("chat.ui.slide")} ${locator.slide}`;
-    case "sheet": return `${t("chat.ui.sheet")} ${locator.sheet}`;
-    case "cell": return `${t("chat.ui.cell")} ${locator.cellRef}`;
-    case "heading": return locator.headingPath;
-    case "paragraph": return `${t("chat.ui.page")} ¶${locator.paragraph}`;
-    case "section": return locator.sectionPath;
-    case "row": return `${t("chat.ui.sheet")} R${locator.startRow}`;
-    case "offset": return `#0${locator.start}`;
-    default: return "";
-  }
-}
-

@@ -17,7 +17,7 @@ export interface UseChatStreamResult {
   error: AppErrorDto | null;
   fallback: Extract<ChatRequestEvent, { type: "fallback" }> | null;
   canSend: boolean;
-  send(question: string, options?: { thinking?: "off" | "low" | "medium" | "high" }): Promise<boolean>;
+  send(question: string, options?: { thinking?: "off" | "low" | "medium" | "high"; conversationId?: string }): Promise<boolean>;
   stop(): Promise<boolean>;
   regenerate(messageId: string, options?: { thinking?: "off" | "low" | "medium" | "high" }): Promise<boolean>;
   repair(options?: { thinking?: "off" | "low" | "medium" | "high" }): Promise<boolean>;
@@ -164,13 +164,14 @@ export function useChatStream(
     }
   }, [chat, applyEvent, teardown, conversationId]);
 
-  const send = useCallback((question: string, options?: { thinking?: "off" | "low" | "medium" | "high" }): Promise<boolean> => {
+  const send = useCallback((question: string, options?: { thinking?: "off" | "low" | "medium" | "high"; conversationId?: string }): Promise<boolean> => {
     setError(null);
     setFallback(null);
     setRepairableMessageId(null);
+    const targetConversationId = options?.conversationId ?? conversationId;
     const localUserMessage = {
       id: "local-user-" + Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 8),
-      conversationId,
+      conversationId: targetConversationId,
       sequence: Number.MAX_SAFE_INTEGER,
       role: "user" as const,
       content: question,
@@ -191,7 +192,7 @@ export function useChatStream(
     setMessages((prev) => [...prev, localUserMessage]);
     return runTurn((requestId) => {
       optimisticUserRef.current.set(requestId, localUserMessage.id);
-      return chat.send({ requestId, projectId, conversationId, question, ...(generationProfileId ? { generationProfileId } : {}), ...(options?.thinking ? { thinking: options.thinking } : {}) });
+      return chat.send({ requestId, projectId, conversationId: targetConversationId, question, ...(generationProfileId ? { generationProfileId } : {}), ...(options?.thinking ? { thinking: options.thinking } : {}) });
     });
   }, [runTurn, chat, projectId, conversationId, generationProfileId]);
 

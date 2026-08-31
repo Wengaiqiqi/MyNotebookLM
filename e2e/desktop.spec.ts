@@ -414,6 +414,24 @@ test("persists a project across desktop restarts", async ({}, testInfo) => {
   }
 });
 
+test("persists language and theme selected in the UI across restart", async ({}, testInfo) => {
+  const userDataDir = testInfo.outputPath("user-data");
+  await fs.mkdir(userDataDir, { recursive: true });
+  const first = await launchWithUserData(userDataDir);
+  await skipOnboarding(first.page);
+  await first.page.getByRole("button", { name: "深色", exact: true }).click();
+  await first.page.getByRole("button", { name: "English", exact: true }).click();
+  await closeElectron(first.app);
+
+  const second = await launchWithUserData(userDataDir);
+  try {
+    await expect(second.page.locator("html")).toHaveAttribute("lang", "en");
+    await expect(second.page.locator("html")).toHaveAttribute("data-theme", "dark");
+  } finally {
+    await closeElectron(second.app);
+  }
+});
+
 test("Task 8 restart recovery retains selected project, appearance, and notes", async ({}, testInfo) => {
   test.setTimeout(90_000);
   const userDataDir = testInfo.outputPath("user-data");

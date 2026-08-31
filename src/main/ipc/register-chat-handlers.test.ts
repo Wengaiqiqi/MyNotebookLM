@@ -162,6 +162,7 @@ describe("registerChatHandlers", () => {
       requestHub: registry as never,
       resolveWindowFromSender: (sender) => (sender === "sender" ? windows.at(-1) : undefined),
       openCitation: async () => ({ ok: true as const, value: { opened: "document" as const } }),
+      getCitationDetail: async () => ({ ok: true as const, value: { text: "Evidence", kind: "text" as const, data: null, sheet: null } }),
       onWindowClosed: () => void 0
     });
     return { ipc };
@@ -321,6 +322,7 @@ describe("registerChatHandlers", () => {
       requestHub: registry as never,
       resolveWindowFromSender: (sender) => (sender === "sender" ? windows.at(-1) : undefined),
       openCitation: async () => ({ ok: true as const, value: { opened: "document" as const } }),
+      getCitationDetail: async () => ({ ok: true as const, value: { text: "Evidence", kind: "text" as const, data: null, sheet: null } }),
       onWindowClosed
     });
     for (let i = 0; i < 5; i++) {
@@ -345,6 +347,7 @@ describe("registerChatHandlers", () => {
       requestHub: registry as never,
       resolveWindowFromSender: (sender) => (sender === "sender" ? windows.at(-1) : undefined),
       openCitation,
+      getCitationDetail: async () => ({ ok: true as const, value: { text: "Evidence", kind: "text" as const, data: null, sheet: null } }),
       onWindowClosed: () => void 0
     });
 

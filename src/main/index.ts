@@ -170,7 +170,10 @@ app.whenReady().then(async () => {
     if (!row) throw Object.assign(new Error("Active embedding space does not match revision project"), { code: "EMBEDDING_SPACE_PROFILE_MISMATCH", recoverable: false });
     return createProviderForSpace(row, space);
   };
-  const indexing = new IndexingService(appDatabase.connection, resolveEmbeddingProvider, lance);
+  const indexing = new IndexingService(appDatabase.connection, resolveEmbeddingProvider, lance, (taskId) => {
+    const completed = taskService.getById(taskId);
+    if (completed) taskFanout?.(completed);
+  });
   const retrieval = new RetrievalService({ db: appDatabase.connection, lance, provider: localEmbeddingProvider, resolveSpace: async (projectId: string, space: { id: string; dimension: number }) => {
     const row = appDatabase!.connection.prepare("SELECT provider, model_id, model_revision, dimension, distance, pooling, preprocess_version, chunking_version, fingerprint FROM embedding_spaces WHERE id = ? AND project_id = ? AND state = 'active'").get(space.id, projectId) as { provider: string; model_id: string; model_revision: string; dimension: number; distance: string; pooling: string; preprocess_version: string; chunking_version: string; fingerprint: string } | undefined;
     return row ? { provider: await createProviderForSpace(row, space) } : null;
@@ -369,6 +372,7 @@ app.whenReady().then(async () => {
     service: chatService,
     requestHub: new Map(),
     openCitation: (input) => new CitationOpener(appDatabase!.connection).openCitation(input),
+    getCitationDetail: (input) => new CitationOpener(appDatabase!.connection).getCitationDetail(input),
     onWindowClosed: () => void 0
   });
 

@@ -9,6 +9,8 @@ describe("RetrievalService", () => {
     const service = new RetrievalService({ db, lance: lance as any, provider: { embedBatch: vi.fn(async () => [[1, 0]]) } as any });
     const promise = service.search("p1", "hello"); await new Promise(r => setTimeout(r, 0)); expect(lance.textSearch).toHaveBeenCalled(); release();
     await expect(promise).resolves.toEqual([expect.objectContaining({ text: "authoritative" })]);
+    expect(lance.textSearch).toHaveBeenCalledWith(expect.anything(), "hello", 160, { projectId: "p1" });
+    expect(lance.vectorSearch).toHaveBeenCalledWith(expect.anything(), [1, 0], 160, { projectId: "p1" });
   });
 
   it("returns typed repair action when active index is unavailable", async () => {

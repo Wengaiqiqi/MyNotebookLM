@@ -2,7 +2,7 @@
 
 import React from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import App from "./App";
 import type { DesktopApi } from "../../shared/ipc";
 import type { ProjectDto } from "../../shared/projects";
@@ -143,6 +143,21 @@ describe("App shell", () => {
 
     fireEvent.click(screen.getByRole("tab", { name: "研究" }));
     expect(await screen.findByLabelText("针对这个项目提问")).toBeTruthy();
+  });
+
+  it("persists the selected language and theme", async () => {
+    const api = mockApi();
+    (window as unknown as { myNotebook: DesktopApi }).myNotebook = api;
+    render(<App />);
+
+    await screen.findAllByText("毕业论文调研");
+    fireEvent.click(screen.getByRole("button", { name: "深色" }));
+    fireEvent.click(screen.getByRole("button", { name: "English" }));
+
+    await waitFor(() => {
+      expect(api.settings.update).toHaveBeenCalledWith({ theme: "dark" });
+      expect(api.settings.update).toHaveBeenCalledWith({ locale: "en" });
+    });
   });
 
   it("shows the empty workspace state when no project exists", async () => {

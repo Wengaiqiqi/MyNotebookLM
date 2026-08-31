@@ -22,11 +22,13 @@ export class RetrievalService {
         if (description.provider !== space.provider || description.modelId !== space.model_id || description.modelRevision !== space.model_revision || description.dimension !== space.dimension || description.distance !== space.distance || description.pooling !== space.pooling || description.preprocessVersion !== space.preprocess_version || description.chunkingVersion !== space.chunking_version) throw new Error("Embedding provider capability mismatch");
       }
       const spec: LanceSpace = { id: space.space_id, dimension: space.dimension };
-      const textPromise = this.store.textSearch(spec, input.query, input.limit * 3);
+      const candidateLimit = Math.min(200, Math.max(48, input.limit * 8));
+      const filter = { projectId: input.projectId };
+      const textPromise = this.store.textSearch(spec, input.query, candidateLimit, filter);
       const [vector] = await queryProvider.embedBatch([input.query], input.signal ?? new AbortController().signal);
       if (!vector) throw new Error("embedding unavailable");
-      const [ann, bm25] = await Promise.all([this.store.vectorSearch(spec, vector, input.limit * 3, { projectId: input.projectId }), textPromise]);
-      const fused = reciprocalRankFusion([ann as Row[], bm25 as Row[]], input.limit * 3);
+      const [ann, bm25] = await Promise.all([this.store.vectorSearch(spec, vector, candidateLimit, filter), textPromise]);
+      const fused = reciprocalRankFusion([ann as Row[], bm25 as Row[]], candidateLimit);
       const value = fused.flatMap(row => { const r = this.db.prepare("SELECT sc.id chunk_id, sc.text, sc.locator_json, sr.id revision_id, s.id source_id FROM source_chunks sc JOIN source_revisions sr ON sr.id = sc.revision_id JOIN sources s ON s.id = sr.source_id WHERE sc.id = ? AND s.project_id = ? AND s.status = 'active' AND s.current_revision_id = sr.id AND sr.state = 'ready'").get(row.chunkId, input.projectId) as any; return r ? [{ ...row, chunkId: r.chunk_id, sourceId: r.source_id, revisionId: r.revision_id, text: r.text, locatorJson: r.locator_json, locator: JSON.parse(r.locator_json) }] : []; });
       return { ok: true, value: diversifyHits(value, input.limit, 4) };
     } catch { return this.failure("INDEX_UNAVAILABLE", true); }

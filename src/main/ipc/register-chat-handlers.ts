@@ -15,6 +15,7 @@ import {
   chatStopInputSchema,
   citationOpenInputSchema
 } from "../../shared/ipc";
+import type { CitationDetailResultValue } from "../../shared/ipc";
 
 type Emit = (event: unknown) => void;
 type StreamOutcome = Result<{ requestId: string; assistantMessageId: string }>;
@@ -32,6 +33,7 @@ export type ChatHandlersServiceLike = {
 };
 
 export type CitationOpenerLike = (input: { projectId: string; citationId: string }) => Promise<Result<{ opened: "document" | "url" }>>;
+export type CitationDetailLike = (input: { projectId: string; citationId: string }) => Promise<Result<CitationDetailResultValue>>;
 
 export type ChatWindowLike = {
   webContents: {
@@ -89,6 +91,7 @@ export function registerChatHandlers(args: {
   service: ChatHandlersServiceLike;
   requestHub: RequestHub;
   openCitation: CitationOpenerLike;
+  getCitationDetail: CitationDetailLike;
   onWindowClosed(window: ChatWindowLike): void;
 }): () => void {
   const hub = args.requestHub;
@@ -208,6 +211,8 @@ export function registerChatHandlers(args: {
     validatedCall(chatStopInputSchema, input, (value) => ({ ok: true as const, value: args.service.stopRequest(value.requestId, { projectId: value.projectId }) })));
   registerHandler(CITATION_CHANNELS.open, (_e, input) =>
     validatedCall(citationOpenInputSchema, input, (value) => args.openCitation(value)));
+  registerHandler(CITATION_CHANNELS.detail, (_e, input) =>
+    validatedCall(citationOpenInputSchema, input, (value) => args.getCitationDetail(value)));
 
   // Subscribe synchronously inside the invoke so it always precedes any later send.
   registerHandler(CHAT_CHANNELS.subscribeRequest, (event, input) => {

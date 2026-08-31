@@ -171,12 +171,13 @@ test("complete research flow with fake providers", async () => {
       const assistant = messages.value.find((message: { id: string }) => message.id === assistantMessageId);
       const first = assistant.citations[0];
       if (!first) throw new Error("citation missing");
-      const opened = await api.citations.open({ projectId, citationId: first.id });
-      if (!opened.ok) throw new Error(`open: ${opened.error.code}`);
-      return { label: first.label, source: first.sourceDisplayName, locator: first.locator, opened };
+      const detail = await api.citations.detail({ projectId, citationId: first.id });
+      if (!detail.ok) throw new Error(`detail: ${detail.error.code}`);
+      return { label: first.label, source: first.sourceDisplayName, locator: first.locator, text: detail.value.text };
     }, { projectId, conversationId: chat.conversationId, assistantMessageId: chat.assistantMessageId });
     expect(citation).toMatchObject({ label: "S1", source: "authoritative-alpha.txt" });
     expect(citation.locator).toMatchObject({ kind: "paragraph", paragraph: 1 });
+    expect(citation.text).toBe("alpha evidence from the authoritative source.");
 
     // -- note + generated title --
     const note = await launched.page.evaluate(async ({ projectId }) => {

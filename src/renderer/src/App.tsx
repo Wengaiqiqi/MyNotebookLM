@@ -58,7 +58,7 @@ export default function App() {
   function selectTheme(next: AppTheme): void {
     setTheme(next);
     changeTheme(next);
-    if (view !== "boot") void window.myNotebook.settings.update({ theme });
+    if (view !== "boot") void window.myNotebook.settings.update({ theme: next });
   }
 
   function selectLanguage(next: AppLanguage): void {

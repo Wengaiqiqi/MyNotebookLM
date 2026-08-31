@@ -1,0 +1,59 @@
+// @vitest-environment jsdom
+
+import React from "react";
+import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import SourcePreview from "./SourcePreview";
+import "../../i18n";
+
+const getPage = vi.fn(async () => ({
+  getViewport: () => ({ width: 600, height: 800 }),
+  render: () => ({ promise: Promise.resolve(), cancel: vi.fn() })
+}));
+
+vi.mock("pdfjs-dist/legacy/build/pdf.mjs", () => ({
+  GlobalWorkerOptions: {},
+  getDocument: () => ({
+    promise: Promise.resolve({ numPages: 5, getPage, destroy: vi.fn(async () => undefined) }),
+    destroy: vi.fn(async () => undefined)
+  })
+}));
+
+describe("SourcePreview", () => {
+  beforeEach(() => {
+    vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue({} as CanvasRenderingContext2D);
+  });
+
+  afterEach(cleanup);
+
+  it("renders the cited PDF page with PDF.js instead of the blank native viewer", async () => {
+    render(
+      <SourcePreview kind="pdf" data={new Uint8Array([0x25, 0x50, 0x44, 0x46])} text="fallback" sheet={null} locator={{ kind: "page", page: 3 }} />
+    );
+
+    const canvas = await screen.findByRole("img", { name: "引用原文" });
+    expect(canvas.tagName).toBe("CANVAS");
+    await waitFor(() => expect(canvas.getAttribute("aria-busy")).toBe("false"));
+    expect(getPage).toHaveBeenCalledWith(3);
+    expect(screen.queryByRole("button")).toBeNull();
+  });
+
+  it("renders workbook cells, merges, styles and the cited cell", async () => {
+    render(<SourcePreview kind="xlsx" data={null} text={null} locator={{ kind: "cell", sheet: "数据", cellRef: "B2" }} sheet={{
+      name: "数据",
+      columns: [{ number: 1, width: 70 }, { number: 2, width: 70 }],
+      rows: [
+        { number: 1, cells: [
+          { column: 1, text: "指标", colSpan: 2, style: { fontWeight: 700, color: "#FFFFFF", backgroundColor: "#2563EB" } },
+          { column: 2, text: "指标", covered: true }
+        ] },
+        { number: 2, cells: [{ column: 1, text: "" }, { column: 2, text: "42" }] }
+      ]
+    }} />);
+
+    const merged = (await screen.findByText("指标")).closest("td");
+    expect(merged?.getAttribute("colspan")).toBe("2");
+    expect(merged?.getAttribute("style")).toContain("background-color");
+    expect((await screen.findByText("42")).closest("td")?.className).toContain("citation-sheet-target");
+  });
+});

@@ -20,7 +20,7 @@ import type {
 } from "./models";
 import type { AppSettingsDto, UpdateAppSettingsInput } from "./settings";
 import type { AppTheme } from "./settings";
-import type { SourceDto } from "./sources";
+import { sourceKindSchema, type SourceDto, type SourceKind } from "./sources";
 import type { NoteDto, NoteLinkDto, CreateNoteInput, UpdateNoteInput, NoteStateInput, NoteIdInput, CreateNoteLinkInput, DeleteNoteLinkInput, GenerateNoteTitleInput } from "./notes";
 import type { TransformationDto, CreateTransformationInput, UpdateTransformationInput, InsightDto, TransformationRunInput, BuiltinTransformationDto } from "./transformations";
 import type { ModelRouteDto, ModelRouteAttemptDto, ModelTaskKind } from "./models";
@@ -109,7 +109,10 @@ export const CHAT_CHANNELS = {
   update: "chat:v1:update"
 } as const;
 
-export const CITATION_CHANNELS = { open: "citations:v1:open" } as const;
+export const CITATION_CHANNELS = {
+  open: "citations:v1:open",
+  detail: "citations:v1:detail"
+} as const;
 
 const chatUsageDtoSchema = z
   .object({ inputTokens: z.number().int().nonnegative(), outputTokens: z.number().int().nonnegative(), totalTokens: z.number().int().nonnegative() })
@@ -132,6 +135,43 @@ export const citationOpenInputSchema = z.object({ projectId: z.uuid(), citationI
 export const chatSendResultValueSchema = z.object({ requestId: z.uuid(), assistantMessageId: z.string() }).strict();
 export type ChatSendResultValue = z.infer<typeof chatSendResultValueSchema>;
 export const chatOpenedResultValueSchema = z.object({ opened: z.enum(["document", "url"]) }).strict();
+const citationSheetStyleSchema = z.object({
+  color: z.string().optional(),
+  backgroundColor: z.string().optional(),
+  fontFamily: z.string().optional(),
+  fontSize: z.number().positive().optional(),
+  fontWeight: z.number().optional(),
+  fontStyle: z.literal("italic").optional(),
+  textDecoration: z.literal("underline").optional(),
+  textAlign: z.enum(["left", "center", "right", "justify"]).optional(),
+  verticalAlign: z.enum(["top", "middle", "bottom"]).optional(),
+  whiteSpace: z.enum(["pre-wrap", "nowrap"]).optional()
+}).strict();
+export const citationSheetPreviewSchema = z.object({
+  name: z.string(),
+  columns: z.array(z.object({ number: z.number().int().positive(), width: z.number().positive() }).strict()).max(256),
+  rows: z.array(z.object({
+    number: z.number().int().positive(),
+    height: z.number().positive().optional(),
+    cells: z.array(z.object({
+      column: z.number().int().positive(),
+      text: z.string(),
+      colSpan: z.number().int().positive().optional(),
+      rowSpan: z.number().int().positive().optional(),
+      covered: z.boolean().optional(),
+      formula: z.string().optional(),
+      style: citationSheetStyleSchema.optional()
+    }).strict()).max(256)
+  }).strict()).max(105)
+}).strict();
+export type CitationSheetPreview = z.infer<typeof citationSheetPreviewSchema>;
+export const citationDetailResultValueSchema = z.object({
+  text: z.string().nullable(),
+  kind: sourceKindSchema,
+  data: z.instanceof(Uint8Array).nullable(),
+  sheet: citationSheetPreviewSchema.nullable()
+}).strict();
+export type CitationDetailResultValue = z.infer<typeof citationDetailResultValueSchema>;
 
 /**
  * Renderer-facing stream events keyed by opaque requestId. retrieved/fallback are
@@ -239,5 +279,6 @@ export interface DesktopApi {
   };
   citations: {
     open(input: { projectId: string; citationId: string }): Promise<Result<{ opened: "document" | "url" }>>;
+    detail(input: { projectId: string; citationId: string }): Promise<Result<CitationDetailResultValue>>;
   };
 }

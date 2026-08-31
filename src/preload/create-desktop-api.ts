@@ -44,7 +44,8 @@ import {
   chatSendInputSchema,
   chatSendResultValueSchema,
   chatStopInputSchema,
-  citationOpenInputSchema
+  citationOpenInputSchema,
+  citationDetailResultValueSchema
 } from "../shared/ipc";
 import { sourceDtoSchema } from "../shared/sources";
 import { createNoteInputSchema, createNoteLinkInputSchema, deleteNoteLinkInputSchema, generateNoteTitleInputSchema, noteDtoSchema, noteIdInputSchema, noteLinkDtoSchema, noteStateInputSchema, updateNoteInputSchema } from "../shared/notes";
@@ -325,7 +326,8 @@ export function createDesktopApi(ipc: IpcInvoker): DesktopApi {
       }
     },
     citations: {
-      open: (input) => invokeResult(ipc, CITATION_CHANNELS.open, citationOpenInputSchema, resultSchema(chatOpenedResultValueSchema), input)
+      open: (input) => invokeResult(ipc, CITATION_CHANNELS.open, citationOpenInputSchema, resultSchema(chatOpenedResultValueSchema), input),
+      detail: (input) => invokeResult(ipc, CITATION_CHANNELS.detail, citationOpenInputSchema, resultSchema(citationDetailResultValueSchema), input)
     },
     notes: {
       create: (input) => invokeResult(ipc, NOTE_CHANNELS.create, createNoteInputSchema, noteResultSchema, input),

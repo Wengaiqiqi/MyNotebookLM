@@ -53,6 +53,24 @@ describe("LanceStore", () => {
     } finally { await store.close(); await rm(dir, { recursive: true, force: true }); }
   }, 30_000);
 
+  it("uses multilingual FTS and applies project filters before lexical ranking", async () => {
+    const dir = await mkdtemp(path.join(os.tmpdir(), "lance-multilingual-fts-"));
+    const store = await LanceStore.open(dir);
+    try {
+      await store.createSpace(space);
+      await store.upsert(space, [
+        row("owned", [1, 0, 0], "控制系统的时域性能指标", { projectId: "project-1" }),
+        row("foreign", [1, 0, 0], "控制系统的时域性能指标", { projectId: "project-2" })
+      ]);
+
+      expect((await store.textSearch(space, "控制系统", 10, { projectId: "project-1" })).map(item => item.chunkId)).toEqual(["owned"]);
+      await expect(store.textSearch(space, "控制系统", 10, { unknown: "value" } as never)).rejects.toThrow(/filter field/);
+
+      const indexes = await (store as any).db.openTable(tableName).then((table: any) => table.listIndices());
+      expect(indexes.find((index: any) => index.name === "text_idx")?.indexDetails?.base_tokenizer).toBe("icu");
+    } finally { await store.close(); await rm(dir, { recursive: true, force: true }); }
+  }, 30_000);
+
   it("counts only the requested revision with a safe metadata filter", async () => {
     const dir = await mkdtemp(path.join(os.tmpdir(), "lance-count-filter-")); const store = await LanceStore.open(dir);
     try { await store.createSpace(space); await store.upsert(space, [row("r1-a", [1, 0, 0], "a"), row("r2-a", [0, 1, 0], "b", { revisionId: "revision-2" })]); expect(await store.count(space)).toBe(2); expect(await store.count(space, { revisionId: "revision-1" })).toBe(1); expect(await store.count(space, { revisionId: "revision-2" })).toBe(1); await expect(store.count(space, { unknown: "x" } as never)).rejects.toThrow(/filter field/); } finally { await store.close(); await rm(dir, { recursive: true, force: true }); }

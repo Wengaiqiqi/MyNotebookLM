@@ -314,7 +314,7 @@ describe("main application composition", () => {
     );
     expect(createLocalModelManager).toHaveBeenCalledWith("C:\\data\\MyNotebookLM\\models\\huggingface", expect.any(Function), expect.any(Function), expect.any(Function));
     expect(LocalEmbeddingProvider).toHaveBeenCalledOnce();
-    expect(mocks.IndexingService).toHaveBeenCalledWith(mocks.connection, expect.any(Function), expect.anything());
+    expect(mocks.IndexingService).toHaveBeenCalledWith(mocks.connection, expect.any(Function), expect.anything(), expect.any(Function));
   });
 
   it("fans out task updates only to live windows subscribed to the project", async () => {

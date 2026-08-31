@@ -67,7 +67,12 @@ export function canonicalEmbeddingFingerprint(value: { provider: string; modelId
 function canonicalLocatorJson(value: unknown): string { if (value === null || typeof value !== "object") return JSON.stringify(value); if (Array.isArray(value)) return "[" + value.map(canonicalLocatorJson).join(",") + "]"; return "{" + Object.keys(value as Record<string, unknown>).sort().map(k => JSON.stringify(k) + ":" + canonicalLocatorJson((value as Record<string, unknown>)[k])).join(",") + "}"; }
 export class IndexingService {
   private recoverChunks?: (revisionId: string) => Promise<void>;
-  constructor(private readonly db: Database.Database, private readonly provider: ProviderResolver, private readonly lance: Pick<LanceStore, "createSpace" | "upsert" | "count" | "rows" | "vectorSearch" | "deleteRevision">) {}
+  constructor(
+    private readonly db: Database.Database,
+    private readonly provider: ProviderResolver,
+    private readonly lance: Pick<LanceStore, "createSpace" | "upsert" | "count" | "rows" | "vectorSearch" | "deleteRevision">,
+    private readonly onCompleted?: (taskId: string) => void
+  ) {}
   private async resolveProvider(revisionId: string, space: LanceSpace) { return typeof this.provider === "function" ? this.provider(revisionId, space) : this.provider; }
   private validateSpace(revisionId: string, space: LanceSpace, operation: "index" | "rebuild"): SpaceBoundary {
     const row = this.db.prepare("SELECT sr.source_id, s.project_id, es.id AS space_id, es.project_id AS space_project_id, es.dimension AS space_dimension, es.state AS space_state, es.provider, es.model_id, es.model_revision, es.distance, es.pooling, es.preprocess_version, es.chunking_version, es.fingerprint, pes.space_id AS active_space_id FROM source_revisions sr JOIN sources s ON s.id = sr.source_id LEFT JOIN embedding_spaces es ON es.id = ? LEFT JOIN project_embedding_spaces pes ON pes.project_id = s.project_id WHERE sr.id = ?").get(space.id, revisionId) as SpaceBoundary | undefined;
@@ -125,6 +130,10 @@ export class IndexingService {
         if (this.db.prepare("UPDATE tasks SET stage = 'finalizing', state = 'completed', progress_1000 = 1000, updated_at = ? WHERE id = ? AND state = 'running'").run(now, input.taskId).changes !== 1) throw new Error("Task completion precondition failed");
       })();
     } catch (error) { await this.lance.deleteRevision(input.space, input.revisionId); throw error; }
+    // The completion row is written in the activation transaction above, so
+    // publish only after commit. UI notification is best-effort and must not
+    // roll back an already-authoritative source.
+    try { this.onCompleted?.(input.taskId); } catch { /* refreshed on next list */ }
   }
   async rebuild(input: { revisionId: string; space: LanceSpace; signal?: AbortSignal; batchSize?: number }): Promise<void> {
     const persisted = this.validateSpace(input.revisionId, input.space, "rebuild");
