@@ -3,6 +3,7 @@ import type { PDFDocumentProxy, RenderTask } from "pdfjs-dist/legacy/build/pdf.m
 import { useTranslation } from "react-i18next";
 import type { CitationImagePreview, CitationSheetPreview } from "../../../../shared/ipc";
 import type { SourceKind, SourceLocator } from "../../../../shared/sources";
+import SafeMarkdown from "../../chat/SafeMarkdown";
 
 export default function SourcePreview({ kind, data, text, locator, sheet, images = [] }: {
   kind: SourceKind;
@@ -15,6 +16,7 @@ export default function SourcePreview({ kind, data, text, locator, sheet, images
   if (kind === "pdf" && data) return <PdfPreview data={data} page={locator.kind === "page" ? locator.page : 1} />;
   if (kind === "xlsx" && sheet) return <WorkbookPreview sheet={sheet} locator={locator} />;
   if (kind === "docx" && (sheet || images.length)) return <DocumentPreview table={sheet} images={images} text={text} />;
+  if (kind === "markdown") return <MarkdownPreview text={text} />;
   return <TextPreview text={text} />;
 }
 
@@ -174,6 +176,13 @@ function TextPreview({ text }: { text: string | null }) {
   const { t } = useTranslation();
   return text
     ? <div className="citation-source-text">{paragraphs(text).map((paragraph, index) => <p key={index}>{paragraph.text}</p>)}</div>
+    : <p className="citation-source-empty">{t("chat.ui.sourceExcerptUnavailable")}</p>;
+}
+
+function MarkdownPreview({ text }: { text: string | null }) {
+  const { t } = useTranslation();
+  return text
+    ? <div className="citation-source-text assistant-body"><SafeMarkdown text={text} allowSafeHtml /></div>
     : <p className="citation-source-empty">{t("chat.ui.sourceExcerptUnavailable")}</p>;
 }
 

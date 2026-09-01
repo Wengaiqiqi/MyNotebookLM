@@ -91,9 +91,14 @@ describe("SourcePreview", () => {
     expect(image.getAttribute("src")).toBe("blob:docx-image");
   });
 
-  it("renders Markdown source excerpts without relevance highlighting", () => {
-    render(<SourcePreview kind="markdown" data={null} sheet={null} locator={{ kind: "paragraph", paragraph: 1 }} text={"General introduction.\n\nStart services with Docker Compose."} />);
-    expect(screen.getByText("Start services with Docker Compose.").tagName).toBe("P");
+  it("renders Markdown formatting and sanitized inline HTML", () => {
+    render(<SourcePreview kind="markdown" data={null} sheet={null} locator={{ kind: "paragraph", paragraph: 1 }} text={'# README\n\n**Community Support**\n\n- [Website](https://example.com)\n\n<p align="right"><a href="#top">Back to top</a></p><script>alert(1)</script>'} />);
+    expect(screen.getByRole("heading", { name: "README" })).toBeTruthy();
+    expect(screen.getByText("Community Support").tagName).toBe("STRONG");
+    expect(screen.getByRole("link", { name: "Website" }).getAttribute("href")).toBe("https://example.com");
+    expect(screen.getByRole("link", { name: "Back to top" }).getAttribute("href")).toBe("#top");
+    expect(document.querySelector("script")).toBeNull();
+    expect(document.body.textContent).not.toContain("<p align");
     expect(document.querySelector("mark")).toBeNull();
   });
 });

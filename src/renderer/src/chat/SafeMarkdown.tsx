@@ -34,14 +34,12 @@ function ensureLinkHardening(): void {
 
 marked.setOptions({ async: false });
 
-/** Render Markdown to sanitized HTML; raw HTML is escaped, not executed. */
-export function renderSafeMarkdown(text: string): string {
+/** Render Markdown to allowlisted HTML; chat escapes raw HTML, source previews may sanitize it. */
+export function renderSafeMarkdown(text: string, allowSafeHtml = false): string {
   ensureLinkHardening();
-  // Marked 18 has no sanitizer left; escape every raw '<' before parsing so
-  // HTML/script markup stays inert literal text while Markdown syntax
-  // (blockquotes use '>', code, tables) keeps working. DOMPurify then runs an
-  // explicit allowlist over the generated tree as defense in depth.
-  const neutralized = text.replace(/</g, "&lt;");
+  // Chat text keeps raw HTML inert. Imported Markdown may opt into parsing it,
+  // but the same explicit DOMPurify allowlist remains the trust boundary.
+  const neutralized = allowSafeHtml ? text : text.replace(/</g, "&lt;");
   const parsed = marked.parse(neutralized, { async: false });
   return DOMPurify.sanitize(parsed, { ALLOWED_TAGS, ALLOWED_ATTR, FORBID_TAGS });
 }
@@ -94,9 +92,10 @@ export interface SafeMarkdownProps {
   text: string;
   citations?: CitationDto[];
   onCitationOpen?: ((citation: CitationDto) => void) | undefined;
+  allowSafeHtml?: boolean;
 }
 
-export default function SafeMarkdown({ text, citations = [], onCitationOpen }: SafeMarkdownProps) {
+export default function SafeMarkdown({ text, citations = [], onCitationOpen, allowSafeHtml = false }: SafeMarkdownProps) {
   const hostRef = React.useRef<HTMLDivElement | null>(null);
   const canonical = React.useMemo(() => canonicalizeCitationTargets(citations), [citations]);
   React.useEffect(() => {
@@ -104,7 +103,7 @@ export default function SafeMarkdown({ text, citations = [], onCitationOpen }: S
     if (!host) return;
     // Rebuild the sanitized tree imperatively so we can splice citation buttons
     // into exact text positions without dangerouslySetInnerHTML bypassing React.
-    host.innerHTML = renderSafeMarkdown(text);
+    host.innerHTML = renderSafeMarkdown(text, allowSafeHtml);
     const walker = document.createTreeWalker(host, NodeFilter.SHOW_TEXT);
     const replacements: Array<{ node: Text; parent: Node; next: ChildNode | null }> = [];
     let current = walker.nextNode() as Text | null;
@@ -134,7 +133,7 @@ export default function SafeMarkdown({ text, citations = [], onCitationOpen }: S
       if (!hasButtons) continue;
       item.parent.replaceChild(fragment, item.node);
     }
-  }, [text, canonical, onCitationOpen]);
+  }, [text, canonical, onCitationOpen, allowSafeHtml]);
   return <div className="safe-markdown" ref={hostRef} />;
 }
 
