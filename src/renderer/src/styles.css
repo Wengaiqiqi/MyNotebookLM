@@ -19,9 +19,9 @@
   --ink-3: #9aa0ad;
   --line: #e5e2d9;
   --line-strong: #d3cfc4;
-  --accent: #5450c8;
-  --accent-hover: #4541b6;
-  --accent-soft: #edecfa;
+  --accent: #166a5c;
+  --accent-hover: #0f5a4e;
+  --accent-soft: #e2f0ec;
   --accent-ink: #ffffff;
   --ok: #177a4c;
   --ok-soft: #e3f4ea;
@@ -30,7 +30,7 @@
   --danger: #c43a55;
   --danger-hover: #ab2c46;
   --danger-soft: #fbeaee;
-  --focus: #5450c8;
+  --focus: #166a5c;
 
   --topbar-bg: #f7f6f2;
   --sidebar-bg: #f2f0ea;
@@ -60,9 +60,9 @@
   --ink-3: #71768a;
   --line: #2a2c37;
   --line-strong: #3a3d4c;
-  --accent: #807ef0;
-  --accent-hover: #918ff5;
-  --accent-soft: #282849;
+  --accent: #4fb99f;
+  --accent-hover: #64c7ae;
+  --accent-soft: #1d332e;
   --accent-ink: #ffffff;
   --ok: #4ec38b;
   --ok-soft: #1d3229;
@@ -71,7 +71,7 @@
   --danger: #e5647f;
   --danger-hover: #ef7f96;
   --danger-soft: #3a2129;
-  --focus: #9d9bff;
+  --focus: #4fb99f;
 
   --topbar-bg: #131418;
   --sidebar-bg: #17181d;
@@ -179,12 +179,12 @@ button:disabled { cursor: not-allowed; opacity: .5; }
 .btn-new-project {
   display: flex; align-items: center; justify-content: center; gap: 8px;
   height: 38px; border: 0; border-radius: 10px;
-  background: linear-gradient(135deg, #5f5cd6, #4b47c2);
+  background: var(--accent);
   color: #fff; font-weight: 600; font-size: 13.5px;
-  box-shadow: 0 2px 10px rgb(80 76 200 / 30%);
+  box-shadow: 0 2px 8px color-mix(in srgb, var(--accent) 28%, transparent);
   transition: transform .12s ease, box-shadow .12s ease, filter .12s ease;
 }
-.btn-new-project:hover:not(:disabled) { filter: brightness(1.06); box-shadow: 0 4px 14px rgb(80 76 200 / 38%); }
+.btn-new-project:hover:not(:disabled) { background: var(--accent-hover); box-shadow: 0 4px 12px color-mix(in srgb, var(--accent) 34%, transparent); }
 .btn-new-project:active:not(:disabled) { transform: translateY(1px); }
 
 .project-filter {
@@ -308,7 +308,7 @@ button:disabled { cursor: not-allowed; opacity: .5; }
 .btn svg { width: 15px; height: 15px; flex: none; }
 .btn.primary {
   background: var(--accent); color: var(--accent-ink);
-  box-shadow: 0 1px 6px rgb(80 76 200 / 30%);
+  box-shadow: 0 1px 5px color-mix(in srgb, var(--accent) 24%, transparent);
 }
 .btn.primary:hover:not(:disabled) { background: var(--accent-hover); }
 .btn.outline { background: transparent; border-color: var(--line-strong); }

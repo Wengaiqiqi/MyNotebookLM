@@ -8,6 +8,9 @@ import "../../i18n";
 import type { DesktopApi } from "../../../../shared/ipc";
 import type { CreateNoteLinkInput, NoteLinkDto } from "../../../../shared/notes";
 
+const toast = vi.hoisted(() => ({ success: vi.fn(), error: vi.fn(), info: vi.fn() }));
+vi.mock("../../ui/Toast", () => ({ toast }));
+
 const projectA = "1a1a1111-1111-4111-8111-111111111111";
 const projectB = "2a2a2222-2222-4222-8222-222222222222";
 const noteId = "3a3a3333-3333-4333-8333-333333333333";
@@ -20,7 +23,7 @@ const questionB = "8a8a8888-8888-4888-8888-888888888882";
 const answerA = "9a9a9999-9999-4999-8999-999999999991";
 const now = "2026-09-01T00:00:00.000Z";
 
-afterEach(() => cleanup());
+afterEach(() => { cleanup(); vi.clearAllMocks(); });
 
 describe("NotesPane", () => {
   it("saves a dirty body before title generation and keeps it when generation fails", async () => {
@@ -100,7 +103,7 @@ describe("NotesPane", () => {
         list: vi.fn(async () => ({ ok: true as const, value: [{ id: noteId, projectId: projectA, title: "测试笔记", body: "正文", version: 1, archivedAt: null, deletedAt: null, createdAt: now, updatedAt: now }] })),
         listLinks: vi.fn(async () => ({ ok: true as const, value: [] })),
         createLink,
-        create: vi.fn(), get: vi.fn(), update: vi.fn(), archive: vi.fn(), restore: vi.fn(), delete: vi.fn(), deleteLink: vi.fn(), generateTitle: vi.fn()
+        create: vi.fn(), get: vi.fn(), update: vi.fn(async () => ({ ok: true as const, value: { id: noteId, projectId: projectA, title: "测试笔记", body: "正文", version: 2, archivedAt: null, deletedAt: null, createdAt: now, updatedAt: now } })), archive: vi.fn(), restore: vi.fn(), delete: vi.fn(), deleteLink: vi.fn(), generateTitle: vi.fn()
       }
     } as unknown as DesktopApi;
 
@@ -110,13 +113,37 @@ describe("NotesPane", () => {
 
     fireEvent.click(screen.getByLabelText("来源"));
     fireEvent.click(await screen.findByRole("option", { name: "甲资料.md" }));
-    fireEvent.click(screen.getAllByRole("button", { name: "关联" })[0]!);
-    await waitFor(() => expect(createLink).toHaveBeenCalledWith({ projectId: projectA, noteId, sourceId: sourceA }));
     fireEvent.click(screen.getByLabelText("提问消息"));
     fireEvent.click(await screen.findByRole("option", { name: /\[研究对话\] 问题一/ }));
-    fireEvent.click(screen.getAllByRole("button", { name: "关联" })[1]!);
+    fireEvent.click(screen.getByRole("button", { name: "保存笔记" }));
     await waitFor(() => expect(createLink).toHaveBeenCalledWith({ projectId: projectA, noteId, messageId: questionA }));
+    expect(createLink).toHaveBeenCalledWith({ projectId: projectA, noteId, sourceId: sourceA });
     fireEvent.click(screen.getByLabelText("模型回答"));
     expect(screen.getByRole("option", { name: /\[研究对话\] 模型回答/ })).toBeTruthy();
+  });
+
+  it("treats an already-associated source as saved without showing an error", async () => {
+    (window as unknown as { myNotebook: DesktopApi }).myNotebook = {
+      projects: { list: vi.fn(async () => [{ id: projectA, name: "项目甲", archived: false, status: "active", deletedAt: null, createdAt: now, updatedAt: now }]) },
+      sources: { list: vi.fn(async () => [{ id: sourceA, projectId: projectA, kind: "markdown", displayName: "甲资料.md", status: "active", currentRevisionId: null, deletedAt: null, createdAt: now, updatedAt: now }]) },
+      conversations: { list: vi.fn(async () => ({ ok: true as const, value: [] })), listMessages: vi.fn(), create: vi.fn(), rename: vi.fn(), archive: vi.fn(), delete: vi.fn() },
+      notes: {
+        list: vi.fn(async () => ({ ok: true as const, value: [{ id: noteId, projectId: projectA, title: "测试笔记", body: "", version: 1, archivedAt: null, deletedAt: null, createdAt: now, updatedAt: now }] })),
+        listLinks: vi.fn(async () => ({ ok: true as const, value: [] })),
+        update: vi.fn(async () => ({ ok: true as const, value: { id: noteId, projectId: projectA, title: "测试笔记", body: "", version: 2, archivedAt: null, deletedAt: null, createdAt: now, updatedAt: now } })),
+        createLink: vi.fn(async () => ({ ok: false as const, error: { code: "CONFLICT" as const, messageKey: "errors.conflict", recoverable: true } })),
+        create: vi.fn(), get: vi.fn(), archive: vi.fn(), restore: vi.fn(), delete: vi.fn(), deleteLink: vi.fn(), generateTitle: vi.fn()
+      }
+    } as unknown as DesktopApi;
+
+    render(<NotesPane projectId={projectA} />);
+    await screen.findByDisplayValue("测试笔记");
+    fireEvent.click(screen.getByRole("button", { name: /关联证据/ }));
+    fireEvent.click(screen.getByLabelText("来源"));
+    fireEvent.click(await screen.findByRole("option", { name: "甲资料.md" }));
+    fireEvent.click(screen.getByRole("button", { name: "保存笔记" }));
+
+    await waitFor(() => expect(toast.success).toHaveBeenCalledWith("笔记已保存。"));
+    expect(toast.error).not.toHaveBeenCalled();
   });
 });

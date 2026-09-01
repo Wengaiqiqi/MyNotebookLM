@@ -285,7 +285,7 @@ function NoteEditor({ note, language, onChanged, onDeleted, projects, sources, c
   const [linkSelections, setLinkSelections] = useState<Record<"source" | "message" | "answer", string[]>>({ source: [], message: [], answer: [] });
   const [openMenu, setOpenMenu] = useState<"source" | "message" | "answer" | null>(null);
   const linkMenuRef = useRef<HTMLDivElement>(null);
-  const [linking, setLinking] = useState(false);
+
   const linkedTargetIds = new Set(links.flatMap((link) => [link.sourceId, link.messageId].filter((id): id is string => Boolean(id))));
   const linkTargets = (linkType: "source" | "message" | "answer") => linkType === "source"
     ? sources.filter((source) => source.projectId === note.projectId && !linkedTargetIds.has(source.id)).map((source) => ({ id: source.id, label: source.displayName }))
@@ -325,8 +325,31 @@ function NoteEditor({ note, language, onChanged, onDeleted, projects, sources, c
     if (saving || generatingTitle || !title.trim()) return;
     setSaving(true);
     const saved = await persistDraft();
+    if (!saved) { setSaving(false); return; }
+    const pending: Array<{ linkType: "source" | "message" | "answer"; targetId: string }> = [];
+    for (const linkType of ["source", "message", "answer"] as const) {
+      for (const targetId of linkSelections[linkType]) pending.push({ linkType, targetId });
+    }
+    if (pending.length > 0) {
+      const results = await Promise.all(pending.map(({ linkType, targetId }) => api().createLink({
+        projectId: note.projectId,
+        noteId: note.id,
+        ...(linkType === "source" ? { sourceId: targetId } : { messageId: targetId })
+      }).catch(() => undefined)));
+      const created = results.flatMap((result) => result?.ok ? [result.value] : []);
+      if (created.length > 0) setLinks((current) => [...current, ...created]);
+      if (results.some((result) => result && !result.ok && result.error.code === "CONFLICT")) await loadLinks();
+      const failed = pending.filter((_, index) => !results[index] || (!results[index]!.ok && results[index]!.error.code !== "CONFLICT"));
+      if (failed.length > 0) {
+        setLinkSelections(Object.fromEntries((["source", "message", "answer"] as const).map((linkType) => [linkType, failed.filter((item) => item.linkType === linkType).map((item) => item.targetId)])) as typeof linkSelections);
+        setSaving(false);
+        const failure = results.find((result) => result && !result.ok && result.error.code !== "CONFLICT");
+        toast.error(failure && !failure.ok ? errorText(failure, t) : t("errors.internal"));
+        return;
+      }
+      setLinkSelections({ source: [], message: [], answer: [] });
+    }
     setSaving(false);
-    if (!saved) return;
     toast.success(t("notes.savedToast"));
   }
 
@@ -358,23 +381,6 @@ function NoteEditor({ note, language, onChanged, onDeleted, projects, sources, c
     if (result?.ok) {
       onChanged(result.value);
     } else toast.error(t("notes.titleFailure"));
-  }
-
-  async function linkTarget(linkType: "source" | "message" | "answer"): Promise<void> {
-    const targetIds = linkSelections[linkType];
-    if (linking || targetIds.length === 0) return;
-    setLinking(true);
-    const results = await Promise.all(targetIds.map((targetId) => api().createLink({
-      projectId: note.projectId,
-      noteId: note.id,
-      ...(linkType === "source" ? { sourceId: targetId } : { messageId: targetId })
-    }).catch(() => undefined)));
-    const created = results.flatMap((result) => result?.ok ? [result.value] : []);
-    setLinks((current) => [...current, ...created]);
-    setLinkSelections((current) => ({ ...current, [linkType]: [] }));
-    setLinking(false);
-    const failed = results.filter((result) => !result?.ok).length;
-    if (failed > 0) toast.error(t("errors.internal"));
   }
 
   async function unlink(link: NoteLinkDto): Promise<void> {
@@ -462,7 +468,6 @@ function NoteEditor({ note, language, onChanged, onDeleted, projects, sources, c
                       </div>
                     )}
                   </div>
-                  <button type="button" className="btn sm" disabled={linking || selection.length === 0} onClick={() => void linkTarget(kind)}>{linking ? t("notes.linking") : t("notes.link")}</button>
                 </div>;
               })}
             </div>
