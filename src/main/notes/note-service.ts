@@ -12,6 +12,7 @@ import {
   type CreateNoteInput,
   type CreateNoteLinkInput,
   type DeleteNoteLinkInput,
+  type NoteIdInput,
   type NoteDto,
   type NoteLinkDto,
   type UpdateNoteInput
@@ -89,7 +90,7 @@ export class NoteService {
     }));
   }
 
-  listLinks(input: { projectId: string; noteId: string }): NoteLinkDto[] {
+  listLinks(input: NoteIdInput): NoteLinkDto[] {
     const parsed = noteIdInputSchema.parse(input);
     return noteLinkDtoSchema.array().parse(this.repository.listLinks(parsed.projectId, parsed.id));
   }

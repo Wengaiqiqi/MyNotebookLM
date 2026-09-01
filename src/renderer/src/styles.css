@@ -956,7 +956,7 @@ button:disabled { cursor: not-allowed; opacity: .5; }
    Studio (transformations)
    ------------------------------------------------------------ */
 .studio { grid-template-columns: minmax(0, 5fr) minmax(0, 4fr); grid-template-rows: minmax(0, auto) minmax(0, 1fr); }
-.studio-run { grid-column: 1; grid-row: 1; }
+.studio-run { grid-column: 1; grid-row: 1; position: relative; z-index: 1; overflow: visible; }
 .studio-insights { grid-column: 2; grid-row: 1 / span 2; }
 .studio-rules { grid-column: 1; grid-row: 2; }
 .studio-run form { display: grid; gap: 12px; padding: 16px; }

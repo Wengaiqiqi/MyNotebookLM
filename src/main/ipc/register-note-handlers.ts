@@ -41,7 +41,7 @@ export function registerNoteHandlers(ipc: Ipc, service: Service): () => void {
   ipc.handle(NOTE_CHANNELS.restore, (_event, input) => safe(noteStateInputSchema, noteResult, input, service.restoreNote.bind(service)));
   ipc.handle(NOTE_CHANNELS.delete, (_event, input) => safe(noteStateInputSchema, voidResult, input, service.deleteNote.bind(service)));
   ipc.handle(NOTE_CHANNELS.createLink, (_event, input) => safe(createNoteLinkInputSchema, linkResult, input, service.createLink.bind(service)));
-  ipc.handle(NOTE_CHANNELS.listLinks, (_event, input) => safe(noteIdInputSchema, linksResult, input, (value) => service.listLinks({ projectId: value.projectId, noteId: value.id })));
+  ipc.handle(NOTE_CHANNELS.listLinks, (_event, input) => safe(noteIdInputSchema, linksResult, input, service.listLinks.bind(service)));
   ipc.handle(NOTE_CHANNELS.deleteLink, (_event, input) => safe(deleteNoteLinkInputSchema, voidResult, input, service.deleteLink.bind(service)));
   ipc.handle(NOTE_CHANNELS.generateTitle, (_event, input) => safe(generateNoteTitleInputSchema, noteResult, input, (value) => service.generateTitle(value as never)));
   const channels = Object.values(NOTE_CHANNELS);

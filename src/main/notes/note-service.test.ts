@@ -25,6 +25,13 @@ describe("NoteService", () => {
     expect(() => listNotesInputSchema.parse({ projectId: PROJECT, unexpected: true })).toThrow();
   });
 
+  it("lists note links using the shared note id contract", () => {
+    const listLinks = vi.fn(() => []);
+    const service = new NoteService({ listLinks } as any);
+    expect(service.listLinks({ projectId: PROJECT, id: NOTE })).toEqual([]);
+    expect(listLinks).toHaveBeenCalledWith(PROJECT, NOTE);
+  });
+
   it("delegates AI title generation to the title service", async () => {
     const generated = { id: NOTE, projectId: PROJECT, title: "AI title", body: "Body", version: 2, archivedAt: null, deletedAt: null, createdAt: "2026-01-01T00:00:00.000Z", updatedAt: "2026-01-01T00:00:00.000Z" };
     const titleService = { generateTitle: vi.fn(async () => generated) };

@@ -37,9 +37,10 @@ describe("registerNoteHandlers", () => {
     await invoke(ipc, NOTE_CHANNELS.archive, { projectId: PROJECT, id: NOTE, version: 1 });
     await invoke(ipc, NOTE_CHANNELS.restore, { projectId: PROJECT, id: NOTE, version: 1 });
     await invoke(ipc, NOTE_CHANNELS.delete, { projectId: PROJECT, id: NOTE, version: 1 });
-    await invoke(ipc, NOTE_CHANNELS.listLinks, { projectId: PROJECT, noteId: NOTE });
+    await invoke(ipc, NOTE_CHANNELS.listLinks, { projectId: PROJECT, id: NOTE });
     await invoke(ipc, NOTE_CHANNELS.generateTitle, { projectId: PROJECT, noteId: NOTE, locale: "en" });
     expect(svc.createNote).toHaveBeenCalledWith({ projectId: PROJECT, title: "N", body: "B" });
+    expect(svc.listLinks).toHaveBeenCalledWith({ projectId: PROJECT, id: NOTE });
     expect(svc.generateTitle).toHaveBeenCalledWith({ projectId: PROJECT, noteId: NOTE, locale: "en" });
   });
 
