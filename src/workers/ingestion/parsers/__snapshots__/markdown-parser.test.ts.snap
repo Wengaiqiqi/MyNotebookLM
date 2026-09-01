@@ -26,8 +26,7 @@ exports[`parseMarkdown > emits heading ancestry, list, code and table text 1`] =
       "kind": "paragraph",
       "paragraph": 1,
     },
-    "text": "Root > Child
-body",
+    "text": "body",
   },
   {
     "kind": "list",

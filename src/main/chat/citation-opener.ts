@@ -7,6 +7,7 @@ import type { Result } from "../../shared/app-errors";
 import type { CitationDetailResultValue, CitationSheetPreview } from "../../shared/ipc";
 import { sourceLocatorSchema, type SourceKind, type SourceLocator } from "../../shared/sources";
 import { previewDocxSource } from "../../workers/ingestion/parsers/docx-parser";
+import { citationClaim } from "./citation-relevance";
 
 type ShellLike = {
   openPath(path: string): Promise<string>;
@@ -56,6 +57,7 @@ export class CitationOpener {
       let data: CitationDetailResultValue["data"] = null;
       let sheet: CitationSheetPreview | null = null;
       let images: CitationDetailResultValue["images"] = [];
+      const claim = citationClaim(row.message_content, row.start);
       if (row.stored_path && row.kind === "pdf") {
         const bytes = await this.readManagedFile(row.stored_path).catch(() => null);
         if (bytes) {
@@ -72,7 +74,6 @@ export class CitationOpener {
         const bytes = await this.readManagedFile(row.stored_path).catch(() => null);
         const locator = sourceLocatorSchema.safeParse(JSON.parse(row.locator_json));
         const tableName = locator.success && locator.data.kind === "cell" && /^Table \d+$/.test(locator.data.sheet) ? locator.data.sheet : undefined;
-        const claim = citationClaim(row.message_content, row.start);
         if (bytes && locator.success) {
           const preview = await previewDocxSource(bytes, claim || row.text || "", locator.data, tableName).catch(() => null);
           sheet = preview?.sheet ?? null;
@@ -143,12 +144,6 @@ export class CitationOpener {
   private failure(code: "NOT_FOUND" | "UNSAFE_INPUT" | "INTERNAL", messageKey: string): Result<never> {
     return { ok: false, error: { code, messageKey, recoverable: code === "INTERNAL" } };
   }
-}
-
-function citationClaim(content: string, start: number): string {
-  const before = content.slice(0, Math.max(0, start));
-  const boundary = Math.max(before.lastIndexOf("\n"), before.lastIndexOf("。"), before.lastIndexOf("！"), before.lastIndexOf("？"));
-  return before.slice(boundary + 1).trim();
 }
 
 async function workbookPreview(data: Uint8Array, locator: SourceLocator): Promise<CitationSheetPreview | null> {

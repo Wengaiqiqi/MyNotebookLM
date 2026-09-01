@@ -58,15 +58,12 @@ function evidenceTarget(chunk: RetrievedChunk): string {
   const table = /(?:^|\n)\s*(?:表|table)\s*(\d+)/i.exec(chunk.text)?.[1];
   if (table) return `${source}:table:${table}`;
   if (!locator) return `${source}:chunk:${chunk.chunkId}`;
-  if (locator.kind === "page") return `${source}:page:${String(locator.page)}`;
-  if (locator.kind === "slide") return `${source}:slide:${String(locator.slide)}`;
-  if (locator.kind === "sheet") return `${source}:sheet:${String(locator.sheet)}`;
   if (locator.kind === "cell") {
     const sheet = String(locator.sheet).replace(/\s+/g, "").toLowerCase();
     const tableNumber = /(?:表|table)(\d+)/i.exec(sheet)?.[1] ?? sheet;
     return chunk.sourceKind === "docx" ? `${source}:table:${tableNumber}` : `${source}:cell:${sheet}:${String(locator.cellRef)}`;
   }
-  return `${source}:${JSON.stringify(locator)}`;
+  return `${source}:chunk:${chunk.chunkId}`;
 }
 function deduplicateTargets(chunks: RetrievedChunk[]): RetrievedChunk[] {
   const unique: RetrievedChunk[] = [];

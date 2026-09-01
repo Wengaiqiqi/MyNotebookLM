@@ -4,6 +4,7 @@ import { _electron as electron } from "playwright";
 
 test("current profile opens a cited PDF without blanking the renderer", async ({}, testInfo) => {
   const userDataDir = process.env.MYNOTEBOOKLM_E2E_PROFILE;
+  const projectName = process.env.MYNOTEBOOKLM_E2E_PROJECT ?? "213";
   test.skip(!userDataDir, "set MYNOTEBOOKLM_E2E_PROFILE to an isolated profile copy");
   if (!userDataDir) return;
   const app = await electron.launch({
@@ -21,12 +22,14 @@ test("current profile opens a cited PDF without blanking the renderer", async ({
   try {
     await expect(page.locator(".app")).toBeVisible();
     await page.waitForTimeout(1_000);
+    const skip = page.getByRole("button", { name: /稍后配置模型|Configure later/ });
+    if (await skip.isVisible()) await skip.click();
+    await expect(page.locator(".app[data-view='app']")).toBeVisible();
     const state = await page.evaluate(() => ({ text: document.body.innerText, html: document.body.innerHTML.slice(0, 1_000) }));
     console.log("renderer-state", JSON.stringify(state));
     expect(state.text.trim()).not.toBe("");
     expect(errors).toEqual([]);
-    expect(state.html).not.toContain('data-view="onboarding"');
-    const project = page.locator(".project-item", { hasText: "213" });
+    const project = page.locator(".project-item", { hasText: projectName });
     const projectButton = project.locator(".project-item-btn");
     if (await projectButton.getAttribute("aria-current") !== "page") {
       await projectButton.evaluate((button: HTMLButtonElement) => button.click());
@@ -36,6 +39,8 @@ test("current profile opens a cited PDF without blanking the renderer", async ({
     await expect(details).toBeVisible();
     await details.click();
     await expect(page.getByRole("dialog", { name: /引用原文|Source excerpt/ })).toBeVisible();
+    await expect(page.getByText(/操作未能完成|The operation could not be completed/)).toHaveCount(0);
+    await expect(page.getByText(/原文暂不可用|source excerpt is unavailable/)).toHaveCount(0);
     const canvas = page.locator(".citation-pdf-page canvas");
     await expect(canvas).toBeVisible();
     await expect(canvas).toHaveAttribute("aria-busy", "false");

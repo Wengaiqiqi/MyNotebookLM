@@ -88,8 +88,8 @@ describe("estimateTokens", () => {
 });
 
 describe("CHUNKING_VERSION", () => {
-  it("records the blocks-480-80-v3 contract", () => {
-    expect(CHUNKING_VERSION).toBe("blocks-480-80-v3");
+  it("records the blocks-480-80-v5 contract", () => {
+    expect(CHUNKING_VERSION).toBe("blocks-480-80-v5");
   });
 });
 
@@ -113,13 +113,13 @@ describe("chunkBlocks locator range merging", () => {
     expect(chunks[0]?.locator).toEqual({ kind: "row", sheet: "Sheet1", startRow: 1, endRow: 5 });
   });
 
-  it("keeps the first locator when block kinds differ", () => {
+  it("uses the body locator when a heading is only chunk context", () => {
     const blocks: DocumentBlock[] = [
       { kind: "heading", text: "Title", locator: { kind: "heading", depth: 1, headingPath: "Title" } },
       { kind: "paragraph", text: "body text here", locator: { kind: "paragraph", paragraph: 1 } }
     ];
     const chunks = chunkBlocks(blocks);
-    expect(chunks[0]?.locator).toEqual({ kind: "heading", depth: 1, headingPath: "Title" });
+    expect(chunks[0]?.locator).toEqual({ kind: "paragraph", paragraph: 1, endParagraph: 1 });
   });
 });
 
@@ -132,8 +132,8 @@ describe("chunkBlocks heading context", () => {
     ];
     const chunks = chunkBlocks(blocks);
     expect(chunks.length).toBeGreaterThanOrEqual(2);
-    expect(chunks[0]?.text).toBe("Chapter 1");
-    expect(chunks[1]?.text.startsWith("Chapter 1\n\n")).toBe(true);
+    expect(chunks.every((chunk) => chunk.text.startsWith("Chapter 1\n\n"))).toBe(true);
+    expect(chunks.some((chunk) => chunk.text === "Chapter 1")).toBe(false);
   });
 });
 

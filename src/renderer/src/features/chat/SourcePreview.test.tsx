@@ -90,4 +90,10 @@ describe("SourcePreview", () => {
     expect(image.closest("td")?.textContent).toContain("说明");
     expect(image.getAttribute("src")).toBe("blob:docx-image");
   });
+
+  it("renders Markdown source excerpts without relevance highlighting", () => {
+    render(<SourcePreview kind="markdown" data={null} sheet={null} locator={{ kind: "paragraph", paragraph: 1 }} text={"General introduction.\n\nStart services with Docker Compose."} />);
+    expect(screen.getByText("Start services with Docker Compose.").tagName).toBe("P");
+    expect(document.querySelector("mark")).toBeNull();
+  });
 });

@@ -173,6 +173,18 @@ function columnName(column: number): string {
 function TextPreview({ text }: { text: string | null }) {
   const { t } = useTranslation();
   return text
-    ? <div className="citation-source-text">{text.split(/\r?\n\s*\r?\n+/).map((paragraph, index) => <p key={index}>{paragraph}</p>)}</div>
+    ? <div className="citation-source-text">{paragraphs(text).map((paragraph, index) => <p key={index}>{paragraph.text}</p>)}</div>
     : <p className="citation-source-empty">{t("chat.ui.sourceExcerptUnavailable")}</p>;
+}
+
+function paragraphs(text: string): Array<{ text: string; start: number }> {
+  const result: Array<{ text: string; start: number }> = [];
+  const separator = /\r?\n[ \t]*\r?\n(?:[ \t]*\r?\n)*/g;
+  let start = 0;
+  for (const match of text.matchAll(separator)) {
+    result.push({ text: text.slice(start, match.index), start });
+    start = match.index + match[0].length;
+  }
+  result.push({ text: text.slice(start), start });
+  return result.filter((paragraph) => paragraph.text.length > 0);
 }

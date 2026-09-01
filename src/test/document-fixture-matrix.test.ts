@@ -51,10 +51,10 @@ describe("document fixture matrix (all 8 source kinds)", () => {
     });
     expect(blocks[2]).toMatchObject({
       kind: "paragraph",
-      text: "根标题 > 子标题\n正文。",
+      text: "正文。",
       locator: { kind: "paragraph", paragraph: 1 }
     });
-    void expectChunkLocatorKinds(blocks, ["heading", "paragraph", "offset"]);
+    void expectChunkLocatorKinds(blocks, ["paragraph", "offset"]);
   });
 
   it("pdf: page locators survive chunking", async () => {

@@ -13,6 +13,25 @@ describe("RetrievalService", () => {
     expect(lance.vectorSearch).toHaveBeenCalledWith(expect.anything(), [1, 0], 160, { projectId: "p1" });
   });
 
+  it("returns the complete structural parent when one question spans several chunks", async () => {
+    const row = (ordinal: number, heading = "第 2 题（28 分）") => ({ chunk_id: `c${ordinal}`, content_hash: `h${ordinal}`, ordinal, source_id: "s1", revision_id: "r1", text: `${heading}\n\npart ${ordinal}`, locator_json: `{"kind":"page","page":${ordinal}}` });
+    const db = { prepare: vi.fn((sql: string) => {
+      if (sql.includes("project_embedding_spaces")) return { get: () => ({ space_id: "sp1", dimension: 2 }) };
+      if (sql.includes("sc.id = ?")) return { get: () => row(7) };
+      return { all: () => [row(4), row(5), row(6), row(7), row(8, "第 3 题（12 分）")] };
+    }) } as any;
+    const lance = {
+      vectorSearch: vi.fn(async () => [{ chunkId: "c7", contentHash: "h7", ordinal: 7 }]),
+      textSearch: vi.fn(async () => [{ chunkId: "c7", contentHash: "h7", ordinal: 7 }])
+    };
+    const service = new RetrievalService({ db, lance: lance as any, provider: { embedBatch: vi.fn(async () => [[1, 0]]) } as any });
+
+    await expect(service.search({ projectId: "p1", query: "第二题", limit: 8 })).resolves.toMatchObject({
+      ok: true,
+      value: [{ chunkId: "c4" }, { chunkId: "c5" }, { chunkId: "c6" }, { chunkId: "c7" }]
+    });
+  });
+
   it("returns typed repair action when active index is unavailable", async () => {
     const service = new RetrievalService({ db: {} as any, lance: {} as any, provider: {} as any, resolveSpace: async () => null });
     await expect(service.search("p1", "x")).rejects.toMatchObject({ code: "INDEX_UNAVAILABLE", repair: true });

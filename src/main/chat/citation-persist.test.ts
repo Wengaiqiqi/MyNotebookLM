@@ -37,4 +37,11 @@ describe("persistParsedCitations", () => {
     const stored = persistParsedCitations(database.connection, { projectId: "p1", messageId: "m1", parsed, retrievals: { S1: { ...retrievals.S1!, text: longText } } });
     expect(stored[0]?.quote).toHaveLength(240);
   });
+
+  it("stores the source sentence most relevant to the cited answer claim", () => {
+    const text = "General introduction. Start services with Docker Compose. Data remains local.";
+    const parsed = finalizeCitations("Start services with Docker Compose [S1].", { S1: { ...retrievals.S1!, text } });
+    const stored = persistParsedCitations(database.connection, { projectId: "p1", messageId: "m1", parsed, retrievals: { S1: { ...retrievals.S1!, text } } });
+    expect(stored[0]?.quote).toBe("Start services with Docker Compose.");
+  });
 });

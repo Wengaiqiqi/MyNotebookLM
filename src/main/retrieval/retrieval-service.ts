@@ -29,9 +29,45 @@ export class RetrievalService {
       if (!vector) throw new Error("embedding unavailable");
       const [ann, bm25] = await Promise.all([this.store.vectorSearch(spec, vector, candidateLimit, filter), textPromise]);
       const fused = reciprocalRankFusion([ann as Row[], bm25 as Row[]], candidateLimit);
-      const value = fused.flatMap(row => { const r = this.db.prepare("SELECT sc.id chunk_id, sc.text, sc.locator_json, sr.id revision_id, s.id source_id FROM source_chunks sc JOIN source_revisions sr ON sr.id = sc.revision_id JOIN sources s ON s.id = sr.source_id WHERE sc.id = ? AND s.project_id = ? AND s.status = 'active' AND s.current_revision_id = sr.id AND sr.state = 'ready'").get(row.chunkId, input.projectId) as any; return r ? [{ ...row, chunkId: r.chunk_id, sourceId: r.source_id, revisionId: r.revision_id, text: r.text, locatorJson: r.locator_json, locator: JSON.parse(r.locator_json) }] : []; });
-      return { ok: true, value: diversifyHits(value, input.limit, 4) };
+      const value = fused.flatMap(row => { const r = this.db.prepare("SELECT sc.id chunk_id, sc.ordinal, sc.text, sc.locator_json, sc.content_hash, sr.id revision_id, s.id source_id FROM source_chunks sc JOIN source_revisions sr ON sr.id = sc.revision_id JOIN sources s ON s.id = sr.source_id WHERE sc.id = ? AND s.project_id = ? AND s.status = 'active' AND s.current_revision_id = sr.id AND sr.state = 'ready'").get(row.chunkId, input.projectId) as any; return r ? [{ ...row, chunkId: r.chunk_id, contentHash: r.content_hash, ordinal: r.ordinal, sourceId: r.source_id, revisionId: r.revision_id, text: r.text, locatorJson: r.locator_json, locator: JSON.parse(r.locator_json) }] : []; });
+      return { ok: true, value: this.withStructuralContext(diversifyHits(value, input.limit, 4), input.projectId, input.limit) };
     } catch { return this.failure("INDEX_UNAVAILABLE", true); }
   }
+  private withStructuralContext(hits: Row[], projectId: string, limit: number): Row[] {
+    const statement = this.db.prepare("SELECT sc.id chunk_id, sc.ordinal, sc.text, sc.locator_json, sc.content_hash, sr.id revision_id, s.id source_id FROM source_chunks sc JOIN source_revisions sr ON sr.id = sc.revision_id JOIN sources s ON s.id = sr.source_id WHERE sr.id = ? AND s.project_id = ? AND s.status = 'active' AND s.current_revision_id = sr.id AND sr.state = 'ready' ORDER BY sc.ordinal") as any;
+    if (typeof statement.all !== "function") return hits;
+    const out: Row[] = [];
+    const seen = new Set<string>();
+    const revisions = new Map<string, any[]>();
+    const add = (row: Row): void => { if (!seen.has(row.chunkId) && out.length < limit) { seen.add(row.chunkId); out.push(row); } };
+    const authoritative = (hit: Row, row: any): Row => ({ ...hit, chunkId: row.chunk_id, contentHash: row.content_hash, ordinal: row.ordinal, sourceId: row.source_id, revisionId: row.revision_id, text: row.text, locatorJson: row.locator_json, locator: JSON.parse(row.locator_json) });
+    for (const hit of hits) {
+      const ordinal = hit.ordinal;
+      if (typeof ordinal !== "number") { add(hit); continue; }
+      let rows = revisions.get(hit.revisionId);
+      if (!rows) { rows = statement.all(hit.revisionId, projectId) as any[]; revisions.set(hit.revisionId, rows); }
+      const parent = structuralPrefix(hit.text);
+      const siblings = parent ? rows.filter((row) => structuralPrefix(row.text) === parent) : [];
+      if (siblings.length > 1) {
+        const hitIndex = siblings.findIndex((row) => row.chunk_id === hit.chunkId);
+        const start = siblings.length <= limit ? 0 : Math.max(0, Math.min(hitIndex - Math.floor(limit / 2), siblings.length - limit));
+        for (const row of siblings.slice(start, start + limit)) add(authoritative(hit, row));
+        continue;
+      }
+      add(hit);
+      for (const neighbor of [ordinal + 1, Math.max(0, ordinal - 1)]) {
+        const row = rows.find((candidate) => candidate.ordinal === neighbor);
+        if (row) add(authoritative(hit, row));
+      }
+    }
+    return out;
+  }
   private failure(code: AppErrorDto["code"], recoverable: boolean): Result<Row[]> { return { ok: false, error: { code, messageKey: code === "INDEX_UNAVAILABLE" ? "errors.indexUnavailable" : "errors.notFound", recoverable } }; }
+}
+
+function structuralPrefix(text: string): string | undefined {
+  const separator = /\r?\n[ \t]*\r?\n/.exec(text);
+  if (!separator?.index) return undefined;
+  const prefix = text.slice(0, separator.index).trim();
+  return prefix.length <= 240 ? prefix : undefined;
 }

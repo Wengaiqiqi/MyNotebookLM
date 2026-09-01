@@ -1,6 +1,7 @@
 import Database from "better-sqlite3";
 import type { CitationDto } from "../../shared/chat";
 import type { ParsedCitations, RetrievedCitation } from "./citation-parser";
+import { citationClaim, relevantSourceExcerpt } from "./citation-relevance";
 import { ConversationRepository } from "./conversation-repository";
 
 const QUOTE_LIMIT = 240;
@@ -31,7 +32,7 @@ export function persistParsedCitations(
       sourceDisplayName: match.sourceDisplayName,
       sourceKind: match.sourceKind,
       locator: match.locator,
-      ...(match.text ? { quote: match.text.slice(0, QUOTE_LIMIT) } : {}),
+      ...(match.text ? { quote: relevantSourceExcerpt(match.text, citationClaim(input.parsed.content, c.start), QUOTE_LIMIT) } : {}),
       createdAt,
       start: c.start,
     });

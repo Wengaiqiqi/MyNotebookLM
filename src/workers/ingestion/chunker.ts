@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import type { SourceLocator } from "../../shared/sources";
 import type { DocumentBlock, PreparedChunk } from "./types";
 
-export const CHUNKING_VERSION = "blocks-480-80-v3";
+export const CHUNKING_VERSION = "blocks-480-80-v5";
 
 export const DEFAULT_TARGET_TOKENS = 480;
 export const DEFAULT_OVERLAP_TOKENS = 80;
@@ -245,7 +245,13 @@ export function chunkBlocks(
     }
     if (fragment.isHeading) {
       flush();
-      activeHeading = estimateTokens(fragment.block.text) <= targetTokens ? fragment.block : undefined;
+      if (estimateTokens(fragment.block.text) <= targetTokens) {
+        activeHeading = fragment.block.locator.kind === "heading"
+          ? { ...fragment.block, text: fragment.block.locator.headingPath }
+          : fragment.block;
+        continue;
+      }
+      activeHeading = undefined;
       state.fragments.push(fragment);
       state.tokens += fragment.tokens;
       state.firstLocator = fragment.block.locator;

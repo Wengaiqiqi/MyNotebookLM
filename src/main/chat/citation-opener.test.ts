@@ -76,7 +76,9 @@ describe("CitationOpener", () => {
   });
 
   it("returns the complete authoritative chunk only to its owning project", async () => {
-    addCitation({ id: "c-detail", sourceId: PDF_SOURCE_ID, sourceChunkId: PDF_CHUNK_ID, locator: { kind: "page", page: 2 } });
+    const answer = "完整信息来自权威原文 [S1]";
+    world.connection.prepare("UPDATE messages SET content = ? WHERE id = ?").run(answer, MESSAGE_ID);
+    addCitation({ id: "c-detail", sourceId: PDF_SOURCE_ID, sourceChunkId: PDF_CHUNK_ID, locator: { kind: "page", page: 2 }, start: answer.indexOf("[S1]") });
 
     await expect(makeOpener().getCitationDetail({ projectId: PROJECT_ID, citationId: "c-detail" })).resolves.toEqual({
       ok: true,
