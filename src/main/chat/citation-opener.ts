@@ -6,7 +6,7 @@ import { parseSafeUrl } from "../sources/url-policy";
 import type { Result } from "../../shared/app-errors";
 import type { CitationDetailResultValue, CitationSheetPreview } from "../../shared/ipc";
 import { sourceLocatorSchema, type SourceKind, type SourceLocator } from "../../shared/sources";
-import { previewDocxTable } from "../../workers/ingestion/parsers/docx-parser";
+import { previewDocxSource } from "../../workers/ingestion/parsers/docx-parser";
 
 type ShellLike = {
   openPath(path: string): Promise<string>;
@@ -55,6 +55,7 @@ export class CitationOpener {
       if (!row) return this.failure("NOT_FOUND", "errors.notFound");
       let data: CitationDetailResultValue["data"] = null;
       let sheet: CitationSheetPreview | null = null;
+      let images: CitationDetailResultValue["images"] = [];
       if (row.stored_path && row.kind === "pdf") {
         const bytes = await this.readManagedFile(row.stored_path).catch(() => null);
         if (bytes) {
@@ -72,9 +73,13 @@ export class CitationOpener {
         const locator = sourceLocatorSchema.safeParse(JSON.parse(row.locator_json));
         const tableName = locator.success && locator.data.kind === "cell" && /^Table \d+$/.test(locator.data.sheet) ? locator.data.sheet : undefined;
         const claim = citationClaim(row.message_content, row.start);
-        if (bytes && locator.success) sheet = await previewDocxTable(bytes, claim || row.text || "", tableName).catch(() => null);
+        if (bytes && locator.success) {
+          const preview = await previewDocxSource(bytes, claim || row.text || "", locator.data, tableName).catch(() => null);
+          sheet = preview?.sheet ?? null;
+          images = preview?.images ?? [];
+        }
       }
-      return { ok: true, value: { text: row.text, kind: row.kind, data, sheet } };
+      return { ok: true, value: { text: row.text, kind: row.kind, data, sheet, images } };
     } catch {
       return this.failure("INTERNAL", "errors.citationDetailFailed");
     }

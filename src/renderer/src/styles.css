@@ -632,9 +632,10 @@ button:disabled { cursor: not-allowed; opacity: .5; }
   background: var(--accent); color: var(--accent-ink);
   white-space: pre-wrap; overflow-wrap: anywhere;
 }
-.msg.user .bubble.editing { padding: 8px 10px; }
+.msg.user.editing { width: min(520px, 92%); }
+.msg.user .bubble.editing { width: 100%; padding: 8px 10px; box-sizing: border-box; }
 .msg.user .bubble textarea {
-  display: block; width: min(520px, 58vw); min-height: 72px; max-height: 180px;
+  display: block; width: 100%; min-height: 72px; max-height: 180px; box-sizing: border-box;
   border: 0; outline: 0; resize: vertical; background: transparent; color: inherit;
   font: inherit; line-height: 1.5; caret-color: currentColor;
 }
@@ -835,7 +836,7 @@ button:disabled { cursor: not-allowed; opacity: .5; }
 .citation-source-empty { padding: 28px 12px; color: var(--ink-3); text-align: center; font-size: 13px; }
 .citation-pdf { display: flex; width: 100%; height: min(74vh, 760px); background: #525659; }
 .citation-pdf-page { flex: 1; overflow: auto; padding: 18px; text-align: center; }
-.citation-pdf-page canvas { display: inline-block; max-width: none; background: #fff; box-shadow: 0 8px 28px #0006; }
+.citation-pdf-page canvas { display: inline-block; max-width: 100%; height: auto; background: #fff; box-shadow: 0 8px 28px #0006; }
 .citation-workbook { min-width: 0; background: var(--surface); }
 .citation-sheet-scroll { max-height: min(68vh, 700px); overflow: auto; background: #fff; }
 .citation-sheet { border-collapse: separate; border-spacing: 0; table-layout: fixed; color: #171717; background: #fff; font: 12px/1.35 "Segoe UI", sans-serif; }
@@ -847,6 +848,10 @@ button:disabled { cursor: not-allowed; opacity: .5; }
 .citation-document { max-height: min(68vh, 700px); overflow: auto; padding: 24px; background: #fff; }
 .citation-document-table { width: max-content; min-width: min(100%, 680px); max-width: 100%; margin: 0 auto; border-collapse: collapse; table-layout: fixed; color: #111; background: #fff; font: 14px/1.55 "Microsoft YaHei", "Segoe UI", sans-serif; }
 .citation-document-table td { min-width: 56px; padding: 7px 10px; border: 1px solid #303030; overflow-wrap: anywhere; white-space: pre-wrap; }
+.citation-document-images { display: grid; gap: 16px; justify-items: center; }
+.citation-document-table + .citation-document-images { margin-top: 18px; }
+.citation-source-text + .citation-document-images { margin-top: 18px; }
+.citation-document-image { display: block; max-width: 100%; max-height: min(60vh, 720px); margin: 8px auto 0; object-fit: contain; }
 
 /* ------------------------------------------------------------
    Notes

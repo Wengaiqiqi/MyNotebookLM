@@ -168,6 +168,34 @@ describe("SafeMarkdown sanitization", () => {
     expect(container.querySelector(".citation-chip")).toBeNull();
     expect(container.textContent).toContain("[S2]");
   });
+
+  it("shows one canonical citation target for fragments from the same DOCX table", async () => {
+    const table = (label: string, sheet: string, quote: string): CitationDto => citationSchema.parse({
+      ...baseCitation,
+      id: `citation-${label}`,
+      label,
+      sourceDisplayName: "Rules.docx",
+      sourceKind: "docx",
+      sourceChunkId: `chunk-${label}`,
+      locator: { kind: "cell", sheet, cellRef: "A1:D6" },
+      quote
+    });
+    const opened: string[] = [];
+    const citations = [
+      table("S1", "Table 1", "短注释"),
+      table("S4", "Table 2", "另一条短注释"),
+      table("S5", "Table 1", "表1的完整内容，应作为代表摘录"),
+      table("S6", "Table 2", "表2的完整内容，应作为代表摘录")
+    ];
+    const container = await render(
+      <SafeMarkdown text="表1 [S5] 补充 [S1]；表2 [S6] 补充 [S4]" citations={citations} onCitationOpen={(citation) => opened.push(citation.id)} />
+    );
+    const buttons = [...container.querySelectorAll<HTMLButtonElement>("button.citation-chip")];
+    expect(buttons.map((button) => button.textContent)).toEqual(["[S1]", "[S1]", "[S4]", "[S4]"]);
+    buttons[0]!.click();
+    buttons[1]!.click();
+    expect(opened).toEqual(["citation-S5", "citation-S5"]);
+  });
 });
 
 describe("AssistantMessageView", () => {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseDocx, previewDocxTable } from "./docx-parser";
+import { parseDocx, previewDocxSource, previewDocxTable } from "./docx-parser";
 import { readFileSync } from "node:fs";
 import JSZip from "jszip";
 
@@ -29,6 +29,23 @@ describe("parseDocx", () => {
     expect(preview?.columns).toHaveLength(2);
     expect(preview?.rows[0]?.cells.map((cell) => cell.text)).toEqual(["等级", "分数"]);
     expect(preview?.rows[1]?.cells[0]).toMatchObject({ text: "合并说明", colSpan: 2 });
+  });
+
+  it("returns embedded images from the cited paragraph or table cell", async () => {
+    const zip = new JSZip();
+    zip.file("word/document.xml", `<w:document xmlns:w="w" xmlns:r="r" xmlns:a="a" xmlns:wp="wp"><w:body><w:p><w:r><w:t>图1 架构图</w:t><w:drawing><wp:docPr descr="架构图"/><a:blip r:embed="rId1"/></w:drawing></w:r></w:p><w:tbl><w:tr><w:tc><w:p><w:r><w:t>单元格图片</w:t><w:drawing><a:blip r:embed="rId2"/></w:drawing></w:r></w:p></w:tc></w:tr></w:tbl></w:body></w:document>`);
+    zip.file("word/_rels/document.xml.rels", `<Relationships><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="media/image1.png"/><Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="media/image2.jpeg"/></Relationships>`);
+    zip.file("word/media/image1.png", new Uint8Array([1, 2, 3]));
+    zip.file("word/media/image2.jpeg", new Uint8Array([4, 5, 6]));
+    const data = await zip.generateAsync({ type: "uint8array" });
+
+    await expect(previewDocxSource(data, "图1 架构图", { kind: "paragraph", paragraph: 1 })).resolves.toMatchObject({
+      images: [{ data: new Uint8Array([1, 2, 3]), mimeType: "image/png", altText: "架构图" }]
+    });
+    await expect(previewDocxSource(data, "单元格图片", { kind: "cell", sheet: "Table 1", cellRef: "A1" }, "Table 1")).resolves.toMatchObject({
+      sheet: { name: "Table 1" },
+      images: [{ data: new Uint8Array([4, 5, 6]), mimeType: "image/jpeg", cellRef: "A1" }]
+    });
   });
 
   it("indexes adjacent DOCX tables as distinct captioned chunks with stable locators", async () => {

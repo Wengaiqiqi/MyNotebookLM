@@ -4,7 +4,7 @@ import type { CitationDto, ConversationDto, MessageDto } from "../../../../share
 import type { CitationDetailResultValue } from "../../../../shared/ipc";
 import type { ModelProfileDto } from "../../../../shared/models";
 import type { SourceDto } from "../../../../shared/sources";
-import SafeMarkdown from "../../chat/SafeMarkdown";
+import SafeMarkdown, { canonicalizeCitationTargets } from "../../chat/SafeMarkdown";
 import { useChatStream } from "../../chat/useChatStream";
 import SourcePreview from "./SourcePreview";
 import Icon from "../../ui/Icon";
@@ -310,7 +310,7 @@ export default function ChatPane({ projectId, generationProfileId, sources, onOp
           const editing = editingMessageId === message.id;
           return message.role === "user"
             ? (
-              <article className="msg user" key={message.id}>
+              <article className={`msg user${editing ? " editing" : ""}`} key={message.id}>
                 <div className={`bubble${editing ? " editing" : ""}`}>
                   {editing
                     ? <textarea autoFocus aria-label={t("chat.ui.editAndResend")} value={editDraft} onChange={(event) => setEditDraft(event.target.value)} />
@@ -530,14 +530,7 @@ export function CitationsPanel({ projectId, citations, active, onSelect }: {
     value: CitationDetailResultValue | null | undefined;
   } | null>(null);
   const cardRefs = useRef(new Map<string, HTMLElement>());
-  const unique = useMemo(() => {
-    const seen = new Set<string>();
-    return citations.filter((citation) => {
-      if (seen.has(citation.label)) return false;
-      seen.add(citation.label);
-      return true;
-    });
-  }, [citations]);
+  const unique = useMemo(() => canonicalizeCitationTargets(citations).unique, [citations]);
 
   async function showDetail(citation: CitationDto): Promise<void> {
     setDetail({ citation, value: undefined });
@@ -635,7 +628,7 @@ export function CitationsPanel({ projectId, citations, active, onSelect }: {
             {detail.value === undefined
               ? <p className="citation-source-empty">{t("common.loading")}</p>
               : detail.value
-                ? <SourcePreview kind={detail.value.kind} data={detail.value.data} text={detail.value.text} sheet={detail.value.sheet} locator={detail.citation.locator} />
+                ? <SourcePreview kind={detail.value.kind} data={detail.value.data} text={detail.value.text} sheet={detail.value.sheet} images={detail.value.images} locator={detail.citation.locator} />
                 : <p className="citation-source-empty">{t("chat.ui.sourceExcerptUnavailable")}</p>}
           </div>
         </>

@@ -1,19 +1,20 @@
 import React, { useEffect, useRef, useState } from "react";
 import type { PDFDocumentProxy, RenderTask } from "pdfjs-dist/legacy/build/pdf.mjs";
 import { useTranslation } from "react-i18next";
-import type { CitationSheetPreview } from "../../../../shared/ipc";
+import type { CitationImagePreview, CitationSheetPreview } from "../../../../shared/ipc";
 import type { SourceKind, SourceLocator } from "../../../../shared/sources";
 
-export default function SourcePreview({ kind, data, text, locator, sheet }: {
+export default function SourcePreview({ kind, data, text, locator, sheet, images = [] }: {
   kind: SourceKind;
   data: Uint8Array | null;
   text: string | null;
   locator: SourceLocator;
   sheet: CitationSheetPreview | null;
+  images?: CitationImagePreview[];
 }) {
   if (kind === "pdf" && data) return <PdfPreview data={data} page={locator.kind === "page" ? locator.page : 1} />;
   if (kind === "xlsx" && sheet) return <WorkbookPreview sheet={sheet} locator={locator} />;
-  if (kind === "docx" && sheet) return <DocumentTablePreview table={sheet} />;
+  if (kind === "docx" && (sheet || images.length)) return <DocumentPreview table={sheet} images={images} text={text} />;
   return <TextPreview text={text} />;
 }
 
@@ -62,7 +63,6 @@ function PdfPreview({ data, page }: { data: Uint8Array; page: number }) {
       canvas.width = Math.floor(viewport.width * pixelRatio);
       canvas.height = Math.floor(viewport.height * pixelRatio);
       canvas.style.width = `${Math.floor(viewport.width)}px`;
-      canvas.style.height = `${Math.floor(viewport.height)}px`;
       renderTask = pdfPage.render({
         canvas,
         viewport,
@@ -88,19 +88,37 @@ function WorkbookPreview({ sheet, locator }: { sheet: CitationSheetPreview; loca
   return <div className="citation-workbook"><SheetTable sheet={sheet} locator={locator} /></div>;
 }
 
-function DocumentTablePreview({ table }: { table: CitationSheetPreview }) {
+function DocumentPreview({ table, images, text }: { table: CitationSheetPreview | null; images: CitationImagePreview[]; text: string | null }) {
+  const looseImages = images.filter((image) => !image.cellRef);
   return (
     <div className="citation-document">
-      <table className="citation-document-table">
-        <colgroup>{table.columns.map((column) => <col key={column.number} style={{ width: column.width }} />)}</colgroup>
-        <tbody>{table.rows.map((row) => (
-          <tr key={row.number}>{row.cells.map((cell) => (
-            <td key={cell.column} colSpan={cell.colSpan} rowSpan={cell.rowSpan} style={cell.style}>{cell.text}</td>
-          ))}</tr>
-        ))}</tbody>
-      </table>
+      {table ? (
+        <table className="citation-document-table">
+          <colgroup>{table.columns.map((column) => <col key={column.number} style={{ width: column.width }} />)}</colgroup>
+          <tbody>{table.rows.map((row) => (
+            <tr key={row.number}>{row.cells.map((cell) => {
+              const cellImages = images.filter((image) => image.cellRef === `${columnName(cell.column)}${row.number}`);
+              return <td key={cell.column} colSpan={cell.colSpan} rowSpan={cell.rowSpan} style={cell.style}>
+                {cell.text}{cellImages.map((image, index) => <DocumentImage key={index} image={image} />)}
+              </td>;
+            })}</tr>
+          ))}</tbody>
+        </table>
+      ) : <TextPreview text={text} />}
+      {looseImages.length > 0 && <div className="citation-document-images">{looseImages.map((image, index) => <DocumentImage key={index} image={image} />)}</div>}
     </div>
   );
+}
+
+function DocumentImage({ image }: { image: CitationImagePreview }) {
+  const { t } = useTranslation();
+  const [url, setUrl] = useState("");
+  useEffect(() => {
+    const next = URL.createObjectURL(new Blob([image.data.slice()], { type: image.mimeType }));
+    setUrl(next);
+    return () => URL.revokeObjectURL(next);
+  }, [image]);
+  return url ? <img className="citation-document-image" src={url} alt={image.altText || t("chat.ui.sourceExcerptTitle")} /> : null;
 }
 
 function SheetTable({ sheet, locator }: { sheet: CitationSheetPreview; locator: SourceLocator }) {

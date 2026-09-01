@@ -1,6 +1,7 @@
 import JSZip from "jszip";
 import { XMLParser } from "fast-xml-parser";
-import type { CitationSheetPreview } from "../../../shared/ipc";
+import type { CitationImagePreview, CitationSheetPreview } from "../../../shared/ipc";
+import type { SourceLocator } from "../../../shared/sources";
 import type { DocumentBlock } from "../types";
 
 const textOf = (node: any): string => (Array.isArray(node) ? node : [node]).filter(Boolean).map((n) => {
@@ -19,10 +20,17 @@ const prop = (cell: any, key: string): any => direct(direct(cell, "w:tcPr")[0], 
 const value = (cell: any, key: string): string | undefined => { if (!cell || typeof cell !== "object") return undefined; if (cell[key] !== undefined) return cell[":@"]?.["@_w:val"]; for (const child of Object.values(cell)) { const found = value(child, key); if (found !== undefined) return found; } return undefined; };
 
 async function documentRoot(data: Uint8Array): Promise<any> {
+  return (await docxArchive(data)).root;
+}
+
+async function docxArchive(data: Uint8Array): Promise<{ zip: JSZip; root: any }> {
   const zip = await JSZip.loadAsync(data);
   const entry = zip.file("word/document.xml");
   if (!entry) throw new Error("DOCX document.xml is missing");
-  return new XMLParser({ ignoreAttributes: false, attributeNamePrefix: "@_", removeNSPrefix: false, preserveOrder: true }).parse(await entry.async("string"));
+  return {
+    zip,
+    root: new XMLParser({ ignoreAttributes: false, attributeNamePrefix: "@_", removeNSPrefix: false, preserveOrder: true }).parse(await entry.async("string"))
+  };
 }
 
 export async function parseDocx(data: Uint8Array): Promise<DocumentBlock[]> {
@@ -54,10 +62,10 @@ export async function parseDocx(data: Uint8Array): Promise<DocumentBlock[]> {
   return blocks;
 }
 
-export async function previewDocxTable(data: Uint8Array, citedText: string, tableName?: string): Promise<CitationSheetPreview | null> {
-  const root = await documentRoot(data);
+export async function previewDocxSource(data: Uint8Array, citedText: string, locator?: SourceLocator, tableName?: string): Promise<{ sheet: CitationSheetPreview | null; images: CitationImagePreview[] }> {
+  const { zip, root } = await docxArchive(data);
   const body = descendants(root, "w:body");
-  const tables: Array<{ table: CitationSheetPreview; caption: string }> = [];
+  const tables: Array<{ table: CitationSheetPreview; caption: string; node: any }> = [];
   let caption = "";
   for (const wrapper of Array.isArray(body) ? body : [body]) {
     if (wrapper?.["w:p"]) {
@@ -67,17 +75,116 @@ export async function previewDocxTable(data: Uint8Array, citedText: string, tabl
     }
     if (!wrapper?.["w:tbl"]) continue;
     const table = tablePreview(wrapper["w:tbl"], tables.length + 1);
-    if (table) tables.push({ table, caption });
+    if (table) tables.push({ table, caption, node: wrapper["w:tbl"] });
   }
-  if (tables.length === 0) return null;
   const exact = tableName ? tables.find((candidate) => candidate.table.name === tableName) : undefined;
-  if (exact) return exact.table;
   const needle = matchText(citedText);
   const ranked = tables.map((candidate) => ({
     ...candidate,
     score: tableScore(candidate.table, needle) + captionScore(candidate.caption, needle)
   })).sort((a, b) => b.score - a.score);
-  return ranked[0]!.score > 0 ? ranked[0]!.table : null;
+  const selected = exact ?? (ranked[0] && ranked[0].score > 0 ? ranked[0] : undefined);
+  const relationships = await imageRelationships(zip);
+  const paragraphPlacements = locator?.kind === "paragraph" ? paragraphImagePlacements(body, locator, citedText) : [];
+  const placements = paragraphPlacements.length
+    ? paragraphPlacements
+    : selected ? tableImagePlacements(selected.node) : paragraphImagePlacements(body, locator, citedText);
+  const images: CitationImagePreview[] = [];
+  for (const placement of placements.slice(0, 12)) {
+    const relation = relationships.get(placement.id);
+    if (!relation) continue;
+    const entry = zip.file(relation.path);
+    if (!entry) continue;
+    const bytes = await entry.async("uint8array");
+    if (bytes.byteLength > 10 * 1024 * 1024) continue;
+    const imageData = new Uint8Array(bytes.byteLength);
+    imageData.set(bytes);
+    images.push({
+      data: imageData,
+      mimeType: relation.mimeType,
+      ...(placement.altText ? { altText: placement.altText } : {}),
+      ...(placement.cellRef ? { cellRef: placement.cellRef } : {})
+    });
+  }
+  return { sheet: selected?.table ?? null, images };
+}
+
+export async function previewDocxTable(data: Uint8Array, citedText: string, tableName?: string): Promise<CitationSheetPreview | null> {
+  return (await previewDocxSource(data, citedText, undefined, tableName)).sheet;
+}
+
+type ImagePlacement = { id: string; altText?: string; cellRef?: string };
+
+async function imageRelationships(zip: JSZip): Promise<Map<string, { path: string; mimeType: CitationImagePreview["mimeType"] }>> {
+  const entry = zip.file("word/_rels/document.xml.rels");
+  if (!entry) return new Map();
+  const parsed = new XMLParser({ ignoreAttributes: false, attributeNamePrefix: "@_" }).parse(await entry.async("string"));
+  const result = new Map<string, { path: string; mimeType: CitationImagePreview["mimeType"] }>();
+  for (const relation of asArray(parsed?.Relationships?.Relationship)) {
+    const id = relation?.["@_Id"];
+    const target = relation?.["@_Target"];
+    if (typeof id !== "string" || typeof target !== "string" || !String(relation?.["@_Type"] ?? "").endsWith("/image")) continue;
+    const path = target.startsWith("/") ? target.slice(1) : `word/${target.replace(/^\.\//, "")}`;
+    const mimeType = imageMimeType(path);
+    if (!/^word\/media\/[^/]+$/i.test(path) || !mimeType) continue;
+    result.set(id, { path, mimeType });
+  }
+  return result;
+}
+
+function imageMimeType(path: string): CitationImagePreview["mimeType"] | null {
+  const extension = path.split(".").pop()?.toLowerCase();
+  if (extension === "png") return "image/png";
+  if (extension === "jpg" || extension === "jpeg") return "image/jpeg";
+  if (extension === "gif") return "image/gif";
+  if (extension === "webp") return "image/webp";
+  if (extension === "bmp") return "image/bmp";
+  return null;
+}
+
+function tableImagePlacements(node: any): ImagePlacement[] {
+  const result: ImagePlacement[] = [];
+  const rows = directElements(directElements(node, "w:tbl")[0]?.["w:tbl"] ?? node, "w:tr");
+  rows.forEach((row, rowIndex) => {
+    let column = 1;
+    for (const rawCell of directElements(row["w:tr"], "w:tc")) {
+      const cell = rawCell["w:tc"];
+      const span = Number(directElements(directElements(cell, "w:tcPr")[0]?.["w:tcPr"], "w:gridSpan")[0]?.[":@"]?.["@_w:val"]) || 1;
+      result.push(...imagePlacements(cell).map((image) => ({ ...image, cellRef: `${columnName(column)}${rowIndex + 1}` })));
+      column += span;
+    }
+  });
+  return result;
+}
+
+function paragraphImagePlacements(body: any, locator: SourceLocator | undefined, citedText: string): ImagePlacement[] {
+  const result: ImagePlacement[] = [];
+  let paragraph = 0;
+  const start = locator?.kind === "paragraph" ? locator.paragraph : undefined;
+  const end = locator?.kind === "paragraph" ? locator.endParagraph ?? locator.paragraph : undefined;
+  const needle = matchText(citedText);
+  for (const wrapper of Array.isArray(body) ? body : [body]) {
+    if (!wrapper?.["w:p"]) continue;
+    const text = normalize(textOf(wrapper["w:p"]));
+    if (text) paragraph += 1;
+    const inRange = start !== undefined && end !== undefined && paragraph >= start && paragraph <= end;
+    const matchesText = !start && needle && overlapScore(matchText(text), needle) > 0;
+    if (inRange || matchesText) result.push(...imagePlacements(wrapper["w:p"]));
+  }
+  return result;
+}
+
+function imagePlacements(node: any): ImagePlacement[] {
+  const blips = elementWrappers(node, "a:blip").map((item) => item[":@"]?.["@_r:embed"]);
+  const legacy = elementWrappers(node, "v:imagedata").map((item) => item[":@"]?.["@_r:id"]);
+  const descriptions = elementWrappers(node, "wp:docPr").map((item) => item[":@"]?.["@_descr"] ?? item[":@"]?.["@_title"] ?? item[":@"]?.["@_name"]);
+  return [...blips, ...legacy].filter((id): id is string => typeof id === "string").map((id, index) => ({ id, ...(descriptions[index] ? { altText: String(descriptions[index]) } : {}) }));
+}
+
+function elementWrappers(node: any, key: string): any[] {
+  if (Array.isArray(node)) return node.flatMap((item) => elementWrappers(item, key));
+  if (!node || typeof node !== "object") return [];
+  return [...(node[key] !== undefined ? [node] : []), ...Object.values(node).flatMap((item) => elementWrappers(item, key))];
 }
 
 function tablePreview(node: any, tableNumber: number): CitationSheetPreview | null {

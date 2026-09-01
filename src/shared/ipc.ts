@@ -165,11 +165,19 @@ export const citationSheetPreviewSchema = z.object({
   }).strict()).max(105)
 }).strict();
 export type CitationSheetPreview = z.infer<typeof citationSheetPreviewSchema>;
+export const citationImagePreviewSchema = z.object({
+  data: z.instanceof(Uint8Array),
+  mimeType: z.enum(["image/png", "image/jpeg", "image/gif", "image/webp", "image/bmp"]),
+  altText: z.string().max(500).optional(),
+  cellRef: z.string().max(32).optional()
+}).strict();
+export type CitationImagePreview = z.infer<typeof citationImagePreviewSchema>;
 export const citationDetailResultValueSchema = z.object({
   text: z.string().nullable(),
   kind: sourceKindSchema,
   data: z.instanceof(Uint8Array).nullable(),
-  sheet: citationSheetPreviewSchema.nullable()
+  sheet: citationSheetPreviewSchema.nullable(),
+  images: z.array(citationImagePreviewSchema).max(12)
 }).strict();
 export type CitationDetailResultValue = z.infer<typeof citationDetailResultValueSchema>;
 

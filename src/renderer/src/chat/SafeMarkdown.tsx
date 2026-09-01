@@ -48,7 +48,31 @@ export function renderSafeMarkdown(text: string): string {
 
 type Piece = string | CitationDto;
 
-function citationPieces(value: string, citations: CitationDto[]): Piece[] {
+export function canonicalizeCitationTargets(citations: CitationDto[]): { byLabel: Map<string, CitationDto>; unique: CitationDto[] } {
+  const groups = new Map<string, { labels: Set<string>; representative: CitationDto; order: number }>();
+  for (const citation of citations) {
+    const table = citation.sourceKind.toLowerCase() === "docx" && citation.locator.kind === "cell"
+      ? `${citation.sourceId}:${String(citation.locator.sheet).trim().toLowerCase()}`
+      : `label:${citation.label}`;
+    const group = groups.get(table);
+    if (!group) {
+      groups.set(table, { labels: new Set([citation.label]), representative: citation, order: Number(citation.label.slice(1)) });
+    } else {
+      group.labels.add(citation.label);
+      group.order = Math.min(group.order, Number(citation.label.slice(1)));
+      if ((citation.quote?.length ?? 0) > (group.representative.quote?.length ?? 0)) group.representative = citation;
+    }
+  }
+  const byLabel = new Map<string, CitationDto>();
+  const unique = [...groups.values()].sort((a, b) => a.order - b.order).map((group) => {
+    const canonical = { ...group.representative, label: `S${group.order}` };
+    for (const label of group.labels) byLabel.set(label, canonical);
+    return canonical;
+  });
+  return { byLabel, unique };
+}
+
+function citationPieces(value: string, citations: Map<string, CitationDto>): Piece[] {
   const pieces: Piece[] = [];
   const re = /\[S(\d{1,2})\]/g;
   let cursor = 0;
@@ -57,7 +81,7 @@ function citationPieces(value: string, citations: CitationDto[]): Piece[] {
     if (match.index > cursor) pieces.push(value.slice(cursor, match.index));
     const label = `S${match[1]}`;
     // Structured-row gate: unknown labels stay visible as plain text.
-    pieces.push(citations.find((c) => c.label === label) ?? value.slice(match.index, match.index + match[0].length));
+    pieces.push(citations.get(label) ?? value.slice(match.index, match.index + match[0].length));
     cursor = match.index + match[0].length;
   }
   if (cursor < value.length) pieces.push(value.slice(cursor));
@@ -74,6 +98,7 @@ export interface SafeMarkdownProps {
 
 export default function SafeMarkdown({ text, citations = [], onCitationOpen }: SafeMarkdownProps) {
   const hostRef = React.useRef<HTMLDivElement | null>(null);
+  const canonical = React.useMemo(() => canonicalizeCitationTargets(citations), [citations]);
   React.useEffect(() => {
     const host = hostRef.current;
     if (!host) return;
@@ -88,7 +113,7 @@ export default function SafeMarkdown({ text, citations = [], onCitationOpen }: S
       current = walker.nextNode() as Text | null;
     }
     for (const item of replacements) {
-      const pieces = citationPieces(item.node.data ?? "", citations);
+      const pieces = citationPieces(item.node.data ?? "", canonical.byLabel);
       if (pieces.length === 1 && typeof pieces[0] === "string") continue;
       const fragment = document.createDocumentFragment();
       let hasButtons = false;
@@ -109,7 +134,7 @@ export default function SafeMarkdown({ text, citations = [], onCitationOpen }: S
       if (!hasButtons) continue;
       item.parent.replaceChild(fragment, item.node);
     }
-  }, [text, citations, onCitationOpen]);
+  }, [text, canonical, onCitationOpen]);
   return <div className="safe-markdown" ref={hostRef} />;
 }
 

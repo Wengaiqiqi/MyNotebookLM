@@ -42,6 +42,7 @@ describe("assembleContext", () => {
       retrieved: [
         { ...common, chunkId: "table-1-caption", text: "前文\n表1 学科竞赛", locator: { kind: "paragraph", paragraph: 10 } },
         { ...common, chunkId: "table-1", text: "表1 学科竞赛\n奖项 | 分数", locator: { kind: "cell", sheet: "Table 1", cellRef: "A1:B2" } },
+        { ...common, chunkId: "table-1-note", text: "排名折算系数为 1.0、0.8、0.6", locator: { kind: "cell", sheet: "Table 1", cellRef: "A1:B2" } },
         { ...common, chunkId: "table-2-caption", text: "前文\n表2 创新大赛", locator: { kind: "paragraph", paragraph: 20 } },
         { ...common, chunkId: "table-2", text: "表2 创新大赛\n奖项 | 分数", locator: { kind: "cell", sheet: "Table 2", cellRef: "A1:B2" } }
       ]

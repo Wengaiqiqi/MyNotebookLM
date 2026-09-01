@@ -46,7 +46,7 @@ function mockApi(messages: MessageDto[] = []) {
     },
     citations: {
       open: vi.fn(),
-      detail: vi.fn(async () => ok({ text: "第一段完整原文。\n\n第二段仍需保留换行。", kind: "pdf" as const, data: null, sheet: null }))
+      detail: vi.fn(async () => ok({ text: "第一段完整原文。\n\n第二段仍需保留换行。", kind: "pdf" as const, data: null, sheet: null, images: [] }))
     },
     models: { listProfiles: vi.fn(async () => ok({ profiles: [], builtInProfiles: [], credentials: [] })) },
     sources: {
@@ -240,6 +240,7 @@ describe("ChatPane conversation creation", () => {
     const editor = screen.getByRole("textbox", { name: "编辑并重新发送" });
     const userMessage = editor.closest(".msg.user") as HTMLElement;
     expect(editor.closest(".bubble")).toBeTruthy();
+    expect(userMessage.classList.contains("editing")).toBe(true);
     expect((editor as HTMLTextAreaElement).value).toBe("原来的问题");
     expect((screen.getByRole("textbox", { name: "针对这个项目提问" }) as HTMLTextAreaElement).value).toBe("");
     fireEvent.change(editor, { target: { value: "修改后的问题" } });

@@ -84,7 +84,8 @@ describe("CitationOpener", () => {
         text: "完整的权威原文。\n\n第二段。",
         kind: "pdf",
         data: new Uint8Array([0x25, 0x50, 0x44, 0x46]),
-        sheet: null
+        sheet: null,
+        images: []
       }
     });
     expect(readManagedFile).toHaveBeenCalledWith(String.raw`C:\managed\content`);
@@ -125,7 +126,9 @@ describe("CitationOpener", () => {
 
   it("parses the cited DOCX table into structured rows and merged cells", async () => {
     const zip = new JSZip();
-    zip.file("word/document.xml", `<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body><w:tbl><w:tblGrid><w:gridCol w:w="1000"/><w:gridCol w:w="1000"/></w:tblGrid><w:tr><w:tc><w:p><w:r><w:t>级别</w:t></w:r></w:p></w:tc><w:tc><w:p><w:r><w:t>分数</w:t></w:r></w:p></w:tc></w:tr><w:tr><w:tc><w:tcPr><w:gridSpan w:val="2"/></w:tcPr><w:p><w:r><w:t>合并说明</w:t></w:r></w:p></w:tc></w:tr></w:tbl></w:body></w:document>`);
+    zip.file("word/document.xml", `<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:r="r" xmlns:a="a"><w:body><w:tbl><w:tblGrid><w:gridCol w:w="1000"/><w:gridCol w:w="1000"/></w:tblGrid><w:tr><w:tc><w:p><w:r><w:t>级别</w:t><w:drawing><a:blip r:embed="rId1"/></w:drawing></w:r></w:p></w:tc><w:tc><w:p><w:r><w:t>分数</w:t></w:r></w:p></w:tc></w:tr><w:tr><w:tc><w:tcPr><w:gridSpan w:val="2"/></w:tcPr><w:p><w:r><w:t>合并说明</w:t></w:r></w:p></w:tc></w:tr></w:tbl></w:body></w:document>`);
+    zip.file("word/_rels/document.xml.rels", `<Relationships><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="media/image1.png"/></Relationships>`);
+    zip.file("word/media/image1.png", new Uint8Array([1, 2, 3]));
     readManagedFile.mockResolvedValueOnce(await zip.generateAsync({ type: "uint8array" }));
     world.connection.prepare("INSERT INTO sources(id, project_id, kind, display_name) VALUES (?, ?, 'docx', '方案.docx')").run(DOCX_SOURCE_ID, PROJECT_ID);
     world.connection.prepare("INSERT INTO source_revisions(id, source_id, original_path, stored_path, source_hash, locator_kind, chunking_version, state) VALUES (?, ?, 'original.docx', ?, 'sha256:docx', 'cell', 'v1', 'ready')").run(DOCX_REVISION_ID, DOCX_SOURCE_ID, String.raw`C:\managed\document`);
@@ -136,6 +139,7 @@ describe("CitationOpener", () => {
     expect(result).toMatchObject({ ok: true, value: { kind: "docx", data: null, sheet: { columns: [{ number: 1 }, { number: 2 }] } } });
     if (!result.ok || !result.value.sheet) throw new Error("missing DOCX table preview");
     expect(result.value.sheet.rows[1]?.cells[0]).toMatchObject({ text: "合并说明", colSpan: 2 });
+    expect(result.value.images).toEqual([{ data: new Uint8Array([1, 2, 3]), mimeType: "image/png", cellRef: "A1" }]);
   });
 
   it("renders a DOCX table for legacy paragraph citations that mention its caption", async () => {

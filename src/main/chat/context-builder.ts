@@ -55,7 +55,7 @@ function evidenceBlock(label: string, chunk: RetrievedChunk): string {
 function evidenceTarget(chunk: RetrievedChunk): string {
   const source = chunk.sourceId ?? chunk.sourceDisplayName;
   const locator = chunk.locator;
-  const table = /(?:^|\n)\s*((?:表|table)\s*\d+)/i.exec(chunk.text)?.[1]?.replace(/\s+/g, "").toLowerCase();
+  const table = /(?:^|\n)\s*(?:表|table)\s*(\d+)/i.exec(chunk.text)?.[1];
   if (table) return `${source}:table:${table}`;
   if (!locator) return `${source}:chunk:${chunk.chunkId}`;
   if (locator.kind === "page") return `${source}:page:${String(locator.page)}`;
@@ -63,7 +63,8 @@ function evidenceTarget(chunk: RetrievedChunk): string {
   if (locator.kind === "sheet") return `${source}:sheet:${String(locator.sheet)}`;
   if (locator.kind === "cell") {
     const sheet = String(locator.sheet).replace(/\s+/g, "").toLowerCase();
-    return chunk.sourceKind === "docx" ? `${source}:table:${sheet}` : `${source}:cell:${sheet}:${String(locator.cellRef)}`;
+    const tableNumber = /(?:表|table)(\d+)/i.exec(sheet)?.[1] ?? sheet;
+    return chunk.sourceKind === "docx" ? `${source}:table:${tableNumber}` : `${source}:cell:${sheet}:${String(locator.cellRef)}`;
   }
   return `${source}:${JSON.stringify(locator)}`;
 }
