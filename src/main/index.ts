@@ -71,6 +71,7 @@ const testUserDataDir = process.env["MYNOTEBOOKLM_USER_DATA_DIR"];
 if (process.env["NODE_ENV"] === "test" && testUserDataDir) {
   app.setPath("userData", testUserDataDir);
 }
+if (process.platform === "win32") app.setAppUserModelId("com.wengaiqiqi.mynotebooklm");
 
 app.whenReady().then(async () => {
   const appPaths = getAppPaths(app.getPath("userData"));

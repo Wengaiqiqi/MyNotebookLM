@@ -59,6 +59,7 @@ const mocks = vi.hoisted(() => {
       getPath: vi.fn(() => "C:\\data"),
       setPath: vi.fn(),
       getAppPath: vi.fn(() => "C:\\app"),
+      setAppUserModelId: vi.fn(),
       on: vi.fn((event: string, callback: Callback) => {
         callbacks.set(event, callback);
       }),

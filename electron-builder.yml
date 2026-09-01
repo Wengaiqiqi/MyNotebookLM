@@ -13,7 +13,10 @@ files:
 extraResources:
   - from: src/main/db/migrations
     to: migrations
+  - from: build/icon.ico
+    to: icon.ico
 win:
+  icon: build/icon.ico
   target:
     - target: nsis
       arch: [x64]

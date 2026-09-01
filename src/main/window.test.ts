@@ -4,6 +4,7 @@ const mocks = vi.hoisted(() => {
   const window = {
     once: vi.fn(),
     show: vi.fn(),
+    setIcon: vi.fn(),
     setTitleBarOverlay: vi.fn(),
     webContents: {
       setWindowOpenHandler: vi.fn(),
@@ -21,7 +22,7 @@ const mocks = vi.hoisted(() => {
   };
 });
 
-vi.mock("electron", () => ({ BrowserWindow: mocks.BrowserWindow }));
+vi.mock("electron", () => ({ app: { isPackaged: false }, BrowserWindow: mocks.BrowserWindow }));
 
 describe("createMainWindow", () => {
   beforeEach(() => {
@@ -38,12 +39,14 @@ describe("createMainWindow", () => {
     expect(mocks.BrowserWindow).toHaveBeenCalledWith(expect.objectContaining({
       titleBarStyle: "hidden",
       titleBarOverlay: expect.objectContaining({ color: "#f7f5f0", symbolColor: "#24231f" }),
+      icon: expect.stringMatching(/[\\/]build[\\/]icon\.ico$/),
       webPreferences: expect.objectContaining({
         contextIsolation: true,
         sandbox: true,
         nodeIntegration: false
       })
     }));
+    expect(mocks.window.setIcon).toHaveBeenCalledWith(expect.stringMatching(/[\\/]build[\\/]icon\.ico$/));
   });
 
   it("validates and cleans up the versioned title-overlay IPC operation", async () => {
