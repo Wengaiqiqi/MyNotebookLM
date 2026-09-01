@@ -108,7 +108,8 @@ describe("StudioPane", () => {
     const runButton = screen.getByRole("button", { name: /运行转换/ });
     expect((runButton as HTMLButtonElement).disabled).toBe(true);
 
-    fireEvent.change(screen.getByLabelText("选择一个来源…"), { target: { value: revisionId } });
+    fireEvent.click(screen.getByLabelText("来源"));
+    fireEvent.click(await screen.findByRole("option", { name: "论文.pdf" }));
     expect((runButton as HTMLButtonElement).disabled).toBe(false);
     fireEvent.click(runButton);
 
@@ -117,7 +118,7 @@ describe("StudioPane", () => {
       projectId,
       builtinKey: "summary",
       language: "zh-CN",
-      sourceRevisionId: revisionId
+      sourceRevisionIds: [revisionId]
     });
   });
 
@@ -130,14 +131,15 @@ describe("StudioPane", () => {
     const runButton = screen.getByRole("button", { name: /运行转换/ });
     expect((runButton as HTMLButtonElement).disabled).toBe(true);
 
-    fireEvent.change(screen.getByLabelText("选择一个来源…"), { target: { value: revisionId } });
+    fireEvent.click(screen.getByLabelText("来源"));
+    fireEvent.click(await screen.findByRole("option", { name: "论文.pdf" }));
     fireEvent.click(runButton);
 
     const api = (window as unknown as { myNotebook: DesktopApi }).myNotebook;
     expect(api.transformations!.run).toHaveBeenCalledWith({
       projectId,
       transformationId: rule.id,
-      sourceRevisionId: revisionId
+      sourceRevisionIds: [revisionId]
     });
   });
 
@@ -162,10 +164,9 @@ describe("StudioPane", () => {
     render(<StudioPane projectId={projectId} />);
 
     await screen.findByText("总结");
-    const picker = screen.getByLabelText("选择一个来源…") as HTMLSelectElement;
-    await vi.waitFor(() => {
-      const options = [...picker.options].filter((option) => option.value !== "");
-      expect(options.map((option) => option.textContent)).toEqual(["就绪.pdf"]);
-    });
+    fireEvent.click(screen.getByLabelText("来源"));
+    const options = await screen.findAllByRole("option", { name: "就绪.pdf" });
+    expect(options).toHaveLength(1);
+    expect(screen.queryByRole("option", { name: "处理中.pdf" })).toBeNull();
   });
 });

@@ -1,7 +1,9 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { DesktopApi } from "../../../../shared/ipc";
+import type { ConversationDto, MessageDto } from "../../../../shared/chat";
 import type { NoteDto, NoteLinkDto } from "../../../../shared/notes";
+import type { ProjectDto } from "../../../../shared/projects";
 import type { SourceDto } from "../../../../shared/sources";
 import SafeMarkdown from "../../chat/SafeMarkdown";
 import Icon from "../../ui/Icon";
@@ -20,7 +22,10 @@ export default function NotesPane({ projectId }: { projectId: string }) {
   const [notes, setNotes] = useState<NoteDto[]>([]);
   const [showArchived, setShowArchived] = useState(false);
   const [selectedId, setSelectedId] = useState<string>();
+  const [projects, setProjects] = useState<ProjectDto[]>([]);
   const [sources, setSources] = useState<SourceDto[]>([]);
+  const [conversations, setConversations] = useState<ConversationDto[]>([]);
+  const [messages, setMessages] = useState<MessageDto[]>([]);
   const [loaded, setLoaded] = useState(false);
   const [collapsed, setCollapsed] = useState(false);
   const [menuOpenFor, setMenuOpenFor] = useState<string>();
@@ -39,7 +44,32 @@ export default function NotesPane({ projectId }: { projectId: string }) {
   useEffect(() => { setLoaded(false); void load(showArchived); }, [load, showArchived]);
 
   useEffect(() => {
-    void window.myNotebook.sources?.list({ projectId }).then(setSources).catch(() => undefined);
+    let active = true;
+    void window.myNotebook.projects.list().then(async (nextProjects) => {
+      const grouped = await Promise.all(nextProjects.map((project) =>
+        window.myNotebook.sources?.list({ projectId: project.id }).catch(() => []) ?? []
+      ));
+      if (!active) return;
+      setProjects(nextProjects);
+      setSources(grouped.flat().filter((source) => source.status === "active"));
+    }).catch(() => { if (active) { setProjects([]); setSources([]); } });
+    return () => { active = false; };
+  }, [projectId]);
+
+  useEffect(() => {
+    let active = true;
+    setConversations([]);
+    setMessages([]);
+    void window.myNotebook.conversations.list({ projectId }).then(async (result) => {
+      if (!result.ok) return;
+      const messageResults = await Promise.all(result.value.map((conversation) =>
+        window.myNotebook.conversations.listMessages({ projectId, conversationId: conversation.id }).catch(() => undefined)
+      ));
+      if (!active) return;
+      setConversations(result.value);
+      setMessages(messageResults.flatMap((item) => item?.ok ? item.value : []));
+    }).catch(() => { if (active) { setConversations([]); setMessages([]); } });
+    return () => { active = false; };
   }, [projectId]);
 
   const selected = useMemo(() => notes.find((note) => note.id === selectedId), [notes, selectedId]);
@@ -218,7 +248,7 @@ export default function NotesPane({ projectId }: { projectId: string }) {
         </Modal>
       )}
       {selected
-        ? <NoteEditor key={selected.id} note={selected} language={language} onChanged={onChanged} onDeleted={deleted} sources={sources} />
+        ? <NoteEditor key={selected.id} note={selected} language={language} onChanged={onChanged} onDeleted={deleted} projects={projects} sources={sources} conversations={conversations} messages={messages} />
         : (
           <section className="panel">
             <div className="empty" style={{ height: "100%" }}>
@@ -231,43 +261,72 @@ export default function NotesPane({ projectId }: { projectId: string }) {
   );
 }
 
-function NoteEditor({ note, language, onChanged, onDeleted, sources }: {
+function NoteEditor({ note, language, onChanged, onDeleted, projects, sources, conversations, messages }: {
   note: NoteDto;
   language: AppLanguage;
   onChanged: (note: NoteDto) => void;
   onDeleted: () => void;
+  projects: ProjectDto[];
   sources: SourceDto[];
+  conversations: ConversationDto[];
+  messages: MessageDto[];
 }) {
   const { t } = useTranslation();
   const [title, setTitle] = useState(note.title);
   const [body, setBody] = useState(note.body);
   const [dirty, setDirty] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [generatingTitle, setGeneratingTitle] = useState(false);
   const [error, setError] = useState("");
   const [conflict, setConflict] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [links, setLinks] = useState<NoteLinkDto[]>([]);
   const [linksOpen, setLinksOpen] = useState(false);
-  const [linkSourceId, setLinkSourceId] = useState("");
+  const [linkSelections, setLinkSelections] = useState<Record<"source" | "message" | "answer", string[]>>({ source: [], message: [], answer: [] });
+  const [openMenu, setOpenMenu] = useState<"source" | "message" | "answer" | null>(null);
+  const linkMenuRef = useRef<HTMLDivElement>(null);
+  const [linking, setLinking] = useState(false);
+  const linkedTargetIds = new Set(links.flatMap((link) => [link.sourceId, link.messageId].filter((id): id is string => Boolean(id))));
+  const linkTargets = (linkType: "source" | "message" | "answer") => linkType === "source"
+    ? sources.filter((source) => source.projectId === note.projectId && !linkedTargetIds.has(source.id)).map((source) => ({ id: source.id, label: source.displayName }))
+    : messages
+      .filter((message) => message.state === "completed" && !message.superseded && message.content.trim() && !linkedTargetIds.has(message.id) && (linkType === "message" ? message.role === "user" : message.role === "assistant"))
+      .map((message) => ({ id: message.id, label: `[${conversations.find((conversation) => conversation.id === message.conversationId)?.title ?? t("chat.ui.conversations")}] ${message.content.slice(0, 100)}` }));
 
   useEffect(() => { setTitle(note.title); setBody(note.body); setDirty(false); setError(""); setConflict(false); }, [note]);
+
+  useEffect(() => {
+    if (!openMenu) return;
+    const close = (event: MouseEvent): void => {
+      if (!linkMenuRef.current?.contains(event.target as Node)) setOpenMenu(null);
+    };
+    document.addEventListener("mousedown", close);
+    return () => document.removeEventListener("mousedown", close);
+  }, [openMenu]);
 
   async function loadLinks(): Promise<void> {
     const result = await api().listLinks({ projectId: note.projectId, id: note.id }).catch(() => undefined);
     if (result?.ok) setLinks(result.value);
   }
 
-  async function save(): Promise<void> {
-    if (saving || !title.trim()) return;
-    setSaving(true); setError(""); setConflict(false);
+  async function persistDraft(): Promise<NoteDto | undefined> {
+    setError(""); setConflict(false);
     const result = await api().update({ projectId: note.projectId, id: note.id, title: title.trim(), body, version: note.version }).catch(() => undefined);
-    setSaving(false);
     if (!result?.ok) {
       if (result?.error.code === "CONFLICT") setConflict(true);
       else setError(result ? errorText(result, t) : t("errors.internal"));
-      return;
+      return undefined;
     }
     onChanged(result.value);
+    return result.value;
+  }
+
+  async function save(): Promise<void> {
+    if (saving || generatingTitle || !title.trim()) return;
+    setSaving(true);
+    const saved = await persistDraft();
+    setSaving(false);
+    if (!saved) return;
     toast.success(t("notes.savedToast"));
   }
 
@@ -290,21 +349,32 @@ function NoteEditor({ note, language, onChanged, onDeleted, sources }: {
   }
 
   async function generateTitle(): Promise<void> {
-    setError("");
-    const result = await api().generateTitle({ projectId: note.projectId, noteId: note.id, locale: language }).catch(() => undefined);
-    if (result?.ok) onChanged(result.value);
-    else toast.error(t("notes.titleFailure"));
+    if (generatingTitle || saving || !title.trim()) return;
+    setGeneratingTitle(true);
+    const saved = dirty ? await persistDraft() : note;
+    if (!saved) { setGeneratingTitle(false); return; }
+    const result = await api().generateTitle({ projectId: saved.projectId, noteId: saved.id, locale: language }).catch(() => undefined);
+    setGeneratingTitle(false);
+    if (result?.ok) {
+      onChanged(result.value);
+    } else toast.error(t("notes.titleFailure"));
   }
 
-  async function linkSource(): Promise<void> {
-    if (!linkSourceId) return;
-    const result = await api().createLink({ projectId: note.projectId, noteId: note.id, sourceId: linkSourceId }).catch(() => undefined);
-    if (result?.ok) {
-      setLinks((current) => [...current, result.value]);
-      setLinkSourceId("");
-    } else {
-      toast.error(result ? errorText(result, t) : t("errors.internal"));
-    }
+  async function linkTarget(linkType: "source" | "message" | "answer"): Promise<void> {
+    const targetIds = linkSelections[linkType];
+    if (linking || targetIds.length === 0) return;
+    setLinking(true);
+    const results = await Promise.all(targetIds.map((targetId) => api().createLink({
+      projectId: note.projectId,
+      noteId: note.id,
+      ...(linkType === "source" ? { sourceId: targetId } : { messageId: targetId })
+    }).catch(() => undefined)));
+    const created = results.flatMap((result) => result?.ok ? [result.value] : []);
+    setLinks((current) => [...current, ...created]);
+    setLinkSelections((current) => ({ ...current, [linkType]: [] }));
+    setLinking(false);
+    const failed = results.filter((result) => !result?.ok).length;
+    if (failed > 0) toast.error(t("errors.internal"));
   }
 
   async function unlink(link: NoteLinkDto): Promise<void> {
@@ -323,8 +393,9 @@ function NoteEditor({ note, language, onChanged, onDeleted, sources }: {
         <button type="button" className="btn ghost sm" aria-expanded={linksOpen} onClick={() => setLinksOpen((value) => !value)}>
           <Icon name="link" />{t("notes.links")}<span className="count">{links.length}</span>
         </button>
-        <button type="button" className="btn ghost sm" onClick={() => void generateTitle()}>
-          <Icon name="sparkle" />{t("notes.aiTitle")}
+        <button type="button" className={`btn ghost sm${generatingTitle ? " loading" : ""}`} disabled={generatingTitle || saving || !title.trim()} aria-busy={generatingTitle} onClick={() => void generateTitle()}>
+          {generatingTitle ? <span className="spinner" aria-hidden="true" /> : <Icon name="sparkle" />}
+          {generatingTitle ? t("notes.aiTitleGenerating") : t("notes.aiTitle")}
         </button>
       </header>
 
@@ -344,6 +415,7 @@ function NoteEditor({ note, language, onChanged, onDeleted, sources }: {
           value={title}
           onChange={(event) => { setTitle(event.target.value); setDirty(true); }}
           maxLength={200}
+          disabled={generatingTitle}
           aria-label={t("notes.title")}
           placeholder={t("notes.title")}
         />
@@ -351,6 +423,7 @@ function NoteEditor({ note, language, onChanged, onDeleted, sources }: {
           <textarea
             className="textarea"
             value={body}
+            disabled={generatingTitle}
             onChange={(event) => { setBody(event.target.value); setDirty(true); }}
             aria-label={t("notes.body")}
             placeholder={t("notes.bodyPlaceholder")}
@@ -363,23 +436,54 @@ function NoteEditor({ note, language, onChanged, onDeleted, sources }: {
 
         {linksOpen && (
           <div>
-            <div className="input-row" style={{ marginBottom: 8 }}>
-              <select className="select" aria-label={t("notes.linkSource")} value={linkSourceId} onChange={(event) => setLinkSourceId(event.target.value)}>
-                <option value="">{t("notes.linkSourcePlaceholder")}</option>
-                {sources.map((source) => <option key={source.id} value={source.id}>{source.displayName}</option>)}
-              </select>
-              <button type="button" className="btn sm" disabled={!linkSourceId} onClick={() => void linkSource()}>{t("notes.link")}</button>
+            <div className="note-link-picker" style={{ marginBottom: 8 }}>
+              {(["source", "message", "answer"] as const).map((kind) => {
+                const targets = linkTargets(kind);
+                const label = kind === "source" ? t("notes.source") : kind === "message" ? t("notes.questionMessage") : t("notes.modelAnswer");
+                const selection = linkSelections[kind];
+                return <div className="note-link-row" key={kind}>
+                  <span className="kind-tag">{label}</span>
+                  <div className="target-select" ref={openMenu === kind ? linkMenuRef : undefined}>
+                    <button type="button" className="select target-select-trigger" aria-label={label} aria-haspopup="listbox" aria-expanded={openMenu === kind} onClick={() => setOpenMenu(openMenu === kind ? null : kind)}>
+                      <span className="target-select-value">{selection.length === 0
+                        ? (targets.length ? `${label}…` : t("notes.noMessages"))
+                        : t("notes.selectedCount").replace("{count}", String(selection.length))}</span>
+                      <Icon name={openMenu === kind ? "chevron-up" : "chevron-down"} className="conv-caret" />
+                    </button>
+                    {openMenu === kind && (
+                      <div className="target-select-menu" role="listbox" aria-label={label} aria-multiselectable="true">
+                        {targets.map((target) => {
+                          const checked = selection.includes(target.id);
+                          return <button type="button" role="option" aria-selected={checked} className={`target-select-option${checked ? " selected" : ""}`} key={target.id} onClick={() => setLinkSelections((current) => ({ ...current, [kind]: checked ? current[kind].filter((id) => id !== target.id) : [...current[kind], target.id] }))}>
+                            <input type="checkbox" readOnly checked={checked} tabIndex={-1} />
+                            <span>{target.label}</span>
+                          </button>;
+                        })}
+                      </div>
+                    )}
+                  </div>
+                  <button type="button" className="btn sm" disabled={linking || selection.length === 0} onClick={() => void linkTarget(kind)}>{linking ? t("notes.linking") : t("notes.link")}</button>
+                </div>;
+              })}
             </div>
             {links.length === 0
               ? <p style={{ color: "var(--ink-3)", fontSize: 12.5 }}>{t("notes.noLinks")}</p>
               : links.map((link) => {
-                const kind = link.sourceId ? t("notes.source") : link.messageId ? t("notes.message") : t("notes.citation");
-                const value = link.sourceId ?? link.messageId ?? link.citationId ?? "";
-                const sourceName = sources.find((source) => source.id === value)?.displayName;
+                const linkedMessage = messages.find((message) => message.id === link.messageId);
+                const kind = link.targetProjectId ? t("notes.project") : link.sourceId ? t("notes.source") : linkedMessage?.role === "user" ? t("notes.questionMessage") : linkedMessage?.role === "assistant" ? t("notes.modelAnswer") : link.messageId ? t("notes.message") : t("notes.citation");
+                const value = link.targetProjectId ?? link.sourceId ?? link.messageId ?? link.citationId ?? "";
+                const linkedSource = sources.find((source) => source.id === link.sourceId);
+                const targetName = link.targetProjectId
+                  ? projects.find((project) => project.id === link.targetProjectId)?.name
+                  : linkedSource
+                    ? `${projects.find((project) => project.id === linkedSource.projectId)?.name ?? ""} / ${linkedSource.displayName}`
+                    : linkedMessage
+                      ? `[${conversations.find((conversation) => conversation.id === linkedMessage.conversationId)?.title ?? t("chat.ui.conversations")}] ${linkedMessage.content}`
+                      : undefined;
                 return (
                   <div className="link-row" key={link.id}>
                     <span className="kind-tag">{kind}</span>
-                    <span className="target">{sourceName ?? value}</span>
+                    <span className="target">{targetName ?? value}</span>
                     {!link.targetAvailable && <span className="unavailable">{t("notes.targetUnavailable")}</span>}
                     <button type="button" className="icon-btn danger" aria-label={t("notes.unlink")} onClick={() => void unlink(link)}>
                       <Icon name="unlink" />
@@ -397,7 +501,7 @@ function NoteEditor({ note, language, onChanged, onDeleted, sources }: {
           : <button type="button" className="btn sm" onClick={() => void setState("archive")}><Icon name="archive" />{t("notes.archive")}</button>}
         <button type="button" className="btn sm danger-soft" onClick={() => setConfirmDelete(true)}><Icon name="trash" />{t("notes.delete")}</button>
         <span className="spacer" />
-        <button type="button" className="btn primary" disabled={saving || !title.trim() || !dirty} onClick={() => void save()}>
+        <button type="button" className="btn primary" disabled={saving || generatingTitle || !title.trim()} onClick={() => void save()}>
           {saving ? <span className="spinner light" aria-hidden="true" /> : <Icon name="check" />}
           {saving ? t("common.saving") : t("notes.save")}
         </button>

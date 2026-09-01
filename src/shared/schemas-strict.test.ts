@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { appErrorDtoSchema } from "./app-errors";
 import { modelProfileInputSchema, modelRouteAttemptDtoSchema, modelRouteDtoSchema } from "./models";
-import { createTransformationInputSchema, insightDtoSchema } from "./transformations";
+import { createTransformationInputSchema, insightDtoSchema, transformationRunInputSchema } from "./transformations";
 import { appSettingsDtoSchema } from "./settings";
 import { sourceDtoSchema, sourceLocatorSchema } from "./sources";
 import { citationLocatorSchema } from "./chat";
@@ -15,6 +15,12 @@ describe("shared DTO schemas", () => {
       expect(createTransformationInputSchema.safeParse({ ...base, prompt }).success).toBe(true);
     for (const prompt of ["{{unknown}}", "{{ content }}", "{{#if content}}{{content}}{{/if}}", "${content}", "<% content %>", "{% if content %}", "{{content"])
       expect(createTransformationInputSchema.safeParse({ ...base, prompt }).success).toBe(false);
+  });
+
+  it("accepts an exclusive project transformation target", () => {
+    const input = { projectId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", builtinKey: "summary" as const, language: "zh-CN" as const, projectTarget: true as const };
+    expect(transformationRunInputSchema.safeParse(input).success).toBe(true);
+    expect(transformationRunInputSchema.safeParse({ ...input, messageId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb" }).success).toBe(false);
   });
 
   it("requires an operation id for route attempts", () => {

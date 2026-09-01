@@ -71,6 +71,7 @@ export const transformationRunInputSchema = z.object({
   transformationId: z.uuid().optional(),
   builtinKey: z.enum(["summary", "key-points", "qa"]).optional(),
   language: z.enum(["zh-CN", "en"]).optional(),
+  projectTarget: z.literal(true).optional(),
   sourceRevisionId: z.uuid().optional(),
   sourceRevisionIds: z.array(z.uuid()).max(100).optional(),
   messageId: z.uuid().optional(),
@@ -86,6 +87,7 @@ export const transformationRunInputSchema = z.object({
     context.addIssue({ code: "custom", path: ["language"], message: "Builtin transformation language is required" });
   }
   const targets = [
+    value.projectTarget === true,
     value.sourceRevisionId !== undefined || (value.sourceRevisionIds?.length ?? 0) > 0,
     value.messageId !== undefined,
     value.answerMessageId !== undefined,

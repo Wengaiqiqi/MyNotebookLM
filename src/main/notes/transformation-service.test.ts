@@ -68,6 +68,22 @@ describe("TransformationService", () => {
     expect(db.connection.prepare("SELECT input_hash, rendered_prompt, route_snapshot_json, transformation_id FROM transformation_task_snapshots WHERE task_id = ?").get(insight.taskId)).toMatchObject({ input_hash: expect.any(String), rendered_prompt: expect.stringContaining("source text"), route_snapshot_json: expect.stringContaining("router-profile"), transformation_id: null });
   });
 
+  it("snapshots every current ready source for a project target", async () => {
+    const source2 = "22222222-2222-4222-8222-222222222223";
+    const revision2 = "33333333-3333-4333-8333-333333333334";
+    db.connection.prepare("INSERT INTO sources(id, project_id, kind, display_name, status) VALUES (?, ?, 'text', 'Second source', 'active')").run(source2, PROJECT);
+    db.connection.prepare("INSERT INTO source_revisions(id, source_id, original_path, stored_path, source_hash, locator_kind, chunking_version, state) VALUES (?, ?, 'b.txt', 'b.txt', 'hash-2', 'offset', 'v1', 'ready')").run(revision2, source2);
+    db.connection.prepare("UPDATE sources SET current_revision_id = ? WHERE id = ?").run(revision2, source2);
+    db.connection.prepare("INSERT INTO source_chunks(id, revision_id, ordinal, text, locator_json, content_hash) VALUES (?, ?, 0, 'second source text', '{}', 'chunk-hash-2')").run("44444444-4444-4444-8444-444444444445", revision2);
+
+    const insight = await service.run({ projectId: PROJECT, builtinKey: "summary", language: "en", projectTarget: true });
+    const snapshot = db.connection.prepare("SELECT input_kind, rendered_prompt, input_snapshot_json FROM transformation_task_snapshots WHERE task_id = ?").get(insight.taskId) as { input_kind: string; rendered_prompt: string; input_snapshot_json: string };
+    expect(snapshot.input_kind).toBe("sources");
+    expect(snapshot.rendered_prompt).toContain("source text");
+    expect(snapshot.rendered_prompt).toContain("second source text");
+    expect(JSON.parse(snapshot.input_snapshot_json).revisionIds).toEqual([REVISION, revision2]);
+  });
+
   it("reuses identical completed work but force creates a new key", async () => {
     const input = { projectId: PROJECT, builtinKey: "summary" as const, language: "en" as const, sourceRevisionId: REVISION };
     const first = await service.run(input);
@@ -208,14 +224,20 @@ describe("TransformationService", () => {
   it("supports message and assistant-answer snapshots with project isolation", async () => {
     const conversation = "99999999-9999-4999-8999-999999999999";
     const message = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+    const question = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaab";
     db.connection.prepare("INSERT INTO conversations(id, project_id, title, created_at, updated_at) VALUES (?, ?, 'Chat', '2026-01-01', '2026-01-01')").run(conversation, PROJECT);
     db.connection.prepare("INSERT INTO messages(id, conversation_id, sequence, role, content, state, created_at, updated_at) VALUES (?, ?, 1, 'assistant', 'answer text', 'completed', '2026-01-01', '2026-01-01')").run(message, conversation);
+    db.connection.prepare("INSERT INTO messages(id, conversation_id, sequence, role, content, state, created_at, updated_at) VALUES (?, ?, 2, 'user', 'complete question text', 'completed', '2026-01-01', '2026-01-01')").run(question, conversation);
     const ruleId = "cdcdcdcd-cdcd-4cdc-8cdc-cdcdcdcdcdcd";
     new TransformationRepository(db.connection).create({ id: ruleId, projectId: PROJECT, name: "Answer rule", appliesTo: "answer", prompt: "{{content}}" });
     const insight = await service.run({ projectId: PROJECT, transformationId: ruleId, language: "en", answerMessageId: message });
     expect(insight.inputKind).toBe("answer");
     expect(db.connection.prepare("SELECT rendered_prompt FROM transformation_task_snapshots WHERE task_id = ?").get(insight.taskId)).toMatchObject({ rendered_prompt: expect.stringContaining("answer text") });
+    await expect(service.run({ projectId: PROJECT, builtinKey: "summary", language: "en", messageId: question })).resolves.toMatchObject({ inputKind: "message" });
+    await expect(service.run({ projectId: PROJECT, builtinKey: "summary", language: "en", messageId: message })).rejects.toThrow(/Message not found/);
     await expect(service.run({ projectId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", builtinKey: "summary", language: "en", messageId: message })).rejects.toThrow();
+    db.connection.prepare("UPDATE messages SET state = 'cancelled' WHERE id = ?").run(question);
+    await expect(service.run({ projectId: PROJECT, builtinKey: "summary", language: "en", messageId: question })).rejects.toThrow(/Message not found/);
   });
 
   it("runs a custom versioned rule and preserves selected revision order", async () => {

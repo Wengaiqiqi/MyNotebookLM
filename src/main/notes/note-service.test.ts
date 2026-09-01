@@ -15,8 +15,8 @@ describe("NoteService", () => {
     const service = new NoteService(repository, () => NOTE);
     service.createNote({ projectId: PROJECT, title: " Title ", body: "# A\r\n\r\nB" });
     expect(calls[0]).toEqual({ id: NOTE, projectId: PROJECT, title: "Title", body: "# A\n\nB" });
-    expect(noteLinkDtoSchema.safeParse({ id: NOTE, noteId: NOTE, sourceId: SOURCE, messageId: null, citationId: null, targetAvailable: true, createdAt: "2026-01-01T00:00:00.000Z" }).success).toBe(true);
-    expect(() => noteLinkDtoSchema.parse({ id: NOTE, noteId: NOTE, sourceId: SOURCE, messageId: null, citationId: null, targetAvailable: true, createdAt: "2026-01-01T00:00:00.000Z", unexpected: true })).toThrow();
+    expect(noteLinkDtoSchema.safeParse({ id: NOTE, noteId: NOTE, targetProjectId: null, sourceId: SOURCE, messageId: null, citationId: null, targetAvailable: true, createdAt: "2026-01-01T00:00:00.000Z" }).success).toBe(true);
+    expect(() => noteLinkDtoSchema.parse({ id: NOTE, noteId: NOTE, targetProjectId: null, sourceId: SOURCE, messageId: null, citationId: null, targetAvailable: true, createdAt: "2026-01-01T00:00:00.000Z", unexpected: true })).toThrow();
     expect(() => createNoteLinkInputSchema.parse({ projectId: PROJECT, noteId: NOTE, sourceId: SOURCE, messageId: SOURCE })).toThrow();
   });
 

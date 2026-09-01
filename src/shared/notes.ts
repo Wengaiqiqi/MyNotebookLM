@@ -42,17 +42,19 @@ export const generateNoteTitleInputSchema = z.object({
 }).strict();
 
 const noteLinkTargetSchema = z.object({
+  targetProjectId: z.uuid().nullable().optional(),
   sourceId: z.uuid().nullable().optional(),
   messageId: z.uuid().nullable().optional(),
   citationId: z.uuid().nullable().optional()
 }).strict().refine(
-  (value) => [value.sourceId, value.messageId, value.citationId].filter((id) => id != null).length === 1,
-  "A note link must target exactly one source, message or citation"
+  (value) => [value.targetProjectId, value.sourceId, value.messageId, value.citationId].filter((id) => id != null).length === 1,
+  "A note link must target exactly one project, source, message or citation"
 );
 
 export const noteLinkDtoSchema = z.object({
   id: z.uuid(),
   noteId: z.uuid(),
+  targetProjectId: z.uuid().nullable(),
   sourceId: z.uuid().nullable(),
   messageId: z.uuid().nullable(),
   citationId: z.uuid().nullable(),

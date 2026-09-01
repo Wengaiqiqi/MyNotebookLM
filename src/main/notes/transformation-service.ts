@@ -27,6 +27,7 @@ export type TransformationRunRequest = Readonly<{
   transformationId?: string;
   builtinKey?: "summary" | "key-points" | "qa";
   language?: "zh-CN" | "en";
+  projectTarget?: true;
   sourceRevisionId?: string;
   sourceRevisionIds?: readonly string[];
   messageId?: string;
@@ -118,16 +119,28 @@ function sourceSnapshot(db: Database.Database, projectId: string, revisionIds: r
 
 function targetSnapshot(db: Database.Database, input: TransformationRunRequest): { kind: InputKind; content: string; hashes: string[]; title: string; target: Record<string, unknown> } {
   const revisionIds = input.sourceRevisionIds ?? (input.sourceRevisionId ? [input.sourceRevisionId] : []);
-  const selectedInputs = [revisionIds.length > 0, input.messageId !== undefined, input.answerMessageId !== undefined, input.answer !== undefined, input.noteId !== undefined].filter(Boolean).length;
+  const selectedInputs = [input.projectTarget === true, revisionIds.length > 0, input.messageId !== undefined, input.answerMessageId !== undefined, input.answer !== undefined, input.noteId !== undefined].filter(Boolean).length;
   if (selectedInputs !== 1) throw new Error("Exactly one transformation input is required");
+  if (input.projectTarget) {
+    const rows = db.prepare(`
+      SELECT sr.id FROM sources s
+      JOIN source_revisions sr ON sr.id = s.current_revision_id
+      WHERE s.project_id = ? AND s.status = 'active' AND sr.state = 'ready'
+      ORDER BY s.created_at ASC, s.id ASC
+    `).all(input.projectId) as Array<{ id: string }>;
+    if (rows.length === 0) throw new Error("Project has no ready sources");
+    const projectRevisionIds = rows.map((row) => row.id);
+    const result = sourceSnapshot(db, input.projectId, projectRevisionIds);
+    return { kind: "sources", ...result, target: { projectId: input.projectId, revisionIds: projectRevisionIds } };
+  }
   if (revisionIds.length > 0) {
     const result = sourceSnapshot(db, input.projectId, revisionIds);
     return { kind: revisionIds.length === 1 ? "source" : "sources", ...result, target: { revisionIds: [...revisionIds] } };
   }
   const messageId = input.answerMessageId ?? input.messageId;
   if (messageId) {
-    const row = db.prepare("SELECT m.id, m.role, m.content, c.title FROM messages m JOIN conversations c ON c.id = m.conversation_id WHERE m.id = ? AND c.project_id = ? AND c.deleted_at IS NULL AND c.archived_at IS NULL").get(messageId, input.projectId) as any;
-    if (!row || (input.answerMessageId && row.role !== "assistant")) throw new Error("Message not found");
+    const row = db.prepare("SELECT m.id, m.role, m.content, c.title FROM messages m JOIN conversations c ON c.id = m.conversation_id WHERE m.id = ? AND c.project_id = ? AND c.deleted_at IS NULL AND c.archived_at IS NULL AND m.state = 'completed' AND m.superseded = 0 AND m.content <> ''").get(messageId, input.projectId) as any;
+    if (!row || (input.messageId && row.role !== "user") || (input.answerMessageId && row.role !== "assistant")) throw new Error("Message not found");
     return { kind: input.answerMessageId ? "answer" : "message", content: row.content, hashes: [sha256(row.content)], title: row.title, target: { messageId, role: row.role } };
   }
   if (input.answer !== undefined) {
@@ -245,7 +258,7 @@ export class TransformationService {
     const language = input.language ?? rule.language ?? "en";
     const bounded = truncateContent(target.content, language);
     const rendered = renderTransformationPrompt(rule.prompt, { content: bounded.content, sourceTitle: target.title, language, projectName: (this.deps.db.prepare("SELECT name FROM projects WHERE id = ?").get(input.projectId) as any)?.name ?? "" });
-    if (rule.appliesTo !== target.kind) throw new Error(`Transformation rule appliesTo ${rule.appliesTo} does not match ${target.kind}`);
+    if (rule.transformationId && rule.appliesTo !== target.kind) throw new Error(`Transformation rule appliesTo ${rule.appliesTo} does not match ${target.kind}`);
     const routes = this.deps.router.resolve(rule.taskKind, input.profileId).map((profile) => ({ profileId: profile.id, provider: profile.provider, model: profile.modelId }));
     if (routes.length === 0) throw new RoutedGenerationError({ code: "VALIDATION", messageKey: "errors.generationProfileMissing", recoverable: false });
     const inputHash = sha256(stable({ kind: target.kind, target: target.target, hashes: target.hashes }));

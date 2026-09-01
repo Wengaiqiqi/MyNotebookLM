@@ -1,11 +1,9 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { transformationPromptSchema } from "../../../../shared/transformations";
 import type { BuiltinTransformationDto, InsightDto, TransformationAppliesTo, TransformationDto } from "../../../../shared/transformations";
-import type { TaskDto } from "../../../../shared/tasks";
 import type { ConversationDto, MessageDto } from "../../../../shared/chat";
 import type { SourceDto } from "../../../../shared/sources";
-import type { NoteDto } from "../../../../shared/notes";
 import Icon from "../../ui/Icon";
 import Modal, { DialogHead } from "../../ui/Modal";
 import { toast } from "../../ui/Toast";
@@ -23,14 +21,13 @@ export default function StudioPane({ projectId }: { projectId: string }) {
   const [rules, setRules] = useState<TransformationDto[]>([]);
   const [insights, setInsights] = useState<InsightDto[]>([]);
   const [sources, setSources] = useState<SourceDto[]>([]);
-  const [notes, setNotes] = useState<NoteDto[]>([]);
   const [conversations, setConversations] = useState<ConversationDto[]>([]);
   const [messages, setMessages] = useState<MessageDto[]>([]);
-  const [selectedConversationId, setSelectedConversationId] = useState("");
 
   const [ruleKey, setRuleKey] = useState("summary");
-  const [targetType, setTargetType] = useState<"source" | "note" | "message" | "answer">("source");
-  const [targetId, setTargetId] = useState("");
+  const [targetSelections, setTargetSelections] = useState<Record<"source" | "message" | "answer", string[]>>({ source: [], message: [], answer: [] });
+  const [openMenu, setOpenMenu] = useState<"source" | "message" | "answer" | null>(null);
+  const targetMenuRef = useRef<HTMLDivElement>(null);
   const [editorRule, setEditorRule] = useState<TransformationDto | null | undefined>(undefined); // undefined = closed
   const [running, setRunning] = useState(false);
 
@@ -53,8 +50,15 @@ export default function StudioPane({ projectId }: { projectId: string }) {
     void api.listRules({ projectId }).then((result) => { if (alive && result.ok) setRules(result.value); }).catch(() => undefined);
     void loadInsights();
     void getApi().sources.list({ projectId }).then((items) => { if (alive) setSources(items); }).catch(() => undefined);
-    void getApi().notes.list({ projectId }).then((result) => { if (alive && result.ok) setNotes(result.value.filter((note) => !note.archivedAt)); }).catch(() => undefined);
-    void window.myNotebook.conversations.list({ projectId }).then((result) => { if (alive && result.ok) setConversations(result.value); }).catch(() => undefined);
+    void window.myNotebook.conversations.list({ projectId }).then(async (result) => {
+      if (!result.ok) return;
+      const messageResults = await Promise.all(result.value.map((conversation) =>
+        window.myNotebook.conversations.listMessages({ projectId, conversationId: conversation.id }).catch(() => undefined)
+      ));
+      if (!alive) return;
+      setConversations(result.value);
+      setMessages(messageResults.flatMap((item) => item?.ok ? item.value : []));
+    }).catch(() => undefined);
     return () => { alive = false; };
   }, [projectId, language, loadInsights]);
 
@@ -63,41 +67,41 @@ export default function StudioPane({ projectId }: { projectId: string }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [transformTask?.state]);
 
-  useEffect(() => {
-    setMessages([]);
-    setSelectedConversationId("");
-  }, [targetType]);
-
-  useEffect(() => {
-    if (!selectedConversationId) { setMessages([]); return; }
-    void window.myNotebook.conversations.listMessages({ projectId, conversationId: selectedConversationId })
-      .then((result) => { if (result.ok) setMessages(result.value); })
-      .catch(() => undefined);
-  }, [projectId, selectedConversationId]);
-
   const chosenBuiltin = builtins.find((item) => item.key === ruleKey);
   const chosenRule = rules.find((item) => item.id === ruleKey);
+
+  useEffect(() => {
+    if (!openMenu) return;
+    const close = (event: MouseEvent): void => {
+      if (!targetMenuRef.current?.contains(event.target as Node)) setOpenMenu(null);
+    };
+    document.addEventListener("mousedown", close);
+    return () => document.removeEventListener("mousedown", close);
+  }, [openMenu]);
 
   const readySources = useMemo(() => sources.filter(sourceReady), [sources]);
 
   async function run(): Promise<void> {
     const api: TransformApi = getApi().transformations;
-    if (!targetId || transformTask?.state === "running" || transformTask?.state === "queued") return;
+    const hasSelection = Object.values(targetSelections).some((ids) => ids.length > 0);
+    if (!hasSelection || transformTask?.state === "running" || transformTask?.state === "queued") return;
     setRunning(true);
-    const target = (() => {
-      if (targetType === "note") return { noteId: targetId };
-      if (targetType === "message") return { messageId: targetId };
-      if (targetType === "answer") return { answerMessageId: targetId };
-      return chosenRule?.appliesTo === "sources"
-        ? { sourceRevisionIds: [targetId] }
-        : { sourceRevisionId: targetId };
-    })();
-    const input = chosenRule
-      ? { projectId, transformationId: chosenRule.id, ...target }
-      : { projectId, builtinKey: ruleKey as "summary" | "key-points" | "qa", language, ...target };
-    const result = await api.run(input).catch(() => undefined);
+    const targets: Array<Record<string, string>> = [];
+    if (targetSelections.source.length > 0) targets.push({ sourceRevisionIds: targetSelections.source.join(",") });
+    for (const id of targetSelections.message) targets.push({ messageId: id });
+    for (const id of targetSelections.answer) targets.push({ answerMessageId: id });
+    const results = await Promise.all(targets.map((target) => {
+      const payload = target.sourceRevisionIds !== undefined
+        ? { sourceRevisionIds: (target.sourceRevisionIds as string).split(",") }
+        : target;
+      const input = chosenRule
+        ? { projectId, transformationId: chosenRule.id, ...payload }
+        : { projectId, builtinKey: ruleKey as "summary" | "key-points" | "qa", language, ...payload };
+      return api.run(input).catch(() => undefined);
+    }));
     setRunning(false);
-    if (!result?.ok) { toast.error(result ? errorText(result, t) : t("errors.internal")); return; }
+    const failed = results.filter((result) => !result?.ok).length;
+    if (failed > 0) { toast.error(t("errors.internal")); return; }
     toast.info(t("transformations.started"));
   }
 
@@ -124,9 +128,6 @@ export default function StudioPane({ projectId }: { projectId: string }) {
     const result = await getApi().transformations.convertToNote({ projectId, insightId: insight.id });
     if (!result.ok) { toast.error(errorText(result, t)); return; }
     toast.success(t("transformations.converted"));
-    void getApi().notes.list({ projectId }).then((notesResult) => {
-      if (notesResult.ok) setNotes(notesResult.value.filter((note) => !note.archivedAt));
-    }).catch(() => undefined);
   }
 
   const taskPercent = transformTask ? Math.round(transformTask.progress / 10) : 0;
@@ -138,85 +139,54 @@ export default function StudioPane({ projectId }: { projectId: string }) {
         <form onSubmit={(event) => { event.preventDefault(); void run(); }}>
           <label className="field">
             {t("transformations.rule")}
-            <select className="select" aria-label={t("transformations.rule")} value={ruleKey} onChange={(event) => setRuleKey(event.target.value)}>
-              <optgroup label={t("transformations.builtins")}>
-                {builtins.map((item) => <option key={item.key} value={item.key}>{item.name}</option>)}
-              </optgroup>
-              {rules.length > 0 && (
+            <select className="select" aria-label={t("transformations.rule")} value={ruleKey} onChange={(event) => {
+              const nextKey = event.target.value;
+              setRuleKey(nextKey);
+            }}>
+              {builtins.map((item) => <option key={item.key} value={item.key}>{item.name}</option>)}
+              {rules.some((item) => item.appliesTo !== "note" && item.appliesTo !== "sources") && (
                 <optgroup label={t("transformations.custom")}>
-                  {rules.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
+                  {rules.filter((item) => item.appliesTo !== "note" && item.appliesTo !== "sources").map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
                 </optgroup>
               )}
             </select>
           </label>
 
-          <label className="field">
-            {t("transformations.target")}
-            <select
-              className="select"
-              aria-label={t("transformations.target")}
-              value={targetType}
-              onChange={(event) => { setTargetType(event.target.value as typeof targetType); setTargetId(""); }}
-            >
-              <option value="source">{t("transformations.targetSource")}</option>
-              <option value="note">{t("transformations.targetNote")}</option>
-              <option value="message">{t("transformations.targetMessage")}</option>
-              <option value="answer">{t("transformations.targetAnswer")}</option>
-            </select>
-          </label>
-
-          {targetType === "source" && (
-            <label className="field">
-              {t("research.sources")}
-              <select className="select" aria-label={t("transformations.pickSource")} value={targetId} onChange={(event) => setTargetId(event.target.value)}>
-                <option value="">{t("transformations.pickSource")}</option>
-                {readySources.map((source) => (
-                  <option key={source.currentRevisionId ?? source.id} value={source.currentRevisionId ?? source.id}>
-                    {source.displayName}
-                  </option>
-                ))}
-              </select>
-            </label>
-          )}
-          {targetType === "note" && (
-            <label className="field">
-              {t("notes.titlePage")}
-              <select className="select" aria-label={t("transformations.pickNote")} value={targetId} onChange={(event) => setTargetId(event.target.value)}>
-                <option value="">{t("transformations.pickNote")}</option>
-                {notes.map((note) => <option key={note.id} value={note.id}>{note.title}</option>)}
-              </select>
-            </label>
-          )}
-          {(targetType === "message" || targetType === "answer") && (
-            <>
-              <label className="field">
-                {t("chat.ui.conversations")}
-                <select className="select" aria-label={t("transformations.pickConversation")} value={selectedConversationId} onChange={(event) => setSelectedConversationId(event.target.value)}>
-                  <option value="">{t("transformations.pickConversation")}</option>
-                  {conversations.map((conversation) => <option key={conversation.id} value={conversation.id}>{conversation.title}</option>)}
-                </select>
-              </label>
-              <label className="field">
-                {t("transformations.pickMessage")}
-                <select className="select" aria-label={t("transformations.pickMessage")} value={targetId} onChange={(event) => setTargetId(event.target.value)} disabled={!selectedConversationId}>
-                  <option value="">{t("transformations.pickMessagePlaceholder")}</option>
-                  {messages
-                    .filter((message) => targetType === "message" ? message.role === "user" : message.role === "assistant")
-                    .map((message) => (
-                      <option key={message.id} value={message.id}>
-                        [{message.role === "user" ? t("chat.roleUser") : t("chat.roleAssistant")}] {message.content.slice(0, 48)}
-                      </option>
-                    ))}
-                </select>
-              </label>
-            </>
-          )}
+          <div className="studio-target-picker">
+            {(["source", "message", "answer"] as const).map((kind) => {
+              const label = kind === "source" ? t("transformations.targetSource") : kind === "message" ? t("transformations.targetMessage") : t("transformations.targetAnswer");
+              const disabled = false;
+              const selection = targetSelections[kind];
+              return <div className="studio-target-row" key={kind}>
+                <span className="kind-tag">{label}</span>
+                <div className="target-select" ref={openMenu === kind ? targetMenuRef : undefined}>
+                  <button type="button" className="select target-select-trigger" aria-label={label} aria-haspopup="listbox" aria-expanded={openMenu === kind} disabled={disabled} onClick={() => setOpenMenu(openMenu === kind ? null : kind)}>
+                    <span className="target-select-value">{selection.length === 0
+                      ? (kind === "source" ? t("transformations.pickSource") : t("transformations.pickMessagePlaceholder"))
+                      : t("notes.selectedCount").replace("{count}", String(selection.length))}</span>
+                    <Icon name={openMenu === kind ? "chevron-up" : "chevron-down"} className="conv-caret" />
+                  </button>
+                  {openMenu === kind && (
+                    <div className="target-select-menu" role="listbox" aria-label={label} aria-multiselectable="true">
+                      {(kind === "source" ? readySources.map((source) => ({ value: source.currentRevisionId ?? source.id, text: source.displayName })) : messages.filter((message) => message.state === "completed" && !message.superseded && message.content.trim() && (kind === "message" ? message.role === "user" : message.role === "assistant")).map((message) => ({ value: message.id, text: "[" + (conversations.find((conversation) => conversation.id === message.conversationId)?.title ?? t("chat.ui.conversations")) + "] " + message.content.slice(0, 40) }))).map((item) => {
+                        const checked = selection.includes(item.value);
+                        return <button type="button" role="option" aria-selected={checked} className={`target-select-option${checked ? " selected" : ""}`} key={item.value} onClick={() => setTargetSelections((current) => ({ ...current, [kind]: checked ? current[kind].filter((id) => id !== item.value) : [...current[kind], item.value] }))}>
+                          <input type="checkbox" readOnly checked={checked} tabIndex={-1} />
+                          <span>{item.text}</span>
+                        </button>;
+                      })}
+                    </div>
+                  )}
+                </div>
+              </div>;
+            })}
+          </div>
 
           <div className="run-actions">
             <button
               type="submit"
               className="btn primary"
-              disabled={!targetId || running || transformTask?.state === "running" || transformTask?.state === "queued" || (!chosenBuiltin && !chosenRule)}
+              disabled={Object.values(targetSelections).every((ids) => ids.length === 0) || running || transformTask?.state === "running" || transformTask?.state === "queued" || (!chosenBuiltin && !chosenRule)}
             >
               {running ? <span className="spinner light" aria-hidden="true" /> : <Icon name="sparkle" />}
               {t("transformations.run")}
@@ -262,7 +232,7 @@ export default function StudioPane({ projectId }: { projectId: string }) {
             <div className="rule-item" key={rule.id}>
               <div className="rule-item-head">
                 <strong>{rule.name}</strong>
-                <span className="badge neutral">{rule.appliesTo}</span>
+                <span className="badge neutral">{t(`transformations.targetKinds.${rule.appliesTo}`, rule.appliesTo)}</span>
                 <span className="spacer" />
                 <button type="button" className="icon-btn" aria-label={`${t("common.edit")}: ${rule.name}`} onClick={() => setEditorRule(rule)}>
                   <Icon name="edit" />
@@ -356,7 +326,7 @@ function RuleEditor({ projectId, rule, onClose, onSaved }: {
     onSaved(result.value);
   }
 
-  const targetOptions: TransformationAppliesTo[] = ["source", "sources", "message", "answer", "note"];
+  const targetOptions: TransformationAppliesTo[] = ["source", "message", "answer"];
 
   return (
     <Modal open wide onClose={onClose} labelledBy="rule-editor-title">
@@ -369,7 +339,7 @@ function RuleEditor({ projectId, rule, onClose, onSaved }: {
         <label className="field" htmlFor="rule-target-input">
           {t("transformations.appliesTo")}
           <select id="rule-target-input" className="select" value={appliesTo} onChange={(event) => setAppliesTo(event.target.value as TransformationAppliesTo)}>
-            {targetOptions.map((option) => <option key={option} value={option}>{option}</option>)}
+            {targetOptions.map((option) => <option key={option} value={option}>{t(`transformations.targetKinds.${option}`, option)}</option>)}
           </select>
         </label>
         <label className="field" htmlFor="rule-prompt-input">

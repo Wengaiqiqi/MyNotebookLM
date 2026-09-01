@@ -761,9 +761,15 @@ describe("openAppDatabase", () => {
       expect(() => db.connection.prepare("INSERT INTO note_links(id, note_id, source_id, message_id) VALUES (?, ?, ?, ?)").run(
         "33333333-3333-4333-8333-333333333333", "dddddddd-dddd-4ddd-8ddd-dddddddddddd", "cccccccc-cccc-4ccc-8ccc-cccccccccccc", "missing-message"
       )).toThrow();
-      expect(() => db.connection.prepare("INSERT INTO note_links(id, note_id, source_id) VALUES (?, ?, ?)").run(
+      db.connection.prepare("INSERT INTO note_links(id, note_id, source_id) VALUES (?, ?, ?)").run(
         "44444444-4444-4444-8444-444444444444", "dddddddd-dddd-4ddd-8ddd-dddddddddddd", "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbc"
-      )).toThrow();
+      );
+      db.connection.prepare("INSERT INTO note_links(id, note_id, target_project_id) VALUES (?, ?, ?)").run(
+        "45454545-4545-4454-8454-454545454545", "dddddddd-dddd-4ddd-8ddd-dddddddddddd", "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
+      );
+      expect(() => db.connection.prepare("INSERT INTO note_links(id, note_id, target_project_id, source_id) VALUES (?, ?, ?, ?)").run(
+        "46464646-4646-4464-8464-464646464646", "dddddddd-dddd-4ddd-8ddd-dddddddddddd", "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbc"
+      )).toThrow(/check/i);
       db.connection.prepare("INSERT INTO conversations(id, project_id, title, created_at, updated_at) VALUES (?, ?, ?, ?, ?)").run(
         "12121212-1212-4121-8121-121212121212", "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "Chat", "2026-01-01", "2026-01-01"
       );

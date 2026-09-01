@@ -82,6 +82,7 @@ export class NoteService {
       id: this.createId(),
       projectId: parsed.projectId,
       noteId: parsed.noteId,
+      targetProjectId: parsed.targetProjectId ?? null,
       sourceId: parsed.sourceId ?? null,
       messageId: parsed.messageId ?? null,
       citationId: parsed.citationId ?? null

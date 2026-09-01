@@ -22,7 +22,7 @@ function service() {
   return {
     createNote: vi.fn(() => note), getNote: vi.fn(() => note), listNotes: vi.fn(() => [note]), updateNote: vi.fn(() => note),
     archiveNote: vi.fn(() => note), restoreNote: vi.fn(() => note), deleteNote: vi.fn(() => undefined),
-    createLink: vi.fn(() => ({ id: NOTE, noteId: NOTE, sourceId: NOTE, messageId: null, citationId: null, targetAvailable: true, createdAt: VERSION })),
+    createLink: vi.fn(() => ({ id: NOTE, noteId: NOTE, targetProjectId: null, sourceId: NOTE, messageId: null, citationId: null, targetAvailable: true, createdAt: VERSION })),
     listLinks: vi.fn(() => []), deleteLink: vi.fn(() => undefined), generateTitle: vi.fn(async () => note)
   };
 }

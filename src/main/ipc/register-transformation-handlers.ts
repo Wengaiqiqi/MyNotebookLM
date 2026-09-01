@@ -7,6 +7,7 @@ import { taskDtoSchema, type TaskDto } from "../../shared/tasks";
 import { noteDtoSchema } from "../../shared/notes";
 import { listBuiltinTransformations } from "../notes/builtin-transformations";
 import type { TransformationService, TransformationRunRequest } from "../notes/transformation-service";
+import { RoutedGenerationError } from "../models/routed-generation";
 
 type Ipc = Pick<IpcMain, "handle" | "removeHandler">;
 type Service = {
@@ -31,6 +32,7 @@ const builtins = resultSchema(builtinTransformationDtoSchema.array());
 const voidResult = resultSchema(empty);
 
 function errorResult(reason: unknown): ReturnType<typeof internalFailure> {
+  if (reason instanceof RoutedGenerationError) return { ok: false, error: { code: reason.error.code, messageKey: reason.error.messageKey, recoverable: reason.error.recoverable } };
   const name = reason instanceof Error ? reason.name : "";
   if (name.includes("VersionConflict") || name.includes("InProgress") || name.includes("StaleTask")) return { ok: false, error: { code: "CONFLICT", messageKey: "errors.conflict", recoverable: true } };
   if (name.includes("NotFound")) return { ok: false, error: { code: "NOT_FOUND", messageKey: "errors.notFound", recoverable: false } };
