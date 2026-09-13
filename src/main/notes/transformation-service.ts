@@ -183,15 +183,24 @@ export class TransformationService {
   }
 
   /** Main-process-only facade: claim/create the durable task and continue in the background. */
-  startTask(input: TransformationRunRequest, signal?: AbortSignal, onFinished?: () => void, onOwnership?: (ownership: { taskId: string; owned: boolean }) => void): TaskDto {
+  async startTask(input: TransformationRunRequest, signal?: AbortSignal, onFinished?: () => void, onOwnership?: (ownership: { taskId: string; owned: boolean }) => void): Promise<TaskDto> {
     let taskId: string | undefined;
-    const notifyOwnership = oneShotOwnership((ownership) => { taskId = ownership.taskId; onOwnership?.(ownership); });
+    let resolveTask!: (task: TaskDto) => void;
+    let rejectTask!: (reason: unknown) => void;
+    const taskReady = new Promise<TaskDto>((resolve, reject) => { resolveTask = resolve; rejectTask = reject; });
+    const notifyOwnership = oneShotOwnership((ownership) => {
+      taskId = ownership.taskId;
+      onOwnership?.(ownership);
+      const task = this.deps.taskRepository.findById(ownership.taskId);
+      if (task) resolveTask(task);
+      else rejectTask(new Error("Transformation task was not created"));
+    });
     const promise = this.run({ ...input, ...(signal === undefined ? {} : { signal }) }, notifyOwnership);
-    void promise.finally(onFinished).catch(() => undefined);
-    if (!taskId) throw new Error("Transformation task was not created");
-    const task = this.deps.taskRepository.findById(taskId);
-    if (!task) throw new Error("Transformation task was not created");
-    return task;
+    void promise
+      .catch((reason) => { if (!taskId) rejectTask(reason); })
+      .finally(onFinished)
+      .catch(() => undefined);
+    return taskReady;
   }
 
   cancelTask(input: { projectId: string; taskId: string }): TaskDto {

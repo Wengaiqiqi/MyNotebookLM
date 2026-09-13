@@ -75,10 +75,11 @@ describe("ModelRouter", () => {
     ]);
   });
 
-  it("returns one embedding profile and no fallback, or a stable empty route", () => {
+  it("returns one embedding profile and falls back to the chat route when a generation route is absent", () => {
     const routes = new FakeRoutes();
     expect(new ModelRouter(routes).resolve("embedding").map((item) => item.id)).toEqual([EMBEDDING_ID]);
-    expect(new ModelRouter(new FakeRoutes()).resolve("summary")).toEqual([]);
+    expect(new ModelRouter(new FakeRoutes()).resolve("summary").map((item) => item.id)).toEqual([FALLBACK_ID, PRIMARY_ID]);
+    expect(new ModelRouter(new FakeRoutes()).resolve("summary", INACTIVE_ID)).toEqual([]);
   });
 
   it.each([

@@ -96,7 +96,7 @@ describe("TransformationService", () => {
 
   it("claims a durable task and returns immediately while completing in the background", async () => {
     const ownership: Array<{ taskId: string; owned: boolean }> = [];
-    const task = service.startTask({ projectId: PROJECT, builtinKey: "summary", language: "en", sourceRevisionId: REVISION }, undefined, undefined, (value) => ownership.push(value));
+    const task = await service.startTask({ projectId: PROJECT, builtinKey: "summary", language: "en", sourceRevisionId: REVISION }, undefined, undefined, (value) => ownership.push(value));
     expect(task.kind).toBe("transformation");
     expect(ownership).toEqual([{ taskId: task.id, owned: true }]);
     await new Promise<void>((resolve) => setImmediate(resolve));
@@ -107,9 +107,16 @@ describe("TransformationService", () => {
     const input = { projectId: PROJECT, builtinKey: "summary" as const, language: "en" as const, sourceRevisionId: REVISION };
     const completed = await service.run(input);
     const ownership: Array<{ taskId: string; owned: boolean }> = [];
-    const reused = service.startTask(input, undefined, undefined, (value) => ownership.push(value));
+    const reused = await service.startTask(input, undefined, undefined, (value) => ownership.push(value));
     expect(reused.id).toBe(completed.taskId);
     expect(ownership).toEqual([{ taskId: completed.taskId, owned: false }]);
+  });
+
+  it("propagates preflight route failures from startTask", async () => {
+    const missingRoute = new TransformationService({ ...baseDeps, router: { resolve: () => [] } });
+    await expect(missingRoute.startTask({ projectId: PROJECT, builtinKey: "summary", language: "en", sourceRevisionId: REVISION }))
+      .rejects.toThrow("errors.generationProfileMissing");
+    expect(db.connection.prepare("SELECT count(*) AS count FROM tasks").get()).toEqual({ count: 0 });
   });
 
   it("keeps interleaved startTask controllers and task ids isolated", async () => {
@@ -126,8 +133,8 @@ describe("TransformationService", () => {
       }
     } });
     const firstController = new AbortController(); const secondController = new AbortController();
-    const first = service.startTask({ projectId: PROJECT, builtinKey: "summary", language: "en", sourceRevisionId: REVISION, force: true }, firstController.signal);
-    const second = service.startTask({ projectId: PROJECT, builtinKey: "summary", language: "en", sourceRevisionId: REVISION, force: true }, secondController.signal);
+    const first = await service.startTask({ projectId: PROJECT, builtinKey: "summary", language: "en", sourceRevisionId: REVISION, force: true }, firstController.signal);
+    const second = await service.startTask({ projectId: PROJECT, builtinKey: "summary", language: "en", sourceRevisionId: REVISION, force: true }, secondController.signal);
     await new Promise<void>((resolve) => setImmediate(resolve));
     firstController.abort();
     service.cancelTask({ projectId: PROJECT, taskId: first.id });
@@ -375,14 +382,14 @@ describe("TransformationService", () => {
     expect(calls).toBe(0);
   });
 
-  it.each(["queued", "running"] as const)("returns the %s winner from startTask after a creation race", (state) => {
+  it.each(["queued", "running"] as const)("returns the %s winner from startTask after a creation race", async (state) => {
     const winnerTask = state === "queued" ? "99999999-9999-4999-8999-999999999970" : "99999999-9999-4999-8999-999999999971";
     const racingTasks = { ...baseDeps.tasks, createTask: (input: any) => {
       db.connection.prepare("INSERT INTO tasks(id, project_id, source_id, kind, state, stage, progress_1000, idempotency_key) VALUES (?, ?, NULL, 'transformation', ?, 'preparing', 0, ?)").run(winnerTask, input.projectId, state, input.idempotencyKey);
       throw new Error("UNIQUE constraint failed: tasks.idempotency_key");
     } };
     const racing = new TransformationService({ ...baseDeps, tasks: racingTasks });
-    expect(racing.startTask({ projectId: PROJECT, builtinKey: "summary", language: "en", sourceRevisionId: REVISION }).id).toBe(winnerTask);
+    expect((await racing.startTask({ projectId: PROJECT, builtinKey: "summary", language: "en", sourceRevisionId: REVISION })).id).toBe(winnerTask);
   });
 
   it("does not fail the winner when a queued claim loses its CAS race", async () => {

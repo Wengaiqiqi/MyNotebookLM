@@ -32,9 +32,16 @@ export class ModelRouter {
       return Object.freeze([Object.freeze({ ...profile })]);
     }
 
+    const configuredRoutes = this.routes.getRoute(task);
+    // Specialized transformation routes are optional. If one is absent,
+    // reuse the configured chat route so a missing per-task setting does not
+    // turn a valid transformation into a generic failure.
+    const fallbackRoutes = explicitProfileId === undefined && configuredRoutes.length === 0 && task !== "chat"
+      ? this.routes.getRoute("chat")
+      : configuredRoutes;
     const candidates = [
       ...(explicitProfileId === undefined ? [] : [explicitProfileId]),
-      ...[...this.routes.getRoute(task)].sort((a, b) => a.position - b.position).map((route) => route.profileId)
+      ...[...fallbackRoutes].sort((a, b) => a.position - b.position).map((route) => route.profileId)
     ];
     const seen = new Set<string>();
     const resolved: ModelProfileSnapshot[] = [];

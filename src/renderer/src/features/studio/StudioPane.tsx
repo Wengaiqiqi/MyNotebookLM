@@ -100,8 +100,8 @@ export default function StudioPane({ projectId }: { projectId: string }) {
       return api.run(input).catch(() => undefined);
     }));
     setRunning(false);
-    const failed = results.filter((result) => !result?.ok).length;
-    if (failed > 0) { toast.error(t("errors.internal")); return; }
+    const failure = results.find((result) => !result?.ok);
+    if (failure && !failure.ok) { toast.error(errorText(failure, t)); return; }
     toast.info(t("transformations.started"));
   }
 
