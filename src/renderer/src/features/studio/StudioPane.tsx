@@ -7,12 +7,19 @@ import type { SourceDto } from "../../../../shared/sources";
 import Icon from "../../ui/Icon";
 import Modal, { DialogHead } from "../../ui/Modal";
 import { toast } from "../../ui/Toast";
+import SafeMarkdown from "../../chat/SafeMarkdown";
 import { useTaskFeed } from "../../hooks/useTaskFeed";
 import { errorText, formatDateTime, sourceReady } from "../../lib/format";
 import { api as getApi } from "../../lib/api";
 import type { AppLanguage } from "../../i18n";
 
 type TransformApi = ReturnType<typeof getApi>["transformations"];
+
+function normalizeInsightMarkdown(text: string): string {
+  // Marked treats **label** immediately followed by CJK text as literal
+  // punctuation; an entity boundary keeps the emphasis without visible space.
+  return text.replace(/\*\*([^*\n]+?)\*\*(?=[\u3400-\u9fff])/gu, "**$1**&#8203;");
+}
 
 export default function StudioPane({ projectId }: { projectId: string }) {
   const { t, i18n } = useTranslation();
@@ -30,9 +37,11 @@ export default function StudioPane({ projectId }: { projectId: string }) {
   const targetMenuRef = useRef<HTMLDivElement>(null);
   const [editorRule, setEditorRule] = useState<TransformationDto | null | undefined>(undefined); // undefined = closed
   const [running, setRunning] = useState(false);
+  const [detailInsight, setDetailInsight] = useState<InsightDto | null>(null);
 
   const tasks = useTaskFeed(projectId, window.myNotebook.tasks?.subscribe, window.myNotebook.tasks?.list);
   const transformTask = tasks.find((task) => task.kind === "transformation" && (task.state === "queued" || task.state === "running" || task.state === "failed"));
+  const latestTransformTask = tasks.find((task) => task.kind === "transformation");
 
   const loadInsights = useCallback(async () => {
     const api = getApi().transformations;
@@ -63,12 +72,19 @@ export default function StudioPane({ projectId }: { projectId: string }) {
   }, [projectId, language, loadInsights]);
 
   useEffect(() => {
-    if (transformTask?.state === "completed") void loadInsights();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [transformTask?.state]);
+    if (latestTransformTask?.state === "completed") void loadInsights();
+  }, [latestTransformTask?.id, latestTransformTask?.state, latestTransformTask?.updatedAt, loadInsights]);
 
   const chosenBuiltin = builtins.find((item) => item.key === ruleKey);
   const chosenRule = rules.find((item) => item.id === ruleKey);
+  const ruleOptions = [
+    ...builtins
+      .filter((item) => item.key !== "key-points")
+      .map((item) => ({ value: item.key, label: item.name })),
+    ...rules
+      .filter((item) => item.appliesTo !== "note" && item.appliesTo !== "sources")
+      .map((item) => ({ value: item.id, label: item.name }))
+  ];
 
   useEffect(() => {
     if (!openMenu) return;
@@ -139,17 +155,12 @@ export default function StudioPane({ projectId }: { projectId: string }) {
         <form onSubmit={(event) => { event.preventDefault(); void run(); }}>
           <label className="field">
             {t("transformations.rule")}
-            <select className="select" aria-label={t("transformations.rule")} value={ruleKey} onChange={(event) => {
-              const nextKey = event.target.value;
-              setRuleKey(nextKey);
-            }}>
-              {builtins.map((item) => <option key={item.key} value={item.key}>{item.name}</option>)}
-              {rules.some((item) => item.appliesTo !== "note" && item.appliesTo !== "sources") && (
-                <optgroup label={t("transformations.custom")}>
-                  {rules.filter((item) => item.appliesTo !== "note" && item.appliesTo !== "sources").map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
-                </optgroup>
-              )}
-            </select>
+            <RuleSelect
+              value={ruleKey}
+              options={ruleOptions}
+              ariaLabel={t("transformations.rule")}
+              onChange={setRuleKey}
+            />
           </label>
 
           <div className="studio-target-picker">
@@ -267,6 +278,9 @@ export default function StudioPane({ projectId }: { projectId: string }) {
               </div>
               <p>{insight.content}</p>
               <div className="foot">
+                <button type="button" className="btn ghost sm" onClick={() => setDetailInsight(insight)}>
+                  <Icon name="open" />{t("transformations.viewDetails")}
+                </button>
                 <button type="button" className="btn ghost sm" onClick={() => void convertToNote(insight)}>
                   <Icon name="notes" />{t("transformations.convert")}
                 </button>
@@ -275,6 +289,26 @@ export default function StudioPane({ projectId }: { projectId: string }) {
           ))}
         </div>
       </section>
+
+      <Modal open={detailInsight !== null} wide onClose={() => setDetailInsight(null)} labelledBy="insight-detail-title">
+        {detailInsight && (
+          <>
+            <button type="button" className="dialog-close" aria-label={t("common.close")} onClick={() => setDetailInsight(null)}>
+              <Icon name="close" />
+            </button>
+            <DialogHead
+              id="insight-detail-title"
+              icon="sparkle"
+              accent
+              title={t("transformations.insightDetail")}
+              body={[detailInsight.model, formatDateTime(detailInsight.createdAt, language)].filter(Boolean).join(" · ")}
+            />
+            <div className="insight-detail-content assistant-body">
+              <SafeMarkdown text={normalizeInsightMarkdown(detailInsight.content)} />
+            </div>
+          </>
+        )}
+      </Modal>
 
       {editorRule !== undefined && (
         <RuleEditor
@@ -290,6 +324,80 @@ export default function StudioPane({ projectId }: { projectId: string }) {
             setRuleKey(saved.id);
           }}
         />
+      )}
+    </div>
+  );
+}
+
+function RuleSelect({ value, options, ariaLabel, onChange }: {
+  value: string;
+  options: Array<{ value: string; label: string }>;
+  ariaLabel: string;
+  onChange: (value: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [placement, setPlacement] = useState<"up" | "down">("down");
+  const rootRef = useRef<HTMLDivElement>(null);
+  const selected = options.find((option) => option.value === value) ?? options[0];
+
+  useEffect(() => {
+    if (!open) return;
+    const root = rootRef.current;
+    if (root) {
+      const rect = root.getBoundingClientRect();
+      setPlacement(window.innerHeight - rect.bottom < 260 && rect.top > 260 ? "up" : "down");
+    }
+    const close = (event: PointerEvent): void => {
+      if (event.target instanceof Node && !rootRef.current?.contains(event.target)) setOpen(false);
+    };
+    const escape = (event: KeyboardEvent): void => {
+      if (event.key === "Escape") setOpen(false);
+    };
+    document.addEventListener("pointerdown", close);
+    document.addEventListener("keydown", escape);
+    return () => {
+      document.removeEventListener("pointerdown", close);
+      document.removeEventListener("keydown", escape);
+    };
+  }, [open]);
+
+  return (
+    <div className="rounded-select" ref={rootRef}>
+      <button
+        type="button"
+        className="select rounded-select-trigger"
+        aria-label={ariaLabel}
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        onClick={() => setOpen((current) => !current)}
+        onKeyDown={(event) => {
+          if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+            event.preventDefault();
+            setOpen(true);
+          }
+        }}
+      >
+        <span className="select-value">{selected?.label}</span>
+        <Icon name={open ? "chevron-up" : "chevron-down"} />
+      </button>
+      {open && (
+        <div className="rounded-select-menu" data-placement={placement} role="listbox" aria-label={ariaLabel}>
+          {options.map((option) => (
+            <button
+              type="button"
+              role="option"
+              aria-selected={option.value === value}
+              className="rounded-select-option"
+              key={option.value}
+              onClick={() => {
+                onChange(option.value);
+                setOpen(false);
+              }}
+            >
+              {option.label}
+            </button>
+          ))}
+        </div>
       )}
     </div>
   );
@@ -336,11 +444,14 @@ function RuleEditor({ projectId, rule, onClose, onSaved }: {
           {t("transformations.ruleName")}
           <input id="rule-name-input" className="input" value={name} onChange={(event) => setName(event.target.value)} maxLength={100} required />
         </label>
-        <label className="field" htmlFor="rule-target-input">
+        <label className="field">
           {t("transformations.appliesTo")}
-          <select id="rule-target-input" className="select" value={appliesTo} onChange={(event) => setAppliesTo(event.target.value as TransformationAppliesTo)}>
-            {targetOptions.map((option) => <option key={option} value={option}>{t(`transformations.targetKinds.${option}`, option)}</option>)}
-          </select>
+          <RuleSelect
+            value={appliesTo}
+            options={targetOptions.map((option) => ({ value: option, label: t(`transformations.targetKinds.${option}`, option) }))}
+            ariaLabel={t("transformations.appliesTo")}
+            onChange={(value) => setAppliesTo(value as TransformationAppliesTo)}
+          />
         </label>
         <label className="field" htmlFor="rule-prompt-input">
           {t("transformations.prompt")}

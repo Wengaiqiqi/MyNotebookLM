@@ -127,7 +127,7 @@ export class ChatService {
       if (!profile) return { ok: false, error: appError("VALIDATION", "errors.generationProfileMissing") };
       // Ownership is validated inside the repository before anything is written.
       const conversation = repo.getConversation(input.projectId, input.conversationId);
-      if (!conversation || conversation.archivedAt) return { ok: false, error: appError("CONFLICT", "errors.chatArchived") };
+      if (!conversation || conversation.archivedAt || conversation.deletedAt) return { ok: false, error: appError("CONFLICT", "errors.chatArchived") };
       if (this.inFlightConversations.has(input.conversationId)) {
         return { ok: false, error: appError("CONFLICT", "errors.chatSendInFlight", true) };
       }
@@ -153,21 +153,23 @@ export class ChatService {
       const profile = this.generationProfiles()[0];
       if (!profile) return { ok: false, error: appError("VALIDATION", "errors.generationProfileMissing") };
       const conversation = repo.getConversation(input.projectId, input.conversationId);
-      if (!conversation || conversation.archivedAt) return { ok: false, error: appError("CONFLICT", "errors.chatArchived") };
+      if (!conversation || conversation.archivedAt || conversation.deletedAt) return { ok: false, error: appError("CONFLICT", "errors.chatArchived") };
       const old = repo.getMessage(input.projectId, input.messageId);
       if (!old || old.role !== "assistant" || !old.replyToMessageId) return { ok: false, error: appError("NOT_FOUND", "errors.notFound") };
+      if (old.conversationId !== input.conversationId) return { ok: false, error: appError("NOT_FOUND", "errors.notFound") };
       if (old.superseded) return { ok: false, error: appError("CONFLICT", "errors.chatRegenerateSuperseded") };
       let userMessage = repo.getMessage(input.projectId, old.replyToMessageId);
       if (!userMessage || userMessage.role !== "user" || userMessage.content === "") {
         return { ok: false, error: appError("NOT_FOUND", "errors.notFound") };
       }
+      if (userMessage.conversationId !== input.conversationId) return { ok: false, error: appError("NOT_FOUND", "errors.notFound") };
+      if (this.inFlightConversations.has(input.conversationId)) {
+        return { ok: false, error: appError("CONFLICT", "errors.chatSendInFlight", true) };
+      }
       if (input.question !== undefined) {
         const question = input.question.trim();
         if (!question) return { ok: false, error: appError("VALIDATION", "errors.validation") };
         userMessage = repo.updateUserMessage({ projectId: input.projectId, id: userMessage.id, content: question, updatedAt: this.clock().toISOString() });
-      }
-      if (this.inFlightConversations.has(input.conversationId)) {
-        return { ok: false, error: appError("CONFLICT", "errors.chatSendInFlight", true) };
       }
       let counter = 0;
       const nextId = (): string => (this.deps.randomId ? this.deps.randomId(++counter) : crypto.randomUUID());
@@ -415,9 +417,8 @@ export class ChatService {
   }
 }
 
-function internalResult(reason: unknown): Result<never> {
-  const message = reason instanceof Error ? reason.message : String(reason);
-  return { ok: false, error: appError("INTERNAL", `errors.internal:${message}`) };
+function internalResult(_reason: unknown): Result<never> {
+  return { ok: false, error: appError("INTERNAL", "errors.internal") };
 }
 
 export async function sendChatMessage(deps: ChatSendDeps, input: SendInput, emit: (event: StreamEvent) => void): Promise<Result<{ requestId: string; assistantMessageId: string }>> {

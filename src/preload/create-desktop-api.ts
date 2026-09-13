@@ -135,6 +135,14 @@ async function invokeResult<I, O>(
   }
 }
 
+function invokeIgnoringError(ipc: IpcInvoker, channel: string, payload: unknown): Promise<unknown> {
+  try {
+    return Promise.resolve(ipc.invoke(channel, payload));
+  } catch {
+    return Promise.resolve(undefined);
+  }
+}
+
 export function createDesktopApi(ipc: IpcInvoker): DesktopApi {
   const pendingSubscriptions = new Map<string, Promise<unknown>>();
   const awaitSubscription = async (requestId: string): Promise<void> => {
@@ -207,6 +215,12 @@ export function createDesktopApi(ipc: IpcInvoker): DesktopApi {
         MODEL_CHANNELS.listProfiles,
         z.undefined(),
         profileListResultSchema
+      ),
+      chooseLocalModel: () => invokeResult(
+        ipc,
+        MODEL_CHANNELS.chooseLocalModel,
+        z.undefined(),
+        resultSchema(z.string().nullable())
       ),
       getDefaultRoutes: () => invokeResult(
         ipc,
@@ -318,18 +332,18 @@ export function createDesktopApi(ipc: IpcInvoker): DesktopApi {
         };
         ipc.on?.(channel, handler);
         // Main only fans out to windows registered here; register before streaming.
-        const registration = Promise.resolve(ipc.invoke(CHAT_CHANNELS.subscribeRequest, { requestId: parsed.data })).catch(() => undefined);
+        const registration = invokeIgnoringError(ipc, CHAT_CHANNELS.subscribeRequest, { requestId: parsed.data }).catch(() => undefined);
         pendingSubscriptions.set(parsed.data, registration);
         return () => {
           ipc.removeListener?.(channel, handler);
           if (pendingSubscriptions.get(parsed.data) === registration) pendingSubscriptions.delete(parsed.data);
-          void Promise.resolve(ipc.invoke(CHAT_CHANNELS.unsubscribeRequest, { requestId: parsed.data })).catch(() => undefined);
+          void invokeIgnoringError(ipc, CHAT_CHANNELS.unsubscribeRequest, { requestId: parsed.data }).catch(() => undefined);
         };
       },
       unsubscribe: (requestId) => {
         const parsed = chatRequestIdInputSchema.safeParse({ requestId });
         if (!parsed.success) return;
-        void ipc.invoke(CHAT_CHANNELS.unsubscribeRequest, parsed.data).catch(() => undefined);
+        void invokeIgnoringError(ipc, CHAT_CHANNELS.unsubscribeRequest, parsed.data).catch(() => undefined);
       }
     },
     citations: {

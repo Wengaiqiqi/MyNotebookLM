@@ -158,6 +158,22 @@ describe("registerModelHandlers", () => {
     expect(service.removeCredential).toHaveBeenCalledWith({ profileId: PROFILE_ID });
   });
 
+  it("opens the native picker for local model files and directories", async () => {
+    const ipc = new FakeIpcMain();
+    const dialogs = {
+      showOpenDialog: vi.fn(async () => ({ canceled: false, filePaths: ["C:\\models\\embedding"] }))
+    };
+    registerModelHandlers(ipc, createService() as unknown as ModelService, dialogs);
+
+    await expect(invoke(ipc, MODEL_CHANNELS.chooseLocalModel)).resolves.toEqual({
+      ok: true,
+      value: "C:\\models\\embedding"
+    });
+    expect(dialogs.showOpenDialog).toHaveBeenCalledWith(expect.objectContaining({
+      properties: ["openFile", "openDirectory"]
+    }));
+  });
+
   it.each([
     [SETTINGS_CHANNELS.get, {}, "getSettings"],
     [SETTINGS_CHANNELS.update, {}, "updateSettings"],

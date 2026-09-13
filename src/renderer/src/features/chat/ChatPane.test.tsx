@@ -97,6 +97,87 @@ describe("ChatPane conversation creation", () => {
     })));
   });
 
+  it("renders provider failures in the assistant bubble and unlocks the composer", async () => {
+    const api = mockApi();
+    let sink: ((event: any) => void) | undefined;
+    let requestId = "";
+    vi.mocked(api.chat.subscribe).mockImplementation((id, listener) => { requestId = id; sink = listener; return () => undefined; });
+    vi.mocked(api.chat.send).mockImplementation(async (input) => ({ ok: true, value: { requestId: input.requestId, assistantMessageId: "assistant-failed" } }));
+    vi.mocked(api.chat.regenerate).mockImplementation(async (input) => ({ ok: true, value: { requestId: input.requestId, assistantMessageId: "assistant-retry" } }));
+    render(
+      <ChatPane
+        projectId={projectId}
+        generationProfileId="9a9a9999-9999-4999-8999-999999999999"
+        sources={readySources}
+        onOpenSettings={() => undefined}
+        onImport={() => undefined}
+      />
+    );
+
+    const input = await screen.findByRole("textbox", { name: "针对这个项目提问" });
+    fireEvent.change(input, { target: { value: "你好" } });
+    fireEvent.click(screen.getByRole("button", { name: "发送" }));
+    await waitFor(() => expect(api.chat.send).toHaveBeenCalled());
+    await act(async () => {
+      sink?.({ type: "failed", requestId, messageId: "assistant-failed", error: { code: "TIMEOUT", messageKey: "errors.timeout", recoverable: true } });
+      await Promise.resolve();
+    });
+
+    const errorBubble = document.querySelector(".assistant-error");
+    expect(errorBubble?.textContent).toContain("提供商响应超时");
+    expect(document.querySelector(".chat-note.error")).toBeNull();
+    const retryButton = screen.getByRole("button", { name: "重试" });
+    expect(retryButton).toBeTruthy();
+    expect(retryButton.className).toContain("assistant-retry");
+    fireEvent.change(input, { target: { value: "再次询问" } });
+    expect((screen.getByRole("button", { name: "发送" }) as HTMLButtonElement).disabled).toBe(false);
+    fireEvent.click(retryButton);
+    await waitFor(() => expect(api.chat.regenerate).toHaveBeenCalledWith(expect.objectContaining({ messageId: "assistant-failed" })));
+  });
+
+  it("explains restored failures with the error code and target model", async () => {
+    const api = mockApi([
+      {
+        id: "failed-user", conversationId: existingId, sequence: 1, role: "user", content: "你好",
+        state: "completed", replyToMessageId: null, supersedesMessageId: null, superseded: false,
+        provider: null, profileId: null, model: null, usage: null, errorCode: null, completionReason: null,
+        createdAt: "2026-08-30T07:00:00.000Z", updatedAt: "2026-08-30T07:00:00.000Z", citations: []
+      },
+      {
+        id: "failed-assistant", conversationId: existingId, sequence: 2, role: "assistant", content: "",
+        state: "failed", replyToMessageId: "failed-user", supersedesMessageId: null, superseded: false,
+        provider: "anthropic", profileId: "profile-1", model: "glm-5.3", usage: null, errorCode: "TIMEOUT", completionReason: null,
+        createdAt: "2026-08-30T07:00:00.000Z", updatedAt: "2026-08-30T07:00:00.000Z", citations: []
+      }
+    ]);
+    vi.mocked(api.models.listProfiles).mockResolvedValueOnce({
+      ok: true,
+      value: {
+        profiles: [{
+          id: "profile-1", name: "闲卡", provider: "anthropic", capability: "generation", baseUrl: "https://example.com",
+          modelId: "glm-5.3", enabled: true, createdAt: "2026-08-30T07:00:00.000Z", updatedAt: "2026-08-30T07:00:00.000Z"
+        }],
+        builtInProfiles: [],
+        credentials: []
+      }
+    });
+    render(
+      <ChatPane
+        projectId={projectId}
+        generationProfileId="profile-1"
+        sources={readySources}
+        onOpenSettings={() => undefined}
+        onImport={() => undefined}
+      />
+    );
+
+    const errorBubble = await screen.findByRole("alert");
+    expect(errorBubble.textContent).toContain("提供商响应超时");
+    expect(errorBubble.textContent).toContain("错误码：TIMEOUT");
+    await waitFor(() => expect(errorBubble.textContent).toContain("目标模型：闲卡 / glm-5.3"));
+    expect(errorBubble.textContent).not.toContain("目标模型：anthropic / glm-5.3");
+  });
+
   it("switches to the blank new conversation immediately after creating it", async () => {
     const api = mockApi();
     const oldMessage: MessageDto = {

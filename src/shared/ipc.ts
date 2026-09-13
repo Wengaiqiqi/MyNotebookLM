@@ -49,6 +49,7 @@ export const SETTINGS_CHANNELS = {
 
 export const MODEL_CHANNELS = {
   listProfiles: "models:v1:list-profiles",
+  chooseLocalModel: "models:v1:choose-local-model",
   getDefaultRoutes: "models:v1:get-default-routes",
   setDefaultRoutes: "models:v1:set-default-routes",
   saveProfile: "models:v1:save-profile",
@@ -243,6 +244,7 @@ export interface DesktopApi {
   };
   models: {
     listProfiles(): Promise<Result<ModelProfileListDto>>;
+    chooseLocalModel(): Promise<Result<string | null>>;
     getDefaultRoutes(): Promise<Result<DefaultModelRoutesDto>>;
     setDefaultRoutes(input: SetDefaultModelRoutesInput): Promise<Result<DefaultModelRoutesDto>>;
     saveProfile(input: SaveModelProfileInput): Promise<Result<ModelProfileDto>>;

@@ -36,7 +36,7 @@ import { SpaceRepository } from "./vector/space-repository";
 import { SpaceService } from "./vector/space-service";
 import { backupDatabase } from "./vector/vector-backup";
 import { createLocalModelManager, managedActiveDirectory, managedStagingDirectory } from "./vector/local-model-manager";
-import { LocalEmbeddingProvider, createTransformersEmbeddingRuntime, isAuthoritativeLocalCapability } from "./vector/local-embedding-provider";
+import { LocalEmbeddingProvider, canonicalLocalModelPath, createLocalDirectoryEmbeddingProvider, createTransformersEmbeddingRuntime, isAuthoritativeLocalCapability } from "./vector/local-embedding-provider";
 import { LOCAL_MODEL_MANIFEST } from "./vector/local-model-manifest";
 import { createModelProvider } from "./models/model-service";
 import { BUILT_IN_LOCAL_EMBEDDING_PROFILE, isBuiltInLocalEmbeddingProfile } from "./models/local-embedding-profile";
@@ -142,10 +142,23 @@ app.whenReady().then(async () => {
   const localEmbeddingProvider = new LocalEmbeddingProvider(localManager, localRuntime);
   const createProviderForSpace = async (row: { provider: string; model_id: string; model_revision: string; dimension?: number; distance?: string; pooling?: string; preprocess_version?: string; chunking_version?: string; fingerprint?: string }, space: { id: string; dimension: number }) => {
     const profile = row.provider === "local"
-      ? BUILT_IN_LOCAL_EMBEDDING_PROFILE
+      ? (row.model_id === BUILT_IN_LOCAL_EMBEDDING_PROFILE.modelId && row.model_revision === LOCAL_MODEL_MANIFEST.revision
+        ? BUILT_IN_LOCAL_EMBEDDING_PROFILE
+        : settingsRepository.listProfiles().find(p => p.capability === "embedding" && p.enabled && p.provider === "local" && p.modelId === row.model_id && canonicalLocalModelPath(p.baseUrl) === canonicalLocalModelPath(row.model_revision)))
       : settingsRepository.listProfiles().find(p => p.capability === "embedding" && p.enabled && p.provider === row.provider && p.modelId === row.model_id);
-    if (!profile || (row.provider === "local" && !isBuiltInLocalEmbeddingProfile(profile))) throw Object.assign(new Error("Embedding profile is missing or mismatched"), { code: "EMBEDDING_PROFILE_MISMATCH", recoverable: false });
+    if (!profile) throw Object.assign(new Error("Embedding profile is missing or mismatched"), { code: "EMBEDDING_PROFILE_MISMATCH", recoverable: false });
     if (profile.provider === "local") {
+      if (!isBuiltInLocalEmbeddingProfile(profile)) {
+        if (!row.dimension || row.distance !== "cosine" || row.pooling !== "mean" || !row.preprocess_version || !row.chunking_version) throw Object.assign(new Error("Local embedding capability is incomplete"), { code: "EMBEDDING_PROFILE_MISMATCH", recoverable: false });
+        const provider = createLocalDirectoryEmbeddingProvider(profile.baseUrl, profile.modelId);
+        if (row.fingerprint) {
+          if (provider.describe().dimension !== row.dimension) await provider.embedBatch(["embedding profile probe"], new AbortController().signal, 1);
+          const actual = provider.describe();
+          const persisted = { provider: row.provider, modelId: row.model_id, modelRevision: canonicalLocalModelPath(row.model_revision), dimension: row.dimension, distance: row.distance, pooling: row.pooling, preprocessVersion: row.preprocess_version, chunkingVersion: row.chunking_version } as const;
+          if (!isAuthoritativeLocalCapability(persisted, actual) || row.fingerprint !== canonicalEmbeddingFingerprint(actual)) throw Object.assign(new Error("Local embedding capability is not authoritative"), { code: "EMBEDDING_PROFILE_MISMATCH", recoverable: false });
+        }
+        return provider;
+      }
       const actual = localEmbeddingProvider.describe();
       if (!row.dimension || row.distance !== "cosine" || row.pooling !== "mean" || !row.preprocess_version || !row.chunking_version || !row.fingerprint) throw Object.assign(new Error("Local embedding capability is incomplete"), { code: "EMBEDDING_PROFILE_MISMATCH", recoverable: false });
       const persisted = { provider: row.provider, modelId: row.model_id, modelRevision: row.model_revision, dimension: row.dimension, distance: row.distance, pooling: row.pooling, preprocessVersion: row.preprocess_version, chunkingVersion: row.chunking_version } as const;
@@ -195,10 +208,11 @@ app.whenReady().then(async () => {
       if (!profile || !profile.enabled || profile.capability !== "embedding") throw unavailable();
       const modelId = profile.modelId.trim();
       if (!modelId) throw unavailable();
-      const trustedRevision = profile.provider === "local" ? LOCAL_MODEL_MANIFEST.revision : modelId;
-      const seedDimension = profile.provider === "local" ? LOCAL_MODEL_MANIFEST.dimension : 1;
-      const capabilitySeed = { provider: profile.provider, modelId, modelRevision: trustedRevision, dimension: seedDimension, distance: "cosine" as const, pooling: "mean" as const, preprocessVersion: profile.provider === "local" ? "e5-query-passage-v1" : "provider-default-v1", chunkingVersion: "persisted" };
-      const provider = await createProviderForSpace({ provider: capabilitySeed.provider, model_id: capabilitySeed.modelId, model_revision: capabilitySeed.modelRevision, dimension: capabilitySeed.dimension, distance: capabilitySeed.distance, pooling: capabilitySeed.pooling, preprocess_version: capabilitySeed.preprocessVersion, chunking_version: capabilitySeed.chunkingVersion, ...(profile.provider === "local" ? { fingerprint: canonicalEmbeddingFingerprint(capabilitySeed) } : {}) }, { id: "", dimension: capabilitySeed.dimension });
+      const builtIn = isBuiltInLocalEmbeddingProfile(profile);
+      const trustedRevision = builtIn ? LOCAL_MODEL_MANIFEST.revision : profile.provider === "local" ? canonicalLocalModelPath(profile.baseUrl) : modelId;
+      const seedDimension = builtIn ? LOCAL_MODEL_MANIFEST.dimension : 1;
+      const capabilitySeed = { provider: profile.provider, modelId, modelRevision: trustedRevision, dimension: seedDimension, distance: "cosine" as const, pooling: "mean" as const, preprocessVersion: builtIn ? "e5-query-passage-v1" : profile.provider === "local" ? "local-provider-v1" : "provider-default-v1", chunkingVersion: "persisted" };
+      const provider = await createProviderForSpace({ provider: capabilitySeed.provider, model_id: capabilitySeed.modelId, model_revision: capabilitySeed.modelRevision, dimension: capabilitySeed.dimension, distance: capabilitySeed.distance, pooling: capabilitySeed.pooling, preprocess_version: capabilitySeed.preprocessVersion, chunking_version: capabilitySeed.chunkingVersion, ...(builtIn ? { fingerprint: canonicalEmbeddingFingerprint(capabilitySeed) } : {}) }, { id: "", dimension: capabilitySeed.dimension });
       const probe = await provider?.embedBatch?.(["embedding profile probe"], new AbortController().signal, 1);
       const dimension = probe[0]?.length;
       if (!dimension) throw unavailable();
@@ -268,10 +282,11 @@ app.whenReady().then(async () => {
       const current = spaces.active(projectId);
       const modelId = profile.modelId.trim();
       if (!modelId) return failure("VALIDATION", "errors.embeddingProfileUnavailable");
-      const trustedRevision = profile.provider === "local" ? LOCAL_MODEL_MANIFEST.revision : modelId;
-      const seedDimension = current?.dimension ?? (profile.provider === "local" ? LOCAL_MODEL_MANIFEST.dimension : 1);
-      const capabilitySeed = { provider: profile.provider, modelId, modelRevision: trustedRevision, dimension: profile.provider === "local" ? LOCAL_MODEL_MANIFEST.dimension : seedDimension, distance: "cosine" as const, pooling: "mean" as const, preprocessVersion: profile.provider === "local" ? "e5-query-passage-v1" : "provider-default-v1", chunkingVersion: "persisted" };
-      const provider = await createProviderForSpace({ provider: capabilitySeed.provider, model_id: capabilitySeed.modelId, model_revision: capabilitySeed.modelRevision, dimension: capabilitySeed.dimension, distance: capabilitySeed.distance, pooling: capabilitySeed.pooling, preprocess_version: capabilitySeed.preprocessVersion, chunking_version: capabilitySeed.chunkingVersion, ...(profile.provider === "local" ? { fingerprint: canonicalEmbeddingFingerprint(capabilitySeed) } : {}) }, { id: current?.id ?? "", dimension: capabilitySeed.dimension });
+      const builtIn = isBuiltInLocalEmbeddingProfile(profile);
+      const trustedRevision = builtIn ? LOCAL_MODEL_MANIFEST.revision : profile.provider === "local" ? canonicalLocalModelPath(profile.baseUrl) : modelId;
+      const seedDimension = builtIn ? LOCAL_MODEL_MANIFEST.dimension : profile.provider === "local" ? 1 : current?.dimension ?? 1;
+      const capabilitySeed = { provider: profile.provider, modelId, modelRevision: trustedRevision, dimension: seedDimension, distance: "cosine" as const, pooling: "mean" as const, preprocessVersion: builtIn ? "e5-query-passage-v1" : profile.provider === "local" ? "local-provider-v1" : "provider-default-v1", chunkingVersion: "persisted" };
+      const provider = await createProviderForSpace({ provider: capabilitySeed.provider, model_id: capabilitySeed.modelId, model_revision: capabilitySeed.modelRevision, dimension: capabilitySeed.dimension, distance: capabilitySeed.distance, pooling: capabilitySeed.pooling, preprocess_version: capabilitySeed.preprocessVersion, chunking_version: capabilitySeed.chunkingVersion, ...(builtIn ? { fingerprint: canonicalEmbeddingFingerprint(capabilitySeed) } : {}) }, { id: current?.id ?? "", dimension: capabilitySeed.dimension });
       const probe = await provider?.embedBatch?.(["embedding profile probe"], new AbortController().signal, 1);
       const dimension = probe[0]?.length;
       if (!dimension) return failure("VALIDATION", "errors.embeddingProfileUnavailable");
@@ -386,6 +401,10 @@ app.whenReady().then(async () => {
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) createMainWindow();
   });
+}).catch(() => {
+  // Startup failures are handled at the process boundary so Electron does
+  // not leave a half-initialized window alive or report an unhandled promise.
+  app.quit();
 });
 
 let quitting = false;
@@ -393,33 +412,39 @@ app.on("before-quit", (event) => {
   if (quitting) return;
   event?.preventDefault();
   quitting = true;
-  return Promise.resolve(workerPool?.close()).finally(() => {
-  return Promise.resolve(LanceStore.closeAll()).finally(() => {
-  workerPool = undefined;
-  taskRevisions.clear();
-  taskFanout?.close();
-  taskFanout = undefined;
-  cleanupProjectHandlers?.();
-  cleanupProjectHandlers = undefined;
-  cleanupModelHandlers?.();
-  cleanupModelHandlers = undefined;
-  cleanupTitleOverlayHandler?.();
-  cleanupSourceHandlers?.();
-  cleanupSourceHandlers = undefined;
-  cleanupVectorHandlers?.();
-  cleanupVectorHandlers = undefined;
-  cleanupChatHandlers?.();
-  cleanupChatHandlers = undefined;
-  cleanupTransformationHandlers?.();
-  cleanupTransformationHandlers = undefined;
-  cleanupNoteHandlers?.();
-  cleanupNoteHandlers = undefined;
-  cleanupTitleOverlayHandler = undefined;
-  appDatabase?.close();
-  appDatabase = undefined;
-    app.quit();
-  });
-  });
+  return Promise.resolve(workerPool?.close())
+    .catch(() => undefined)
+    .then(() => LanceStore.closeAll())
+    .catch(() => undefined)
+    .finally(() => {
+      try {
+        workerPool = undefined;
+        taskRevisions.clear();
+        taskFanout?.close();
+        taskFanout = undefined;
+        cleanupProjectHandlers?.();
+        cleanupProjectHandlers = undefined;
+        cleanupModelHandlers?.();
+        cleanupModelHandlers = undefined;
+        cleanupTitleOverlayHandler?.();
+        cleanupSourceHandlers?.();
+        cleanupSourceHandlers = undefined;
+        cleanupVectorHandlers?.();
+        cleanupVectorHandlers = undefined;
+        cleanupChatHandlers?.();
+        cleanupChatHandlers = undefined;
+        cleanupTransformationHandlers?.();
+        cleanupTransformationHandlers = undefined;
+        cleanupNoteHandlers?.();
+        cleanupNoteHandlers = undefined;
+        cleanupTitleOverlayHandler = undefined;
+        appDatabase?.close();
+        appDatabase = undefined;
+      } finally {
+        app.quit();
+      }
+    })
+    .catch(() => undefined);
 });
 
 app.on("window-all-closed", () => {

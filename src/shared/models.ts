@@ -134,7 +134,9 @@ function validateProviderAddress(
   context: z.RefinementCtx,
   path: PropertyKey[] = []
 ): void {
-  if (input.provider === "local" && input.baseUrl === "") return;
+  // Local embedding profiles store the user-selected model file/directory in
+  // baseUrl; the main process validates that path before loading it.
+  if (input.provider === "local") return;
   let address: URL;
   try {
     address = new URL(input.baseUrl);

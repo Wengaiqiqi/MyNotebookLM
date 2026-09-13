@@ -1,9 +1,12 @@
 import { describe, expect, it, vi } from "vitest";
 vi.mock("@huggingface/transformers", () => ({ env: {}, pipeline: vi.fn(async () => vi.fn(async () => ({ tolist: () => [[1]] }))) }));
 import { LocalEmbeddingProvider, createTransformersEmbeddingRuntime, isAuthoritativeLocalCapability } from "./local-embedding-provider";
+import { createLocalDirectoryEmbeddingProvider } from "./local-embedding-provider";
 import { BUILT_IN_LOCAL_EMBEDDING_PROFILE } from "../models/local-embedding-profile";
 import { LOCAL_MODEL_MANIFEST } from "./local-model-manifest";
 import path from "node:path";
+import os from "node:os";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 describe("LocalEmbeddingProvider", () => it("prefixes, batches, normalizes, and cancels", async () => {
   const manager = { ensureReady: vi.fn(async () => ({})) }; const seen: string[][] = [];
   const provider = new LocalEmbeddingProvider(manager as never, async (_m, input) => { seen.push(input); return input.map(() => [3, ...Array(383).fill(4)]); }, 2);
@@ -47,4 +50,35 @@ it("accepts only the exact manager active directory after Windows normalization"
   const runtime = createTransformersEmbeddingRuntime("C:/models", "C:/models/active-one");
   await runtime("c:/models/active-one", ["x"], new AbortController().signal);
   expect(transformers.pipeline).toHaveBeenCalledWith("feature-extraction", path.resolve("C:/models/active-one"), expect.anything());
+});
+it("retries a model load after a transient pipeline failure", async () => {
+  const transformers = await import("@huggingface/transformers");
+  const pipelineMock = vi.mocked(transformers.pipeline);
+  const active = `C:/models/retry-${Date.now()}`;
+  pipelineMock.mockRejectedValueOnce(new Error("transient model load"));
+  pipelineMock.mockResolvedValueOnce(vi.fn(async () => ({ tolist: () => [[1]] })) as never);
+  const runtime = createTransformersEmbeddingRuntime(active);
+
+  await expect(runtime(active, ["first"], new AbortController().signal)).rejects.toThrow("transient model load");
+  await expect(runtime(active, ["second"], new AbortController().signal)).resolves.toEqual([[1]]);
+  expect(pipelineMock).toHaveBeenLastCalledWith("feature-extraction", path.resolve(active), { local_files_only: true });
+});
+it("loads a user-selected weight file from its model root", async () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), "mynotebook-local-"));
+  const weights = path.join(root, "onnx", "model.onnx");
+  mkdirSync(path.dirname(weights), { recursive: true });
+  writeFileSync(path.join(root, "config.json"), "{}");
+  writeFileSync(weights, "weights");
+  try {
+    const provider = createLocalDirectoryEmbeddingProvider(weights, "custom-local");
+    expect(provider.describe()).toMatchObject({ provider: "local", modelId: "custom-local", dimension: 1 });
+    await provider.embedBatch(["hello"], new AbortController().signal, 1);
+    expect((await import("@huggingface/transformers")).pipeline).toHaveBeenLastCalledWith(
+      "feature-extraction",
+      root,
+      { local_files_only: true }
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 });

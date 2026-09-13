@@ -53,7 +53,12 @@ const en = {
     builtIn: "Built-in",
     builtInHint: "Built-in local embedding model · {{dimension}} dimensions, no API key required.",
     builtInSelected: "Selected",
-    useBuiltinInstead: "Use the built-in local model instead",
+    localModelMode: "Local model mode",
+    localModelBuiltIn: "Use built-in model",
+    localModelCustom: "Choose local model",
+    localModelPath: "Model weights or directory",
+    localModelPathPlaceholder: "Choose a model weight file or model directory",
+    chooseLocalModel: "Choose file / directory",
     provider: "Provider",
     profileName: "Profile name",
     keySaved: "key {{mask}}",
@@ -64,7 +69,7 @@ const en = {
       anthropic: "Anthropic",
       gemini: "Gemini",
       ollama: "Ollama",
-      local: "Built-in local model"
+      local: "Built-in model"
     },
     apiAddress: "API address",
     apiKey: "API key",
@@ -75,12 +80,15 @@ const en = {
     fetchSuccess: "Models fetched",
     model: "Model",
     modelName: "Model name",
+    selectedModels: "{{count}} models selected",
+    noDiscoveredModels: "Fetch models to load the available choices.",
     chooseModel: "Choose a model",
     manualModel: "Enter model name manually",
     chooseDiscovered: "Choose a discovered model",
     validation: {
       apiKey: "Enter an API key.",
       address: "Enter a valid HTTP or HTTPS API address.",
+      localModelPath: "Choose a model weight file or model directory.",
       complete: "Configure both a valid generation model and embedding model."
     },
     errors: { request: "The model service request failed." }
@@ -114,7 +122,7 @@ const en = {
     embeddingRule: "Embedding uses a single profile",
     embeddingProfile: "Embedding profile",
     chooseEmbeddingProfile: "Choose embedding profile",
-    emptyRoute: "No model route configured yet",
+    emptyRoute: "Please add a model route",
     addFirstProfile: "Add the first profile",
     addFallback: "Add fallback",
     fallbackProfile: "Add fallback profile",
@@ -220,7 +228,7 @@ const en = {
       failed: "The answer failed."
     },
     repair: {
-      retry: "Retry answer",
+      retry: "Retry",
       repair: "Repair answer"
     },
     renameHint: "Click to switch, double-click to rename",
@@ -230,7 +238,7 @@ const en = {
     retryBusyHint: "An answer is streaming. Wait for it to finish or stop it first",
     ui: {
       conversations: "Conversations", rename: "Rename", remove: "Delete", saveTitle: "Save conversation title", noConversations: "No conversations yet.", conversationTitle: "Conversation title", viewDetails: "View source",
-      citationTitle: "Source citations", citationEmpty: "Citations from answers will appear here.", sourceExcerptTitle: "Source excerpt", sourceExcerptUnavailable: "The source excerpt is unavailable.", openOriginal: "Open original source", opened: "Opened {{kind}}", sourceLabel: "Sources", indexed: "indexed", indexedLabel: "indexed", processingComplete: "Processing complete", research: "Research", researchChat: "Research chat", askPlaceholder: "Ask about your sources. Enter to send, Shift+Enter for a new line…", model: "Model", generationModel: "Generation model", noModel: "No model", send: "Send", stop: "Stop", copy: "Copy", regenerate: "Regenerate", editAndResend: "Edit and resend", answerFailed: "The answer failed.", retryAnswer: "Retry answer", fallbackBanner: "The primary model was unavailable. The answer continued with a fallback model.", unavailableTitle: "Research chat is not ready yet", unavailableImport: "Import a source and wait for indexing to finish, then start asking.", unavailableModel: "Configure a generation model in settings to ask questions.", importSources: "Import sources", openSettings: "Open settings", rebuildIndex: "Rebuild index", pending: "pending", ready: "ready", sourceProgress: "{{stage}} · {{progress}}%", page: "Page", slide: "Slide", sheet: "Sheet", cell: "Cell"
+      citationTitle: "Source citations", citationEmpty: "Citations from answers will appear here.", sourceExcerptTitle: "Source excerpt", sourceExcerptUnavailable: "The source excerpt is unavailable.", openOriginal: "Open original source", opened: "Opened {{kind}}", sourceLabel: "Sources", indexed: "indexed", indexedLabel: "indexed", processingComplete: "Processing complete", research: "Research", researchChat: "Research chat", askPlaceholder: "Ask about your sources. Enter to send, Shift+Enter for a new line…", model: "Model", generationModel: "Generation model", noModel: "No model", send: "Send", stop: "Stop", copy: "Copy", regenerate: "Regenerate", editAndResend: "Edit and resend", answerFailed: "The answer failed.", retryAnswer: "Retry", errorCode: "Code: {{code}}", errorTarget: "Target model: {{target}}", fallbackBanner: "The primary model was unavailable. The answer continued with a fallback model.", unavailableTitle: "Research chat is not ready yet", unavailableImport: "Import a source and wait for indexing to finish, then start asking.", unavailableModel: "Configure a generation model in settings to ask questions.", importSources: "Import sources", openSettings: "Open settings", rebuildIndex: "Rebuild index", pending: "pending", ready: "Ready", sourceProgress: "{{stage}} · {{progress}}%", page: "Page", slide: "Slide", sheet: "Sheet", cell: "Cell"
     }
   },
   research: {
@@ -370,6 +378,8 @@ const en = {
     noRules: "No custom rules yet.",
     insights: "Insights",
     noInsights: "Completed insights will appear here.",
+    viewDetails: "View details",
+    insightDetail: "Insight details",
     convert: "Convert to note",
     unavailable: "Transformations are unavailable until the desktop service is ready.",
     states: { queued: "Queued", running: "Processing", completed: "Completed", failed: "Failed", cancelled: "Cancelled" }

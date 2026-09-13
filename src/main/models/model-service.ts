@@ -52,6 +52,7 @@ import { OllamaProvider } from "./ollama-provider";
 import { OpenAiCompatibleProvider, OpenAiProvider } from "./openai-provider";
 import { ProviderRequestError } from "./http-client";
 import type { ModelDescriptor, ModelProvider } from "./provider";
+import { createLocalDirectoryEmbeddingProvider } from "../vector/local-embedding-provider";
 
 export type ModelProviderFactory = (
   provider: ProviderKind,
@@ -127,15 +128,6 @@ function capabilityError<T>(): Result<T> {
   return errorResult(appError("VALIDATION", "errors.modelCapability"));
 }
 
-const generationTasks = [
-  "chat",
-  "note-title",
-  "summary",
-  "key-points",
-  "qa",
-  "custom-transformation"
-] as const;
-
 type ProviderConnection = Readonly<{
   profileId?: string | undefined;
   provider: ProviderKind;
@@ -195,22 +187,9 @@ export class ModelService {
 
   async getDefaultRoutes(): Promise<Result<DefaultModelRoutesDto>> {
     try {
-      const generationRoutes = generationTasks.map((task) => this.settings.getRoute(task));
-      const configuredGenerationRoutes = generationRoutes.filter((route) => route.length > 0);
-      if (configuredGenerationRoutes.length > 0) {
-        const generationProfileId = generationRoutes[0]?.[0]?.profileId;
-        const consistent = generationRoutes.every((route) =>
-          route.length > 0 && route[0]?.profileId === generationProfileId
-        );
-        if (!consistent) {
-          return errorResult(appError(
-            "VALIDATION",
-            "errors.modelRouteInconsistent",
-            true
-          ));
-        }
-      }
-      const generationProfileId = generationRoutes[0]?.[0]?.profileId;
+      // Chat availability follows the chat route; other task routes may be
+      // intentionally configured independently in the routing screen.
+      const generationProfileId = this.settings.getRoute("chat")[0]?.profileId;
       const embeddingRoutes = this.settings.getRoute("embedding");
       if (embeddingRoutes.length > 1) {
         return errorResult(appError("VALIDATION", "errors.modelRouteInconsistent", true));
@@ -266,11 +245,13 @@ export class ModelService {
     const generationProfile = this.settings.getProfile(parsed.generationProfileId);
     if (!generationProfile) return notFound();
     if (generationProfile.capability !== "generation") return capabilityError();
+    if (!generationProfile.enabled) return errorResult(appError("VALIDATION", "errors.validation", true));
 
     if (!isBuiltInLocalEmbeddingProfile(parsed.embeddingProfileId)) {
       const embeddingProfile = this.settings.getProfile(parsed.embeddingProfileId);
       if (!embeddingProfile) return notFound();
       if (embeddingProfile.capability !== "embedding") return capabilityError();
+      if (!embeddingProfile.enabled) return errorResult(appError("VALIDATION", "errors.validation", true));
     }
     try {
       this.settings.replaceDefaultRoutes(
@@ -408,7 +389,16 @@ export class ModelService {
 
   private async testProfile(input: TestModelInput): Promise<Result<ModelTestResultDto>> {
     const { profile } = input;
-    if (profile.provider === "local") return builtInError();
+    if (profile.provider === "local") {
+      if (isBuiltInLocalEmbeddingProfile(profile)) return builtInError();
+      try {
+        const provider = createLocalDirectoryEmbeddingProvider(profile.baseUrl, profile.modelId);
+        await provider.embedBatch(["test"], new AbortController().signal, 1);
+        return { ok: true, value: { modelId: profile.modelId, capability: profile.capability, verifiedBy: "probe" } };
+      } catch {
+        return errorResult(appError("VALIDATION", "errors.embeddingProfileUnavailable"));
+      }
+    }
     return this.withProvider({
       profileId: profile.id,
       provider: profile.provider,

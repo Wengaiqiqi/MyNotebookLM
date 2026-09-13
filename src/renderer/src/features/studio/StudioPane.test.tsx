@@ -2,14 +2,19 @@
 
 import React from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import StudioPane from "./StudioPane";
 import "../../i18n";
 import type { DesktopApi } from "../../../../shared/ipc";
 import type { BuiltinTransformationDto, InsightDto, TransformationDto } from "../../../../shared/transformations";
+import type { TaskDto } from "../../../../shared/tasks";
 
 const builtin: BuiltinTransformationDto = {
   key: "summary", language: "zh-CN", name: "总结", appliesTo: "source", prompt: "总结 {{content}}"
+};
+
+const keyPointsBuiltin: BuiltinTransformationDto = {
+  key: "key-points", language: "zh-CN", name: "要点", appliesTo: "source", prompt: "提取要点 {{content}}"
 };
 
 const rule: TransformationDto = {
@@ -29,13 +34,15 @@ const insight: InsightDto = {
   createdAt: "2026-01-01T00:00:00.000Z", updatedAt: "2026-01-01T00:00:00.000Z"
 };
 
+const refreshedInsight: InsightDto = { ...insight, id: "6a1a1111-1111-4111-8111-111111111111", content: "更新后的洞察" };
+
 const projectId = "1a1a1111-1111-4111-8111-111111111111";
 const revisionId = "5a1a1111-1111-4111-8111-111111111111";
 
-function mockApi(overrides: Partial<DesktopApi> = {}): void {
+function mockApi(overrides: Partial<DesktopApi> = {}): DesktopApi {
   const api = {
     transformations: {
-      listBuiltins: vi.fn(async () => ({ ok: true as const, value: [builtin] })),
+      listBuiltins: vi.fn(async () => ({ ok: true as const, value: [builtin, keyPointsBuiltin] })),
       listRules: vi.fn(async () => ({ ok: true as const, value: [rule] })),
       listInsights: vi.fn(async () => ({ ok: true as const, value: [insight] })),
       run: vi.fn(async () => ({ ok: true as const, value: taskDto() })),
@@ -66,7 +73,9 @@ function mockApi(overrides: Partial<DesktopApi> = {}): void {
     },
     ...overrides
   } as unknown as DesktopApi;
-  (window as unknown as { myNotebook: DesktopApi }).myNotebook = api;
+  const desktopApi = api as unknown as DesktopApi;
+  (window as unknown as { myNotebook: DesktopApi }).myNotebook = desktopApi;
+  return desktopApi;
 }
 
 function taskDto() {
@@ -93,11 +102,13 @@ describe("StudioPane", () => {
     render(<StudioPane projectId={projectId} />);
 
     expect(await screen.findByText("洞察内容")).toBeTruthy();
-    // The rule select carries builtin and custom options.
-    const ruleSelect = screen.getByLabelText("规则") as HTMLSelectElement;
-    const optionTexts = [...ruleSelect.options].map((option) => option.textContent);
-    expect(optionTexts).toContain("总结");
-    expect(optionTexts).toContain("我的规则");
+    // The rule select uses the themed rounded listbox.
+    const ruleSelect = screen.getByRole("button", { name: "规则" });
+    expect(ruleSelect.className).toContain("rounded-select-trigger");
+    fireEvent.click(ruleSelect);
+    expect(screen.getByRole("option", { name: "总结" })).toBeTruthy();
+    expect(screen.queryByRole("option", { name: "要点" })).toBeNull();
+    expect(screen.getByRole("option", { name: "我的规则" })).toBeTruthy();
   });
 
   it("runs a builtin transformation against the selected ready source revision", async () => {
@@ -127,7 +138,8 @@ describe("StudioPane", () => {
     render(<StudioPane projectId={projectId} />);
 
     await screen.findByText("洞察内容");
-    fireEvent.change(screen.getByLabelText("规则"), { target: { value: rule.id } });
+    fireEvent.click(screen.getByRole("button", { name: "规则" }));
+    fireEvent.click(await screen.findByRole("option", { name: "我的规则" }));
     const runButton = screen.getByRole("button", { name: /运行转换/ });
     expect((runButton as HTMLButtonElement).disabled).toBe(true);
 
@@ -168,5 +180,58 @@ describe("StudioPane", () => {
     const options = await screen.findAllByRole("option", { name: "就绪.pdf" });
     expect(options).toHaveLength(1);
     expect(screen.queryByRole("option", { name: "处理中.pdf" })).toBeNull();
+  });
+
+  it("opens the full insight in a detail dialog", async () => {
+    const api = mockApi();
+    vi.mocked(api.transformations!.listInsights).mockResolvedValue({
+      ok: true,
+      value: [{
+        ...insight,
+        content: "## 洞察标题\n\n1. **问：** 问题  \n   **答：**考试日期为 6 月 13 日。"
+      }]
+    });
+    render(<StudioPane projectId={projectId} />);
+
+    await screen.findByText(/考试日期为/);
+    fireEvent.click(screen.getByRole("button", { name: "查看详细" }));
+
+    const dialog = screen.getByRole("dialog");
+    expect(dialog).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "洞察详情" })).toBeTruthy();
+    expect(dialog.querySelector(".insight-detail-content h2")?.textContent).toBe("洞察标题");
+    expect(dialog.querySelectorAll(".insight-detail-content strong").length).toBe(2);
+    expect(dialog.textContent).not.toContain("**答：**");
+  });
+
+  it("uses the themed dropdown for a custom rule target", async () => {
+    mockApi();
+    render(<StudioPane projectId={projectId} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "新建自定义规则" }));
+    const target = await screen.findByRole("button", { name: "适用目标" });
+    expect(target.className).toContain("rounded-select-trigger");
+    fireEvent.click(target);
+    expect(screen.getByRole("option", { name: "模型回答" })).toBeTruthy();
+  });
+
+  it("reloads insights when a transformation task completes", async () => {
+    const api = mockApi();
+    const listInsights = vi.mocked(api.transformations!.listInsights);
+    listInsights.mockResolvedValueOnce({ ok: true, value: [insight] });
+    listInsights.mockResolvedValueOnce({ ok: true, value: [insight, refreshedInsight] });
+    let emit: ((task: TaskDto) => void) | undefined;
+    api.tasks!.subscribe = vi.fn((_id, listener) => {
+      emit = listener;
+      return () => undefined;
+    });
+    render(<StudioPane projectId={projectId} />);
+
+    await screen.findByText("洞察内容");
+    await act(async () => {
+      emit?.({ ...taskDto(), state: "completed", stage: "saving", progress: 1000, updatedAt: "2026-01-01T00:01:00.000Z" });
+    });
+    await waitFor(() => expect(screen.getByText("更新后的洞察")).toBeTruthy());
+    expect(listInsights).toHaveBeenCalledTimes(2);
   });
 });

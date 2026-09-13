@@ -311,13 +311,24 @@ describe("ModelService", () => {
     })).resolves.toMatchObject({ ok: false, error: { code: "NOT_FOUND" } });
   });
 
-  it("rejects partially present or inconsistent generation default routes", async () => {
+  it("rejects disabled profiles before writing default routes", async () => {
+    const { service, repository } = setup();
+    repository.profiles.set(PROFILE_ID, dto({ ...profile, enabled: false }));
+
+    await expect(service.setDefaultRoutes({
+      generationProfileId: PROFILE_ID,
+      embeddingProfileId: BUILT_IN_LOCAL_EMBEDDING_PROFILE_ID
+    })).resolves.toMatchObject({ ok: false, error: { code: "VALIDATION" } });
+    expect(repository.routes.size).toBe(0);
+  });
+
+  it("uses the chat route even when generation task routes differ", async () => {
     const { service, repository } = setup();
     repository.routes.set("chat", [{ taskKind: "chat", position: 0, profileId: PROFILE_ID }]);
 
     await expect(service.getDefaultRoutes()).resolves.toMatchObject({
-      ok: false,
-      error: { code: "VALIDATION", messageKey: "errors.modelRouteInconsistent" }
+      ok: true,
+      value: { generationProfileId: PROFILE_ID }
     });
 
     repository.replaceDefaultRoutes(PROFILE_ID, BUILT_IN_LOCAL_EMBEDDING_PROFILE_ID);
@@ -327,8 +338,8 @@ describe("ModelService", () => {
       profileId: OTHER_PROFILE_ID
     }]);
     await expect(service.getDefaultRoutes()).resolves.toMatchObject({
-      ok: false,
-      error: { code: "VALIDATION", messageKey: "errors.modelRouteInconsistent" }
+      ok: true,
+      value: { generationProfileId: PROFILE_ID, embeddingProfileId: BUILT_IN_LOCAL_EMBEDDING_PROFILE_ID }
     });
   });
 
@@ -737,6 +748,25 @@ describe("ModelService", () => {
     expect(credentials.set).not.toHaveBeenCalled();
     expect(credentials.remove).not.toHaveBeenCalled();
     expect(factory).not.toHaveBeenCalled();
+  });
+
+  it("validates a custom local model path before saving it", async () => {
+    const { service, repository } = setup();
+    const localProfile: ModelProfileInput = {
+      id: OTHER_PROFILE_ID,
+      name: "Local embedding",
+      provider: "local",
+      capability: "embedding",
+      baseUrl: "C:\\does-not-exist\\model",
+      modelId: "custom-local",
+      enabled: true
+    };
+
+    await expect(service.saveProfile({ profile: localProfile })).resolves.toMatchObject({
+      ok: false,
+      error: { code: "VALIDATION", messageKey: "errors.embeddingProfileUnavailable" }
+    });
+    expect(repository.profiles.has(OTHER_PROFILE_ID)).toBe(false);
   });
 
   it("returns not found instead of mutating unknown persisted profiles", async () => {

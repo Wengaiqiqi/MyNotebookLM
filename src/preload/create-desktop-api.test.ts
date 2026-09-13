@@ -76,6 +76,7 @@ describe("createDesktopApi", () => {
     expect(Object.keys(api.settings)).toEqual(["get", "update"]);
     expect(Object.keys(api.models)).toEqual([
       "listProfiles",
+      "chooseLocalModel",
       "getDefaultRoutes",
       "setDefaultRoutes",
       "saveProfile",
@@ -464,6 +465,14 @@ describe("createDesktopApi", () => {
     release(ok(undefined));
     await send;
     expect(invoke).toHaveBeenNthCalledWith(2, CHAT_CHANNELS.send, { requestId: chatRequestId, projectId: chatProjectId, conversationId: chatConversationId, question: "Hi" });
+  });
+
+  it("routes the native local-model picker through its validated channel", async () => {
+    const invoke = vi.fn().mockResolvedValue(ok("C:\\models\\embedding"));
+    const api = createDesktopApi({ invoke });
+
+    await expect(api.models.chooseLocalModel()).resolves.toEqual(ok("C:\\models\\embedding"));
+    expect(invoke).toHaveBeenCalledExactlyOnceWith(MODEL_CHANNELS.chooseLocalModel);
   });
 
   it("queues an immediate stop behind the send registration gate", async () => {

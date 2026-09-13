@@ -211,6 +211,9 @@ export class SettingsRepository {
       if (profiles.some((profile) => profile!.capability !== requiredCapability)) {
         throw new Error(`Route requires ${requiredCapability} capability`);
       }
+      if (profiles.some((profile) => !profile!.enabled)) {
+        throw new Error("Route requires enabled profile");
+      }
 
       this.db.prepare("DELETE FROM model_routes WHERE task_kind = ?").run(parsedTask);
       const insert = this.db.prepare(`
@@ -239,6 +242,9 @@ export class SettingsRepository {
       }
       if (embeddingProfile.capability !== "embedding") {
         throw new Error("Embedding default route requires embedding capability");
+      }
+      if (!generationProfile.enabled || !embeddingProfile.enabled) {
+        throw new Error("Default route requires enabled profiles");
       }
 
       this.db.prepare(`

@@ -80,6 +80,23 @@ describe("worker protocol", () => {
     await pool.close();
   });
 
+  it("rejects active and queued jobs when the pool closes", async () => {
+    const workers: EventEmitter[] = [];
+    const pool = new WorkerPool(1, new URL("file:///fake"), () => {
+      const worker = Object.assign(new EventEmitter(), { postMessage: () => undefined, terminate: async () => 0 });
+      workers.push(worker);
+      return worker as any;
+    });
+    const active = pool.start("active", "revision", "text", new Uint8Array());
+    const queued = pool.start("queued-close", "revision", "text", new Uint8Array());
+
+    await pool.close();
+    await expect(active).rejects.toThrow("Worker pool is closed");
+    await expect(queued).rejects.toThrow("Worker pool is closed");
+    await expect(pool.start("after-close", "revision", "text", new Uint8Array())).rejects.toThrow("Worker pool is closed");
+    expect(workers).toHaveLength(1);
+  });
+
   it("replaces a crashed worker and redispatches the durable task payload", async () => {
     const workers: EventEmitter[] = [];
     const pool = new WorkerPool(1, new URL("file:///fake"), () => {

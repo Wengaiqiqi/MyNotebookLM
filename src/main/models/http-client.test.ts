@@ -246,6 +246,28 @@ describe("ProviderHttpClient", () => {
     expect(cancel).toHaveBeenCalledOnce();
   });
 
+  it("stops an idle body read immediately when the caller aborts", async () => {
+    const controller = new AbortController();
+    let bodyController!: ReadableStreamDefaultController<Uint8Array>;
+    const client = new ProviderHttpClient(async () => new Response(new ReadableStream({
+      start(streamController) {
+        bodyController = streamController;
+        streamController.enqueue(new TextEncoder().encode('{"value":1}\n'));
+      }
+    }), { headers: { "content-type": "application/x-ndjson" } }), { idleTimeoutMs: 120_000 });
+    const iterator = client.ndjson("https://models.example", "/stream", { signal: controller.signal })[Symbol.asyncIterator]();
+    await expect(iterator.next()).resolves.toMatchObject({ value: { value: 1 }, done: false });
+    controller.abort();
+
+    const result = await Promise.race([
+      iterator.next().catch((error: unknown) => error),
+      new Promise<symbol>((resolve) => setTimeout(() => resolve(Symbol("timed out")), 500))
+    ]);
+    expect(result).toBeInstanceOf(ProviderRequestError);
+    expect((result as ProviderRequestError).failure.error.code).toBe("CANCELLED");
+    void bodyController;
+  });
+
   it("does not cancel a response that is read to completion", async () => {
     const cancel = vi.fn();
     const client = new ProviderHttpClient(async () => new Response(new ReadableStream({

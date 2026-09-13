@@ -71,9 +71,12 @@ export function createNodeUrlSource(): UrlSource {
     const address = init.addresses[0];
     if (!address) { reject(new Error("host did not resolve")); return; }
     const request = transport.request({ hostname: url.hostname, port: url.port || undefined, path: `${url.pathname}${url.search}`, method: "GET", headers: { accept: "text/html,application/xhtml+xml" }, signal: init.signal, lookup: (_hostname, _options, callback) => callback(null, address, isIP(address) as 4 | 6) }, (response) => {
-      const chunks: Buffer[] = []; let size = 0;
-      response.on("data", (chunk: Buffer) => { size += chunk.length; if (size <= MAX_BODY_BYTES) chunks.push(chunk); else request.destroy(new Error("response too large")); });
-      response.on("end", () => resolve({ status: response.statusCode ?? 0, headers: Object.fromEntries(Object.entries(response.headers).map(([key, value]) => [key, Array.isArray(value) ? value[0] ?? "" : value ?? ""])), url: rawUrl, body: () => Buffer.concat(chunks) }));
+      const chunks: Buffer[] = []; let size = 0; let tooLarge = false;
+      response.on("data", (chunk: Buffer) => { size += chunk.length; if (size <= MAX_BODY_BYTES) chunks.push(chunk); else { tooLarge = true; request.destroy(new Error("response too large")); } });
+      response.on("end", () => {
+        if (tooLarge) { reject(new Error("response too large")); return; }
+        resolve({ status: response.statusCode ?? 0, headers: Object.fromEntries(Object.entries(response.headers).map(([key, value]) => [key, Array.isArray(value) ? value[0] ?? "" : value ?? ""])), url: rawUrl, body: () => Buffer.concat(chunks) });
+      });
       response.on("error", reject);
     });
     request.once("error", reject); request.end();

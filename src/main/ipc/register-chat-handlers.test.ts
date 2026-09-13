@@ -234,10 +234,24 @@ describe("registerChatHandlers", () => {
     const service = makeService();
     const { ipc } = setup(service);
     const window = new FakeWindow();
+    windows.push(window);
     registry.set(rid, new Set([window]));
     await invoke(ipc, CHAT_CHANNELS.unsubscribeRequest, { requestId: rid });
     expect(registry.has(rid)).toBe(false);
     expect(window.delivered()).toEqual([]);
+  });
+
+  it("only removes the unsubscribing window from a shared request", async () => {
+    const rid = nextRequestId();
+    const service = makeService();
+    const { ipc } = setup(service);
+    const first = windows[0]!;
+    const second = new FakeWindow();
+    windows.push(second);
+    registry.set(rid, new Set([first, second]));
+
+    await invoke(ipc, CHAT_CHANNELS.unsubscribeRequest, { requestId: rid });
+    expect(registry.get(rid)).toEqual(new Set([first]));
   });
 
   it("cleans every subscription when the subscribing window is destroyed", async () => {

@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type {
   BuiltInModelProfileDto,
@@ -23,6 +23,20 @@ const ALL_TASKS: ModelTaskKind[] = [...GENERATION_TASKS, "embedding"];
 const providerLabel = (t: (key: string) => string, provider: ProviderKind): string =>
   t(`model.providers.${provider}`);
 
+function profileDisplayName(name: string): string {
+  // Older multi-select saves appended " / <index>". Keep those records
+  // readable without carrying the implementation detail into the title.
+  // ponytail: this display-only heuristic can match a user-entered numeric
+  // suffix; add explicit multi-select metadata if that distinction matters.
+  return name.replace(/\s+\/\s+\d+$/, "").trim() || name;
+}
+
+type RouteProfile = ModelProfileDto | BuiltInModelProfileDto;
+
+function routeModelLabel(profile: RouteProfile | undefined, fallback: string): string {
+  return profile ? `${profile.name} / ${profile.modelId}` : fallback;
+}
+
 export default function Settings({ projectId, language, theme, onLanguage, onTheme, onRoutesChanged, onClose }: {
   projectId?: string | undefined;
   language: AppLanguage;
@@ -36,7 +50,6 @@ export default function Settings({ projectId, language, theme, onLanguage, onThe
   const [section, setSection] = useState<Section>("models");
   const [profiles, setProfiles] = useState<ModelProfileDto[]>([]);
   const [builtIns, setBuiltIns] = useState<BuiltInModelProfileDto[]>([]);
-  const [credentials, setCredentials] = useState<Map<string, string>>(new Map());
   const [editorOpen, setEditorOpen] = useState<{ capability: "generation" | "embedding"; existing?: ModelProfileDto }>();
   const [deleting, setDeleting] = useState<ModelProfileDto>();
   const [loaded, setLoaded] = useState(false);
@@ -46,7 +59,6 @@ export default function Settings({ projectId, language, theme, onLanguage, onThe
     if (!result.ok) { toast.error(t(result.error.messageKey)); return; }
     setProfiles(result.value.profiles);
     setBuiltIns(result.value.builtInProfiles);
-    setCredentials(new Map(result.value.credentials.filter((entry) => entry.hasCredential && entry.mask).map((entry) => [entry.profileId, entry.mask as string])));
     setLoaded(true);
   }, [t]);
 
@@ -61,7 +73,7 @@ export default function Settings({ projectId, language, theme, onLanguage, onThe
 
   return (
     <div className="center-stage fade-in">
-      <div className="stage-inner">
+      <div className={`stage-inner${section === "models" ? " settings-stage-models" : ""}`}>
         <header className="stage-head" style={{ display: "flex", alignItems: "flex-start", gap: 14 }}>
           <div>
             <h1>{t("settings.title")}</h1>
@@ -71,7 +83,7 @@ export default function Settings({ projectId, language, theme, onLanguage, onThe
           <button type="button" className="btn outline" onClick={onClose}><Icon name="close" />{t("settings.back")}</button>
         </header>
 
-        <div className="settings-grid">
+        <div className={`settings-grid${section === "models" ? " settings-models-grid" : ""}`}>
           <nav className="settings-nav" aria-label={t("settings.title")}>
             {sections.map((item) => (
               <button key={item.id} type="button" aria-current={section === item.id ? "page" : undefined} onClick={() => setSection(item.id)}>
@@ -81,7 +93,7 @@ export default function Settings({ projectId, language, theme, onLanguage, onThe
             ))}
           </nav>
 
-          <div style={{ minWidth: 0, display: "grid", gap: 12 }}>
+          <div className={section === "models" ? "settings-content settings-models-content" : "settings-content"} style={{ minWidth: 0, display: "grid", gap: 12 }}>
             {section === "general" && (
               <>
                 <div className="pref-card card">
@@ -107,7 +119,7 @@ export default function Settings({ projectId, language, theme, onLanguage, onThe
             {section === "models" && (
               <>
                 {(["generation", "embedding"] as const).map((capability) => (
-                  <div key={capability} className="pref-card card">
+                  <div key={capability} className="pref-card card model-service-card">
                     <div className="pref-row">
                       <div className="copy">
                         <strong>{t(capability === "generation" ? "model.generation.title" : "model.embedding.title")}</strong>
@@ -122,38 +134,42 @@ export default function Settings({ projectId, language, theme, onLanguage, onThe
                       </button>
                     </div>
                     {loaded && profiles.filter((profile) => profile.capability === capability).length === 0 && (
-                      <p style={{ color: "var(--ink-3)", fontSize: 13 }}>{t("model.noProfiles")}</p>
+                      <p className="model-service-empty">{t("model.noProfiles")}</p>
                     )}
-                    {profiles.filter((profile) => profile.capability === capability).map((profile) => (
-                      <div className="profile-row" key={profile.id}>
-                        <span className="p-icon" aria-hidden="true">
-                          <Icon name={capability === "generation" ? "brain" : "database"} />
-                        </span>
-                        <span className="copy">
-                          <strong>{profile.name}</strong>
-                          <small>{providerLabel(t, profile.provider)} · {profile.modelId}{credentials.get(profile.id) ? ` · ${t("model.keySaved", { mask: credentials.get(profile.id) })}` : ""}</small>
-                        </span>
-                        {!profile.enabled && <span className="badge neutral">{t("model.disabled")}</span>}
-                        <span className="row-actions">
-                          <button type="button" className="icon-btn" aria-label={`${t("common.edit")}: ${profile.name}`} onClick={() => setEditorOpen({ capability, existing: profile })}>
-                            <Icon name="edit" />
-                          </button>
-                          <button type="button" className="icon-btn danger" aria-label={`${t("common.delete")}: ${profile.name}`} onClick={() => setDeleting(profile)}>
-                            <Icon name="trash" />
-                          </button>
-                        </span>
-                      </div>
-                    ))}
-                    {capability === "embedding" && builtIns.map((builtIn) => (
-                      <div className="profile-row" key={builtIn.id} style={{ opacity: 0.85 }}>
-                        <span className="p-icon" aria-hidden="true"><Icon name="cpu" /></span>
-                        <span className="copy">
-                          <strong>{builtIn.name}</strong>
-                          <small>{t("model.builtInHint", { dimension: builtIn.dimension })}</small>
-                        </span>
-                        <span className="badge accent">{t("model.builtIn")}</span>
-                      </div>
-                    ))}
+                    <div className="model-service-list">
+                      {profiles.filter((profile) => profile.capability === capability).map((profile) => (
+                        <div className="profile-row" key={profile.id}>
+                          <span className="p-icon" aria-hidden="true">
+                            <Icon name={capability === "generation" ? "brain" : "database"} />
+                          </span>
+                          <span className="copy">
+                            <strong>
+                              <span>{profileDisplayName(profile.name)}</span>
+                              <span className="profile-model-id">{profile.modelId}</span>
+                            </strong>
+                          </span>
+                          {!profile.enabled && <span className="badge neutral">{t("model.disabled")}</span>}
+                          <span className="row-actions">
+                            <button type="button" className="icon-btn" aria-label={`${t("common.edit")}: ${profile.name}`} onClick={() => setEditorOpen({ capability, existing: profile })}>
+                              <Icon name="edit" />
+                            </button>
+                            <button type="button" className="icon-btn danger" aria-label={`${t("common.delete")}: ${profile.name}`} onClick={() => setDeleting(profile)}>
+                              <Icon name="trash" />
+                            </button>
+                          </span>
+                        </div>
+                      ))}
+                      {capability === "embedding" && builtIns.map((builtIn) => (
+                        <div className="profile-row" key={builtIn.id} style={{ opacity: 0.85 }}>
+                          <span className="p-icon" aria-hidden="true"><Icon name="cpu" /></span>
+                          <span className="copy">
+                            <strong>{builtIn.name}</strong>
+                            <small>{t("model.builtInHint", { dimension: builtIn.dimension })}</small>
+                          </span>
+                          <span className="badge accent">{t("model.builtIn")}</span>
+                        </div>
+                      ))}
+                    </div>
                   </div>
                 ))}
               </>
@@ -179,6 +195,7 @@ export default function Settings({ projectId, language, theme, onLanguage, onThe
             <ModelForm
               capability={editorOpen.capability}
               existing={editorOpen.existing}
+              {...(editorOpen.capability === "embedding" ? { builtIn: builtIns[0], initialProvider: "local" as const } : {})}
               onCancel={() => setEditorOpen(undefined)}
               onSaved={() => { setEditorOpen(undefined); void reload(); }}
             />
@@ -243,11 +260,21 @@ function RoutesPanel({ profiles, builtIns, projectId, onSaved }: {
   const available = useMemo(() => {
     const capability = isEmbedding ? "embedding" : "generation";
     const matching = profiles.filter((profile) => profile.enabled && profile.capability === capability);
-    return isEmbedding ? [...matching, ...builtIns] : matching;
+    const candidates: RouteProfile[] = isEmbedding ? [...matching, ...builtIns] : matching;
+    return [...candidates].sort((left, right) =>
+      `${left.modelId}\u0000${left.provider}`.localeCompare(`${right.modelId}\u0000${right.provider}`, undefined, { numeric: true, sensitivity: "base" })
+    );
   }, [profiles, builtIns, isEmbedding]);
   const unused = available.filter((profile) => !route.some((item) => item.profileId === profile.id));
-  const profileName = (id: string): string =>
-    profiles.find((profile) => profile.id === id)?.name ?? builtIns.find((profile) => profile.id === id)?.name ?? id;
+  const profileLabel = (id: string): string => routeModelLabel(
+    profiles.find((profile) => profile.id === id) ?? builtIns.find((profile) => profile.id === id),
+    id
+  );
+  const addProfileLabel = isEmbedding
+    ? t("routing.chooseEmbeddingProfile")
+    : route.length === 0
+      ? t("routing.emptyRoute")
+      : t("routing.fallbackProfile");
 
   useEffect(() => {
     let alive = true;
@@ -320,21 +347,24 @@ function RoutesPanel({ profiles, builtIns, projectId, onSaved }: {
       <div className="pref-card card">
         <div className="pref-row" style={{ flexWrap: "wrap", gap: 8 }}>
           <span className="copy"><strong>{t("routing.title")}</strong><small>{t("routing.description")}</small></span>
-          <select className="select" style={{ width: 200 }} aria-label={t("routing.task")} value={taskKind} onChange={(event) => setTaskKind(event.target.value as ModelTaskKind)}>
-            {ALL_TASKS.map((kind) => <option key={kind} value={kind}>{taskLabels[kind]}</option>)}
-          </select>
+          <RoundedSelect
+            className="route-task-select"
+            ariaLabel={t("routing.task")}
+            value={taskKind}
+            options={ALL_TASKS.map((kind) => ({ value: kind, label: taskLabels[kind] }))}
+            onChange={(value) => setTaskKind(value as ModelTaskKind)}
+          />
         </div>
 
         <div className="route-chain">
-          {route.length === 0 && <p style={{ color: "var(--ink-3)", fontSize: 13 }}>{t("routing.emptyRoute")}</p>}
           {route.map((step, index) => (
             <div className="route-step" key={`${step.profileId}-${index}`}>
               <span className="pos" aria-hidden="true">{index + 1}</span>
-              <span className="name">{profileName(step.profileId)}</span>
+              <span className="name">{profileLabel(step.profileId)}</span>
               <span className="step-actions">
-                <button type="button" className="icon-btn" aria-label={t("routing.moveUp", { name: profileName(step.profileId) })} disabled={index === 0} onClick={() => move(index, -1)}><Icon name="arrow-up" /></button>
-                <button type="button" className="icon-btn" aria-label={t("routing.moveDown", { name: profileName(step.profileId) })} disabled={index === route.length - 1} onClick={() => move(index, 1)}><Icon name="arrow-down" /></button>
-                {!isEmbedding && <button type="button" className="icon-btn danger" aria-label={t("routing.remove", { name: profileName(step.profileId) })} onClick={() => removeAt(index)}><Icon name="close" /></button>}
+                <button type="button" className="icon-btn" aria-label={t("routing.moveUp", { name: profileLabel(step.profileId) })} disabled={index === 0} onClick={() => move(index, -1)}><Icon name="arrow-up" /></button>
+                <button type="button" className="icon-btn" aria-label={t("routing.moveDown", { name: profileLabel(step.profileId) })} disabled={index === route.length - 1} onClick={() => move(index, 1)}><Icon name="arrow-down" /></button>
+                {!isEmbedding && <button type="button" className="icon-btn danger" aria-label={t("routing.remove", { name: profileLabel(step.profileId) })} onClick={() => removeAt(index)}><Icon name="close" /></button>}
               </span>
             </div>
           ))}
@@ -342,15 +372,15 @@ function RoutesPanel({ profiles, builtIns, projectId, onSaved }: {
         </div>
 
         <div className="input-row">
-          <select
-            className="select"
-            aria-label={isEmbedding ? t("routing.chooseEmbeddingProfile") : t("routing.fallbackProfile")}
+          <RoundedSelect
+            ariaLabel={addProfileLabel}
             value=""
-            onChange={(event) => addProfile(event.target.value)}
-          >
-            <option value="">{isEmbedding ? t("routing.chooseEmbeddingProfile") : unused.length > 0 ? t("routing.fallbackProfile") : t("routing.noAvailableProfiles")}</option>
-            {unused.map((profile) => <option key={profile.id} value={profile.id}>{profile.name}</option>)}
-          </select>
+            options={[
+              { value: "", label: addProfileLabel },
+              ...unused.map((profile) => ({ value: profile.id, label: routeModelLabel(profile, profile.id) }))
+            ]}
+            onChange={addProfile}
+          />
           <button type="button" className="btn primary" disabled={busy || !dirty || route.length === 0} onClick={() => void save()}>
             {busy ? <span className="spinner light" aria-hidden="true" /> : <Icon name="check" />}
             {t("routing.saveRoute")}
@@ -366,10 +396,85 @@ function RoutesPanel({ profiles, builtIns, projectId, onSaved }: {
               <span className={`badge ${attempt.state === "completed" ? "ok" : attempt.state === "failed" ? "danger" : "neutral"}`}>
                 {t(`routing.states.${attempt.state}`, attempt.state)}
               </span>
-              <span className="model">{attempt.model}</span>
+              <span className="model">{providerLabel(t, attempt.provider)} / {attempt.model}</span>
               {attempt.errorCode && <span style={{ color: "var(--danger)" }}>{attempt.errorCode}</span>}
               <span className="when">{new Date(attempt.startedAt).toLocaleString()}</span>
             </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function RoundedSelect({ value, options, ariaLabel, onChange, className = "" }: {
+  value: string;
+  options: Array<{ value: string; label: string }>;
+  ariaLabel: string;
+  onChange: (value: string) => void;
+  className?: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const [placement, setPlacement] = useState<"up" | "down">("down");
+  const rootRef = useRef<HTMLDivElement>(null);
+  const selected = options.find((option) => option.value === value) ?? options[0];
+
+  useEffect(() => {
+    if (!open) return;
+    const root = rootRef.current;
+    if (root) {
+      const rect = root.getBoundingClientRect();
+      setPlacement(window.innerHeight - rect.bottom < 280 && rect.top > 280 ? "up" : "down");
+    }
+    const close = (event: PointerEvent): void => {
+      if (event.target instanceof Node && !rootRef.current?.contains(event.target)) setOpen(false);
+    };
+    const escape = (event: KeyboardEvent): void => {
+      if (event.key === "Escape") setOpen(false);
+    };
+    document.addEventListener("pointerdown", close);
+    document.addEventListener("keydown", escape);
+    return () => {
+      document.removeEventListener("pointerdown", close);
+      document.removeEventListener("keydown", escape);
+    };
+  }, [open]);
+
+  return (
+    <div className={`rounded-select ${className}`.trim()} ref={rootRef}>
+      <button
+        type="button"
+        className="select rounded-select-trigger"
+        aria-label={ariaLabel}
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        onClick={() => setOpen((current) => !current)}
+        onKeyDown={(event) => {
+          if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+            event.preventDefault();
+            setOpen(true);
+          }
+        }}
+      >
+        <span className="select-value">{selected?.label}</span>
+        <Icon name={open ? "chevron-up" : "chevron-down"} />
+      </button>
+      {open && (
+        <div className="rounded-select-menu" data-placement={placement} role="listbox" aria-label={ariaLabel}>
+          {options.map((option) => (
+            <button
+              type="button"
+              role="option"
+              aria-selected={option.value === value}
+              className="rounded-select-option"
+              key={option.value}
+              onClick={() => {
+                onChange(option.value);
+                setOpen(false);
+              }}
+            >
+              {option.label}
+            </button>
           ))}
         </div>
       )}

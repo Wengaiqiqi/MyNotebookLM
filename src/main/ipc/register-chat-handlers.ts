@@ -222,10 +222,18 @@ export function registerChatHandlers(args: {
     const subscribed = subscribeWindow(parsed.data.requestId, sender);
     return Promise.resolve(subscribed ? { ok: true as const, value: undefined } : internalFailure());
   });
-  registerHandler(CHAT_CHANNELS.unsubscribeRequest, (_e, input) => {
+  registerHandler(CHAT_CHANNELS.unsubscribeRequest, (event, input) => {
     const parsed = chatRequestIdInputSchema.safeParse(input);
     if (!parsed.success) return Promise.resolve(validationFailure());
-    hub.delete(parsed.data.requestId);
+    // Unsubscribing is scoped to the renderer that requested it. A request can
+    // be observed by more than one window, so deleting the whole hub entry here
+    // would silently stop the remaining windows from receiving the stream.
+    const window = args.resolveWindowFromSender((event as { sender?: unknown })?.sender);
+    const subscribers = hub.get(parsed.data.requestId);
+    if (window && subscribers) {
+      subscribers.delete(window);
+      if (subscribers.size === 0) hub.delete(parsed.data.requestId);
+    }
     return Promise.resolve({ ok: true as const, value: undefined });
   });
 

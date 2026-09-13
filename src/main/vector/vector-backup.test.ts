@@ -57,4 +57,22 @@ describe("vector backups", () => {
       db.close();
     } finally { await rm(dir, { recursive: true, force: true }); }
   });
+
+  it("ignores verified metadata that points outside the backup directory", async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), "mynotebooklm-backup-"));
+    const outside = await mkdtemp(path.join(tmpdir(), "mynotebooklm-backup-outside-"));
+    try {
+      const db = new Database(":memory:");
+      db.exec("CREATE TABLE x (v TEXT); INSERT INTO x VALUES ('keep')");
+      const external = path.join(outside, "keep.db");
+      const externalBackup = await backupDatabase(db, external);
+      await writeFile(path.join(dir, "forged.json"), JSON.stringify({ verified: true, createdAt: 0, path: external, sha256: externalBackup.sha256 }));
+      for (let i = 0; i < 4; i += 1) await backupDatabase(db, path.join(dir, `backup-${i}.db`));
+      await expect(access(external)).resolves.toBeUndefined();
+      db.close();
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+      await rm(outside, { recursive: true, force: true });
+    }
+  });
 });

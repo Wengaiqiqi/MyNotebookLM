@@ -110,6 +110,21 @@ describe("SettingsRepository", () => {
     ]);
   });
 
+  it("does not persist disabled profiles into a route", () => {
+    repository.saveProfile({
+      id: GENERATION_ID,
+      name: "Disabled",
+      provider: "openai",
+      capability: "generation",
+      baseUrl: "https://api.openai.com/v1",
+      modelId: "gpt-test",
+      enabled: false
+    });
+
+    expect(() => repository.replaceRoute("chat", [GENERATION_ID])).toThrow(/enabled/i);
+    expect(repository.getRoute("chat")).toEqual([]);
+  });
+
   it("rejects a profile whose capability cannot serve the route", () => {
     repository.saveProfile({
       id: EMBEDDING_ID,

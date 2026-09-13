@@ -470,6 +470,42 @@ describe("ChatService conversation operations and retrieval failure", () => {
     expect(messages.filter((m) => m.role === "assistant" && !m.superseded)).toHaveLength(1);
   });
 
+  it("does not regenerate an assistant message from another conversation", async () => {
+    const first = await collectEvents(baseDeps(), { requestId: REQUEST_ID, projectId: PROJECT_ID, conversationId: world.conversationId, question: "first" });
+    const assistantId = (first.result as { ok: true; value: { assistantMessageId: string } }).value.assistantMessageId;
+    const otherConversationId = "55555555-5555-4555-8555-555555555555";
+    world.repository.createConversation({ id: otherConversationId, projectId: PROJECT_ID, title: "Other", createdAt: AT });
+    const otherUser = world.repository.appendUserMessage({ projectId: PROJECT_ID, conversationId: otherConversationId, id: "other-user", content: "other", createdAt: AT });
+    world.repository.startAssistantMessage({ projectId: PROJECT_ID, conversationId: otherConversationId, id: "other-assistant", replyToMessageId: otherUser.id, provider: "openai", profileId: makeProfile().id, model: "gpt-test", createdAt: AT });
+
+    const result = await service().regenerate({ requestId: "66666666-6666-4666-8666-666666666666", projectId: PROJECT_ID, conversationId: world.conversationId, messageId: "other-assistant" }, () => undefined);
+    expect(result).toMatchObject({ ok: false, error: { code: "NOT_FOUND" } });
+    expect(world.repository.getMessage(PROJECT_ID, assistantId)?.superseded).toBe(false);
+    expect(world.repository.getMessage(PROJECT_ID, "other-assistant")?.superseded).toBe(false);
+  });
+
+  it("does not edit a question when regeneration races an active turn", async () => {
+    const first = await collectEvents(baseDeps(), { requestId: REQUEST_ID, projectId: PROJECT_ID, conversationId: world.conversationId, question: "keep this" });
+    const assistantId = (first.result as { ok: true; value: { assistantMessageId: string } }).value.assistantMessageId;
+    const originalUserId = world.repository.getMessage(PROJECT_ID, assistantId)!.replyToMessageId!;
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    const svc = service({ providerFactory: () => ({ ...fakeProvider(), async *generate(_request, signal) { await gate; if (signal.aborted) return; yield { type: "text-delta", text: "second" }; yield { type: "done" }; } }) });
+    const pending = svc.send({ requestId: "77777777-7777-4777-8777-777777777777", projectId: PROJECT_ID, conversationId: world.conversationId, question: "second turn" }, () => undefined);
+    await new Promise((resolve) => setImmediate(resolve));
+
+    const result = await svc.regenerate({ requestId: "88888888-8888-4888-8888-888888888888", projectId: PROJECT_ID, conversationId: world.conversationId, messageId: assistantId, question: "must not mutate" }, () => undefined);
+    expect(result).toMatchObject({ ok: false, error: { code: "CONFLICT" } });
+    expect(world.repository.getMessage(PROJECT_ID, originalUserId)?.content).toBe("keep this");
+    release();
+    await pending;
+  });
+
+  it("does not expose internal exception details to callers", async () => {
+    const result = await service().send({ requestId: REQUEST_ID, projectId: PROJECT_ID, conversationId: "99999999-9999-4999-8999-999999999999", question: "private" }, () => undefined);
+    expect(result).toEqual({ ok: false, error: { code: "INTERNAL", messageKey: "errors.internal", recoverable: false } });
+  });
+
   it("edits a cancelled question in place and includes earlier completed turns", async () => {
     await collectEvents(baseDeps({ retrieval: async () => [] }), { requestId: REQUEST_ID, projectId: PROJECT_ID, conversationId: world.conversationId, question: "Original context" });
     const cancelledUser = world.repository.appendUserMessage({ projectId: PROJECT_ID, conversationId: world.conversationId, id: "cancelled-user", content: "Old follow-up", createdAt: AT });

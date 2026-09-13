@@ -53,7 +53,12 @@ const zhCN = {
     builtIn: "内置",
     builtInHint: "内置本地嵌入模型 · {{dimension}} 维，无需 API Key。",
     builtInSelected: "已选择",
-    useBuiltinInstead: "改用内置本地模型",
+    localModelMode: "本地模型方式",
+    localModelBuiltIn: "使用内置模型",
+    localModelCustom: "选择本机模型",
+    localModelPath: "模型权重或目录",
+    localModelPathPlaceholder: "选择模型权重文件或模型目录",
+    chooseLocalModel: "选择文件 / 目录",
     provider: "提供商",
     profileName: "配置名称",
     keySaved: "密钥 {{mask}}",
@@ -64,7 +69,7 @@ const zhCN = {
       anthropic: "Anthropic",
       gemini: "Gemini",
       ollama: "Ollama",
-      local: "内置本地模型"
+      local: "内置模型"
     },
     apiAddress: "API 地址",
     apiKey: "API Key",
@@ -75,12 +80,15 @@ const zhCN = {
     fetchSuccess: "获取成功",
     model: "模型",
     modelName: "模型名称",
+    selectedModels: "已选择 {{count}} 个模型",
+    noDiscoveredModels: "请先点击“获取模型”加载可选模型。",
     chooseModel: "选择模型",
     manualModel: "手动输入模型名称",
     chooseDiscovered: "选择已获取模型",
     validation: {
       apiKey: "请输入 API Key。",
       address: "请输入有效的 HTTP 或 HTTPS API 地址。",
+      localModelPath: "请选择模型权重文件或模型目录。",
       complete: "请同时配置有效的生成模型与嵌入模型。"
     },
     errors: { request: "模型服务请求失败。" }
@@ -114,7 +122,7 @@ const zhCN = {
     embeddingRule: "嵌入仅使用一个配置",
     embeddingProfile: "嵌入配置",
     chooseEmbeddingProfile: "选择嵌入配置",
-    emptyRoute: "尚未配置模型路由",
+    emptyRoute: "请添加模型路由",
     addFirstProfile: "添加首个配置",
     addFallback: "添加回退",
     fallbackProfile: "添加回退配置",
@@ -220,7 +228,7 @@ const zhCN = {
       failed: "回答失败。"
     },
     repair: {
-      retry: "重试回答",
+      retry: "重试",
       repair: "修复回答"
     },
     renameHint: "单击切换对话，双击重命名",
@@ -230,7 +238,7 @@ const zhCN = {
     retryBusyHint: "正在生成回答，请等待完成或停止后再重试",
     ui: {
       conversations: "对话", rename: "重命名", remove: "删除", saveTitle: "保存对话标题", noConversations: "暂无对话。", conversationTitle: "对话标题", viewDetails: "查看原文",
-      citationTitle: "来源引用", citationEmpty: "回答中的引用会显示在这里。", sourceExcerptTitle: "引用原文", sourceExcerptUnavailable: "原文暂不可用。", openOriginal: "打开原始来源", opened: "已打开{{kind}}", sourceLabel: "已有资料", indexed: "已建立索引", indexedLabel: "已建立索引", processingComplete: "资料处理完成", research: "研究", researchChat: "研究对话", askPlaceholder: "针对来源提问，Enter 发送，Shift+Enter 换行…", model: "模型", generationModel: "生成模型", noModel: "无模型", send: "发送", stop: "停止", copy: "复制", regenerate: "重新生成", editAndResend: "编辑并重新发送", answerFailed: "回答失败。", retryAnswer: "重试回答", fallbackBanner: "首选模型暂时不可用，回答已切换到回退模型。", unavailableTitle: "研究对话尚未就绪", unavailableImport: "导入来源并等待索引完成后，即可开始提问。", unavailableModel: "请在设置中配置生成模型后提问。", importSources: "导入来源", openSettings: "打开设置", rebuildIndex: "重建索引", pending: "待处理", ready: "已就绪", sourceProgress: "{{stage}} · {{progress}}%", page: "第", slide: "幻灯片", sheet: "工作表", cell: "单元格"
+      citationTitle: "来源引用", citationEmpty: "回答中的引用会显示在这里。", sourceExcerptTitle: "引用原文", sourceExcerptUnavailable: "原文暂不可用。", openOriginal: "打开原始来源", opened: "已打开{{kind}}", sourceLabel: "已有资料", indexed: "已建立索引", indexedLabel: "已建立索引", processingComplete: "资料处理完成", research: "研究", researchChat: "研究对话", askPlaceholder: "针对来源提问，Enter 发送，Shift+Enter 换行…", model: "模型", generationModel: "生成模型", noModel: "无模型", send: "发送", stop: "停止", copy: "复制", regenerate: "重新生成", editAndResend: "编辑并重新发送", answerFailed: "回答失败。", retryAnswer: "重试", errorCode: "错误码：{{code}}", errorTarget: "目标模型：{{target}}", fallbackBanner: "首选模型暂时不可用，回答已切换到回退模型。", unavailableTitle: "研究对话尚未就绪", unavailableImport: "导入来源并等待索引完成后，即可开始提问。", unavailableModel: "请在设置中配置生成模型后提问。", importSources: "导入来源", openSettings: "打开设置", rebuildIndex: "重建索引", pending: "待处理", ready: "已就绪", sourceProgress: "{{stage}} · {{progress}}%", page: "第", slide: "幻灯片", sheet: "工作表", cell: "单元格"
     }
   },
   research: {
@@ -370,6 +378,8 @@ const zhCN = {
     noRules: "还没有自定义规则。",
     insights: "洞察",
     noInsights: "已完成的洞察会显示在这里。",
+    viewDetails: "查看详细",
+    insightDetail: "洞察详情",
     convert: "转换为笔记",
     unavailable: "转换服务尚未就绪。",
     states: { queued: "排队中", running: "处理中", completed: "已完成", failed: "失败", cancelled: "已取消" }

@@ -139,6 +139,7 @@ export class ProviderHttpClient {
     const onCallerAbort = () => rejectCancelled?.(new DOMException("aborted", "AbortError"));
     if (!originalSignal.aborted) originalSignal.addEventListener("abort", onCallerAbort, { once: true });
     const readIdle = async (): Promise<ReadableStreamReadResult<Uint8Array>> => {
+      if (originalSignal.aborted) throw new DOMException("aborted", "AbortError");
       let timer: ReturnType<typeof setTimeout> | undefined;
       try {
         return await Promise.race([
@@ -146,7 +147,10 @@ export class ProviderHttpClient {
           new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new IdleTimeout()), this.idleTimeoutMs); }),
           ...(originalSignal.aborted ? [] : [new Promise<never>((_, reject) => { rejectCancelled = reject; })])
         ]);
-      } finally { clearTimeout(timer); }
+      } finally {
+        clearTimeout(timer);
+        rejectCancelled = undefined;
+      }
     };
     try {
       while (true) {

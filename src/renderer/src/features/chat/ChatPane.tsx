@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+import type { AppErrorDto } from "../../../../shared/app-errors";
 import type { CitationDto, ConversationDto, MessageDto } from "../../../../shared/chat";
 import type { CitationDetailResultValue } from "../../../../shared/ipc";
 import type { ModelProfileDto } from "../../../../shared/models";
@@ -14,6 +15,23 @@ import { errorText, formatDateTime, sourceReady } from "../../lib/format";
 
 type ConversationsApi = typeof window.myNotebook.conversations;
 type ChatApi = typeof window.myNotebook.chat;
+
+const assistantErrorMessageKeys: Record<string, string> = {
+  VALIDATION: "errors.validation",
+  NOT_FOUND: "errors.notFound",
+  CONFLICT: "errors.conflict",
+  CANCELLED: "errors.chatCancelled",
+  AUTH: "errors.authentication",
+  RATE_LIMITED: "errors.rateLimited",
+  TIMEOUT: "errors.timeout",
+  NETWORK: "errors.network",
+  PROVIDER: "errors.provider",
+  UNSUPPORTED_FORMAT: "errors.unsupportedFormat",
+  UNSAFE_INPUT: "errors.unsafeInput",
+  INDEX_UNAVAILABLE: "errors.indexUnavailable",
+  INTERNAL: "errors.internal",
+  INTERRUPTED: "errors.interrupted"
+};
 
 export default function ChatPane({ projectId, generationProfileId, sources, onOpenSettings, onImport }: {
   projectId: string;
@@ -53,6 +71,7 @@ export default function ChatPane({ projectId, generationProfileId, sources, onOp
   const scrollRef = useRef<HTMLDivElement>(null);
   const composerRef = useRef<HTMLTextAreaElement>(null);
   const followRef = useRef(true);
+  const conversationIdRef = useRef("");
 
   const indexedCount = useMemo(() => sources.filter(sourceReady).length, [sources]);
   const chatAvailable = Boolean(generationProfileId) && indexedCount > 0;
@@ -102,6 +121,24 @@ export default function ChatPane({ projectId, generationProfileId, sources, onOp
 
   const stream = useChatStream(window.myNotebook.chat, projectId, conversationId, restored, selectedProfileId || undefined);
   const messages = stream.messages;
+  const activeGenerationProfile = profiles.find((profile) => profile.id === selectedProfileId);
+
+  function assistantErrorInfo(message: Pick<MessageDto, "errorCode" | "provider" | "model" | "profileId"> | null, liveError: AppErrorDto | null): { text: string; details: string | null } {
+    const code = liveError?.code ?? message?.errorCode ?? null;
+    const key = liveError?.messageKey ?? (code ? assistantErrorMessageKeys[code] : undefined) ?? "errors.providerFailure";
+    const fallback = t("errors.providerFailure");
+    const text = t(key, { defaultValue: fallback });
+    const profile = message?.profileId
+      ? profiles.find((candidate) => candidate.id === message.profileId) ?? activeGenerationProfile
+      : activeGenerationProfile;
+    const target = [profile?.name ?? message?.provider, message?.model ?? profile?.modelId]
+      .filter((value): value is string => Boolean(value)).join(" / ");
+    const details = [
+      code ? t("chat.ui.errorCode", { code }) : null,
+      target ? t("chat.ui.errorTarget", { target }) : null
+    ].filter((value): value is string => Boolean(value)).join(" · ") || null;
+    return { text, details };
+  }
 
   // Auto-follow scroll while streaming.
   useEffect(() => {
@@ -126,7 +163,11 @@ export default function ChatPane({ projectId, generationProfileId, sources, onOp
     document.addEventListener("mousedown", close);
     return () => document.removeEventListener("mousedown", close);
   }, [modelMenuOpen]);
-  useEffect(() => { followRef.current = true; setEditingMessageId(""); }, [conversationId]);
+  useEffect(() => {
+    conversationIdRef.current = conversationId;
+    followRef.current = true;
+    setEditingMessageId("");
+  }, [conversationId]);
 
   function chooseThinking(level: "off" | "low" | "medium" | "high"): void {
     setThinking(level);
@@ -137,7 +178,6 @@ export default function ChatPane({ projectId, generationProfileId, sources, onOp
   async function send(): Promise<void> {
     const text = question.trim();
     if (!text || !stream.canSend) return;
-    setQuestion("");
     let targetConversationId = conversationId;
     if (!targetConversationId) {
       const created = await window.myNotebook.conversations.create({ projectId, title: text.slice(0, 60) || t("chat.newConversation") });
@@ -156,7 +196,13 @@ export default function ChatPane({ projectId, generationProfileId, sources, onOp
           .catch(() => undefined);
       }
     }
-    await stream.send(text, { thinking, conversationId: targetConversationId });
+    // Clear once the turn has been accepted by the UI. If IPC rejects it,
+    // restore the draft while the user is still viewing that conversation.
+    setQuestion("");
+    const sent = await stream.send(text, { thinking, conversationId: targetConversationId });
+    if (!sent && conversationIdRef.current === targetConversationId) {
+      setQuestion((current) => current || text);
+    }
   }
 
   function onScroll(event: React.UIEvent<HTMLDivElement>): void {
@@ -165,6 +211,9 @@ export default function ChatPane({ projectId, generationProfileId, sources, onOp
   }
 
   const latestAssistant = [...messages].reverse().find((message) => message.role === "assistant");
+  const failedAssistant = stream.repairableMessageId
+    ? messages.find((message) => message.id === stream.repairableMessageId && message.state === "failed")
+    : undefined;
   const citations = useMemo(() => {
     const owner = activeCitation
       ? messages.find((message) => message.role === "assistant" && message.citations.some((citation) => citation.id === activeCitation.id))
@@ -287,14 +336,6 @@ export default function ChatPane({ projectId, generationProfileId, sources, onOp
       {stream.fallback && (
         <p className="chat-note" role="status">{t("chat.ui.fallbackBanner")}</p>
       )}
-      {stream.error && (
-        <p className="chat-note error" role="alert">
-          {t(stream.error.messageKey, stream.error.messageKey)}
-          {stream.repairableMessageId && (
-            <button type="button" onClick={() => void stream.repair({ thinking })}>{t("chat.ui.retryAnswer")}</button>
-          )}
-        </p>
-      )}
 
       <div className="chat-scroll" ref={scrollRef} onScroll={onScroll} aria-live="polite">
         {messages.length === 0 && (
@@ -308,6 +349,9 @@ export default function ChatPane({ projectId, generationProfileId, sources, onOp
           const reply = messages[index + 1];
           const canEditAndResend = message.role === "user" && reply?.role === "assistant" && reply.state === "cancelled";
           const editing = editingMessageId === message.id;
+          const errorInfo = message.state === "failed"
+            ? assistantErrorInfo(message, stream.repairableMessageId === message.id ? stream.error : null)
+            : null;
           return message.role === "user"
             ? (
               <article className={`msg user${editing ? " editing" : ""}`} key={message.id}>
@@ -343,7 +387,17 @@ export default function ChatPane({ projectId, generationProfileId, sources, onOp
             : (
               <article className={`msg assistant is-${message.state}`} key={message.id}>
                 <div className="bubble assistant-body">
-                  {message.state === "streaming" && !message.content
+                  {message.state === "failed" ? (
+                    <>
+                      {message.content && <SafeMarkdown text={message.content} citations={message.citations} onCitationOpen={(citation: CitationDto) => setActiveCitation(citation)} />}
+                      {errorInfo && <AssistantError
+                        message={errorInfo.text}
+                        details={errorInfo.details}
+                        disabled={!stream.canSend}
+                        onRetry={() => void (stream.repairableMessageId === message.id ? stream.repair({ thinking }) : stream.regenerate(message.id, { thinking }))}
+                      />}
+                    </>
+                  ) : message.state === "streaming" && !message.content
                     ? <span className="typing" aria-label={t("chat.message.streaming")}><i /><i /><i /></span>
                     : (
                       <SafeMarkdown
@@ -372,16 +426,26 @@ export default function ChatPane({ projectId, generationProfileId, sources, onOp
                         <Icon name="retry" />{t("chat.ui.regenerate")}
                       </button>
                     )}
-                    {message.state === "failed" && (
-                      <button type="button" disabled={!stream.canSend} title={t("chat.retryBusyHint")} onClick={() => void stream.regenerate(message.id, { thinking })}>
-                        <Icon name="retry" />{t("chat.ui.retryAnswer")}
-                      </button>
-                    )}
                   </div>
                 )}
               </article>
             );
         })}
+        {stream.error && !failedAssistant && (
+          <article className="msg assistant is-failed" key={`error-${stream.error.code}-${stream.error.messageKey}`}>
+            <div className="bubble assistant-body">
+              {(() => {
+                const errorInfo = assistantErrorInfo(null, stream.error);
+                return <AssistantError
+                  message={errorInfo.text}
+                  details={errorInfo.details}
+                  disabled={!stream.canSend}
+                  {...(stream.repairableMessageId ? { onRetry: () => void stream.repair({ thinking }) } : {})}
+                />;
+              })()}
+            </div>
+          </article>
+        )}
       </div>
 
       <div className="composer-wrap">
@@ -488,6 +552,26 @@ export default function ChatPane({ projectId, generationProfileId, sources, onOp
       onSelect={setActiveCitation}
     />
     </>
+  );
+}
+
+function AssistantError({ message, details, disabled, onRetry }: {
+  message: string;
+  details?: string | null;
+  disabled: boolean;
+  onRetry?: () => void;
+}) {
+  const { t } = useTranslation();
+  return (
+    <div className="assistant-error" role="alert">
+      <p>{message}</p>
+      {details && <small className="assistant-error-details">{details}</small>}
+      {onRetry && (
+        <button type="button" className="assistant-retry" disabled={disabled} onClick={onRetry}>
+          <Icon name="retry" />{t("chat.ui.retryAnswer")}
+        </button>
+      )}
+    </div>
   );
 }
 

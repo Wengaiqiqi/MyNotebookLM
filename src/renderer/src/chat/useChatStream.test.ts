@@ -197,6 +197,9 @@ describe("useChatStream", () => {
     expect(result.current.repairableMessageId).toBe(MESSAGE_ID);
     expect(result.current.error?.code).toBe("PROVIDER");
     expect(result.current.messages.at(-1)?.content).toBe("half written");
+    expect(result.current.messages.at(-1)?.state).toBe("failed");
+    expect(result.current.streamingMessageId).toBeNull();
+    expect(result.current.canSend).toBe(true);
 
     await act(async () => { await result.current.repair(); });
     expect(h.regenerate).toHaveBeenCalledWith(expect.objectContaining({ projectId: PROJECT_ID, conversationId: CONVERSATION_ID, messageId: MESSAGE_ID, requestId: expect.any(String) }));

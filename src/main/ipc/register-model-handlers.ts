@@ -1,4 +1,5 @@
 import type { IpcMain } from "electron";
+import * as electron from "electron";
 import { z } from "zod";
 import {
   internalFailure,
@@ -37,10 +38,12 @@ import {
 import type { ModelService } from "../models/model-service";
 
 type IpcMainLike = Pick<IpcMain, "handle" | "removeHandler">;
+type Dialog = Pick<typeof electron.dialog, "showOpenDialog">;
 
 const undefinedSchema = z.undefined();
 const settingsResultSchema = resultSchema(appSettingsDtoSchema);
 const profileListResultSchema = resultSchema(modelProfileListDtoSchema);
+const localModelPathResultSchema = resultSchema(z.string().nullable());
 const defaultRoutesResultSchema = resultSchema(defaultModelRoutesDtoSchema);
 const profileResultSchema = resultSchema(modelProfileDtoSchema);
 const deleteResultSchema = resultSchema(undefinedSchema);
@@ -68,7 +71,8 @@ async function validatedCall<I>(
 
 export function registerModelHandlers(
   ipc: IpcMainLike,
-  service: ModelService
+  service: ModelService,
+  dialogs?: Dialog
 ): () => void {
   ipc.handle(SETTINGS_CHANNELS.get, (_event, input) =>
     validatedCall(undefinedSchema, settingsResultSchema, input, () => service.getSettings())
@@ -81,6 +85,18 @@ export function registerModelHandlers(
   ipc.handle(MODEL_CHANNELS.listProfiles, (_event, input) =>
     validatedCall(undefinedSchema, profileListResultSchema, input, () => service.listProfiles())
   );
+  ipc.handle(MODEL_CHANNELS.chooseLocalModel, async (_event, input) => {
+    if (!undefinedSchema.safeParse(input).success) return validationFailure<string | null>();
+    try {
+      const picked = await (dialogs ?? electron.dialog).showOpenDialog({
+        properties: ["openFile", "openDirectory"],
+        filters: [{ name: "Model files", extensions: ["onnx", "bin", "safetensors", "pt", "pth", "gguf", "json"] }]
+      });
+      return localModelPathResultSchema.parse({ ok: true, value: picked.canceled ? null : (picked.filePaths[0] ?? null) });
+    } catch {
+      return internalFailure<string | null>();
+    }
+  });
   ipc.handle(MODEL_CHANNELS.getDefaultRoutes, (_event, input) =>
     validatedCall(undefinedSchema, defaultRoutesResultSchema, input, () =>
       service.getDefaultRoutes()

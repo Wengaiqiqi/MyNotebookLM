@@ -79,6 +79,8 @@ export function useChatStream(
   }, [conversationId, restoredMessages]);
 
   const teardown = useCallback((): void => {
+    const requestId = turnRef.current?.requestId;
+    if (requestId) optimisticUserRef.current.delete(requestId);
     unsubscribeRef.current?.();
     unsubscribeRef.current = null;
     turnRef.current = null;
@@ -87,11 +89,14 @@ export function useChatStream(
 
   const applyEvent = useCallback((targetConversationId: string, event: ChatRequestEvent): void => {
     const reconcileTerminal = (requestId: string, assistant: MessageDto): void => {
+      // Capture before scheduling the state updater: a terminal event tears
+      // down the subscription immediately, and teardown also clears stale
+      // optimistic entries.
+      const optimisticUserId = optimisticUserRef.current.get(requestId);
+      optimisticUserRef.current.delete(requestId);
       updateMessages(targetConversationId, (prev) => {
-        const optimisticUserId = optimisticUserRef.current.get(requestId);
         const persistedUserId = assistant.replyToMessageId;
         const alreadyPersisted = persistedUserId !== null && prev.some((message) => message.id === persistedUserId);
-        optimisticUserRef.current.delete(requestId);
         return prev.flatMap((message) => {
           if (message.id === assistant.id) return [assistant];
           if (message.id !== optimisticUserId) return [message];
@@ -116,6 +121,9 @@ export function useChatStream(
         setRepairableMessageId(event.message.id);
         break;
       case "failed":
+        updateMessages(targetConversationId, (prev) => prev.map((message) => message.id === event.messageId
+          ? { ...message, state: "failed", errorCode: event.error.code, completionReason: null }
+          : message));
         setState("failed");
         {
           // Main may report a transport-level code string; normalize it into
@@ -184,6 +192,7 @@ export function useChatStream(
   }, [chat, addAssistantDraft, applyEvent, teardown]);
 
   const send = useCallback((question: string, options?: { thinking?: "off" | "low" | "medium" | "high"; conversationId?: string }): Promise<boolean> => {
+    if (turnRef.current) return Promise.resolve(false);
     setError(null);
     setFallback(null);
     setRepairableMessageId(null);
@@ -216,6 +225,7 @@ export function useChatStream(
   }, [runTurn, chat, projectId, conversationId, generationProfileId, updateMessages]);
 
   const regenerate = useCallback((messageId: string, options?: { thinking?: "off" | "low" | "medium" | "high"; question?: string }): Promise<boolean> => {
+    if (turnRef.current) return Promise.resolve(false);
     setError(null);
     if (options?.question) {
       updateMessages(conversationId, (current) => {
@@ -264,7 +274,7 @@ export function useChatStream(
 
   const ownsStatus = statusConversationId === conversationId;
   const visibleState = ownsStatus ? state : "idle";
-  const canSend = !turnRef.current && (!ownsStatus || state === "idle");
+  const canSend = !turnRef.current && (!ownsStatus || state !== "streaming");
   const messages = messagesByConversation[conversationId] ?? [];
   return useMemo(() => ({
     messages,

@@ -174,6 +174,11 @@ vi.mock("./vector/local-model-manager", () => ({
 }));
 vi.mock("./vector/local-embedding-provider", () => ({
   createTransformersEmbeddingRuntime: vi.fn(() => vi.fn()),
+  createLocalDirectoryEmbeddingProvider: vi.fn(() => ({
+    describe: vi.fn(() => ({ provider: "local", modelId: "custom-local", modelRevision: "C:\\models\\embedding", dimension: 384, distance: "cosine", pooling: "mean", preprocessVersion: "local-provider-v1", chunkingVersion: "persisted" })),
+    embedBatch: vi.fn(async () => [Array(384).fill(1)])
+  })),
+  canonicalLocalModelPath: vi.fn((value: string) => value),
   isAuthoritativeLocalCapability: vi.fn((value: unknown, expected: unknown) => JSON.stringify(value) === JSON.stringify(expected)),
   LocalEmbeddingProvider: vi.fn(function (this: Record<string, unknown>, manager: unknown, runtime: unknown) {
     this.manager = manager; this.runtime = runtime;
