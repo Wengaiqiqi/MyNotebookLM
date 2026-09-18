@@ -46,7 +46,7 @@ function mockApi(overrides: Partial<DesktopApi> = {}): DesktopApi {
       listRules: vi.fn(async () => ({ ok: true as const, value: [rule] })),
       listInsights: vi.fn(async () => ({ ok: true as const, value: [insight] })),
       run: vi.fn(async () => ({ ok: true as const, value: taskDto() })),
-      cancel: vi.fn(), retry: vi.fn(), createRule: vi.fn(), updateRule: vi.fn(), deleteRule: vi.fn(), convertToNote: vi.fn()
+      cancel: vi.fn(), retry: vi.fn(), createRule: vi.fn(), updateRule: vi.fn(), deleteRule: vi.fn(), deleteInsight: vi.fn(), convertToNote: vi.fn()
     },
     sources: {
       list: vi.fn(async () => [
@@ -204,10 +204,22 @@ describe("StudioPane", () => {
     expect(dialog.textContent).not.toContain("**答：**");
   });
 
+  it("deletes an insight card and removes it from the list", async () => {
+    const api = mockApi();
+    vi.mocked(api.transformations!.deleteInsight).mockResolvedValue({ ok: true, value: undefined });
+    render(<StudioPane projectId={projectId} />);
+
+    await screen.findByText("洞察内容");
+    fireEvent.click(screen.getByRole("button", { name: "删除: 洞察内容" }));
+    await waitFor(() => expect(screen.queryByText("洞察内容")).toBeNull());
+    expect(api.transformations!.deleteInsight).toHaveBeenCalledWith({ projectId, insightId: insight.id });
+  });
+
   it("uses the themed dropdown for a custom rule target", async () => {
     mockApi();
     render(<StudioPane projectId={projectId} />);
 
+    fireEvent.click(screen.getByRole("button", { name: "规则" }));
     fireEvent.click(screen.getByRole("button", { name: "新建自定义规则" }));
     const target = await screen.findByRole("button", { name: "适用目标" });
     expect(target.className).toContain("rounded-select-trigger");

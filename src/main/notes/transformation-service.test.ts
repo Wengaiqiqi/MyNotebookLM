@@ -61,6 +61,22 @@ describe("TransformationService", () => {
 
   afterEach(() => { db.close(); rmSync(root, { recursive: true, force: true }); });
 
+  it("identifies persisted Q&A sets by the saved rule rather than content", async () => {
+    const qa = await service.run({ projectId: PROJECT, builtinKey: "qa", language: "zh-CN", sourceRevisionId: REVISION });
+    const summary = await service.run({ projectId: PROJECT, builtinKey: "summary", language: "en", sourceRevisionId: REVISION });
+    const reloaded = new TransformationService(baseDeps).listInsights({ projectId: PROJECT });
+    expect(reloaded.find((item) => item.id === qa.id)?.builtinKey).toBe("qa");
+    expect(reloaded.find((item) => item.id === summary.id)?.builtinKey).toBe("summary");
+    expect(service.listInsights({ projectId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb" })).toEqual([]);
+  });
+
+  it("deletes an insight only inside its project", async () => {
+    const insight = await service.run({ projectId: PROJECT, builtinKey: "qa", language: "zh-CN", sourceRevisionId: REVISION });
+    service.deleteInsight({ projectId: PROJECT, insightId: insight.id });
+    expect(service.listInsights({ projectId: PROJECT })).toEqual([]);
+    expect(() => service.deleteInsight({ projectId: PROJECT, insightId: insight.id })).toThrow(/not found/i);
+  });
+
   it("snapshots a source before generation and persists a normalized insight", async () => {
     const insight = await service.run({ projectId: PROJECT, builtinKey: "summary", language: "en", sourceRevisionId: REVISION });
     expect(insight).toMatchObject({ projectId: PROJECT, inputKind: "source", content: "# Result", provider: "openai", model: "test-model", usage: { totalTokens: 14 } });

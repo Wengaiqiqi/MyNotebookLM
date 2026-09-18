@@ -19,6 +19,7 @@ type Service = {
   cancelTask(input: { projectId: string; taskId: string }): unknown;
   retryTask(input: { projectId: string; taskId: string }, signal: AbortSignal, onFinished: () => void, onOwnership: (ownership: { taskId: string; owned: boolean }) => void): TaskDto;
   listInsights(input: { projectId: string; limit?: number; offset?: number }): unknown;
+  deleteInsight(input: { projectId: string; insightId: string }): unknown;
   convertToNote(input: { projectId: string; insightId: string }): unknown;
 };
 
@@ -55,6 +56,7 @@ export function registerTransformationHandlers(ipc: Ipc, service: Service): () =
   ipc.handle(TRANSFORMATION_CHANNELS.cancel, (_event, input) => safe(transformationTaskInputSchema, task, input, (value) => { const result = service.cancelTask(value); controllers.get(value.taskId)?.abort(); controllers.delete(value.taskId); return result; }));
   ipc.handle(TRANSFORMATION_CHANNELS.retry, (_event, input) => safe(transformationTaskInputSchema, task, input, (value) => { const controller = new AbortController(); let created!: TaskDto; let ownershipNotified = false; const onFinished = () => { if (created && controllers.get(created.id) === controller) controllers.delete(created.id); }; const onOwnership = ({ taskId, owned }: { taskId: string; owned: boolean }) => { if (ownershipNotified) return; ownershipNotified = true; if (owned) controllers.set(taskId, controller); else controller.abort(); }; created = service.retryTask(value, controller.signal, onFinished, onOwnership); return created; }));
   ipc.handle(TRANSFORMATION_CHANNELS.listInsights, (_event, input) => safe(transformationInsightsInputSchema, insights, input, (value) => service.listInsights(value as never)));
+  ipc.handle(TRANSFORMATION_CHANNELS.deleteInsight, (_event, input) => safe(transformationConvertInputSchema, voidResult, input, service.deleteInsight.bind(service)));
   ipc.handle(TRANSFORMATION_CHANNELS.convertToNote, (_event, input) => safe(transformationConvertInputSchema, note, input, service.convertToNote.bind(service)));
   const channels = Object.values(TRANSFORMATION_CHANNELS);
   return () => { for (const controller of controllers.values()) controller.abort(); controllers.clear(); channels.forEach((channel) => ipc.removeHandler(channel)); };

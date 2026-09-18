@@ -373,6 +373,7 @@ export function createDesktopApi(ipc: IpcInvoker): DesktopApi {
       cancel: (input) => invokeResult(ipc, TRANSFORMATION_CHANNELS.cancel, transformationTaskInputSchema, transformationTaskResultSchema, input),
       retry: (input) => invokeResult(ipc, TRANSFORMATION_CHANNELS.retry, transformationTaskInputSchema, transformationTaskResultSchema, input),
       listInsights: (input) => invokeResult(ipc, TRANSFORMATION_CHANNELS.listInsights, transformationInsightsInputSchema, insightResultSchema, input),
+      deleteInsight: (input) => invokeResult(ipc, TRANSFORMATION_CHANNELS.deleteInsight, transformationConvertInputSchema, voidResultSchema, input),
       convertToNote: (input) => invokeResult(ipc, TRANSFORMATION_CHANNELS.convertToNote, transformationConvertInputSchema, noteResultSchema, input)
     }
   };

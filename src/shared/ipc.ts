@@ -70,7 +70,7 @@ export const NOTE_CHANNELS = {
 export const TRANSFORMATION_CHANNELS = {
   listRules: "transformations:v1:list-rules", createRule: "transformations:v1:create-rule", updateRule: "transformations:v1:update-rule", deleteRule: "transformations:v1:delete-rule",
   listBuiltins: "transformations:v1:list-builtins", run: "transformations:v1:run", cancel: "transformations:v1:cancel", retry: "transformations:v1:retry",
-  listInsights: "transformations:v1:list-insights", convertToNote: "transformations:v1:convert-to-note"
+  listInsights: "transformations:v1:list-insights", deleteInsight: "transformations:v1:delete-insight", convertToNote: "transformations:v1:convert-to-note"
 } as const;
 
 export const modelRoutesInputSchema = z.object({ taskKind: z.enum(["chat", "note-title", "summary", "key-points", "qa", "custom-transformation", "embedding"]) }).strict();
@@ -263,7 +263,7 @@ export interface DesktopApi {
   transformations?: {
     listRules(input: { projectId: string }): Promise<Result<TransformationDto[]>>; createRule(input: CreateTransformationInput): Promise<Result<TransformationDto>>; updateRule(input: UpdateTransformationInput): Promise<Result<TransformationDto>>; deleteRule(input: { projectId: string; id: string; version: number }): Promise<Result<void>>;
     listBuiltins(input?: { language?: "zh-CN" | "en" }): Promise<Result<BuiltinTransformationDto[]>>; run(input: TransformationRunInput): Promise<Result<TaskDto>>; cancel(input: { projectId: string; taskId: string }): Promise<Result<TaskDto>>; retry(input: { projectId: string; taskId: string }): Promise<Result<TaskDto>>;
-    listInsights(input: { projectId: string; limit?: number; offset?: number }): Promise<Result<InsightDto[]>>; convertToNote(input: { projectId: string; insightId: string }): Promise<Result<NoteDto>>;
+    listInsights(input: { projectId: string; limit?: number; offset?: number }): Promise<Result<InsightDto[]>>; deleteInsight(input: { projectId: string; insightId: string }): Promise<Result<void>>; convertToNote(input: { projectId: string; insightId: string }): Promise<Result<NoteDto>>;
   };
   credentials: {
     set(input: CredentialInput): Promise<Result<CredentialStatusDto>>;

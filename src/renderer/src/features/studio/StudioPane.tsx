@@ -8,6 +8,7 @@ import Icon from "../../ui/Icon";
 import Modal, { DialogHead } from "../../ui/Modal";
 import { toast } from "../../ui/Toast";
 import SafeMarkdown from "../../chat/SafeMarkdown";
+import QuizPanel from "./QuizPanel";
 import { useTaskFeed } from "../../hooks/useTaskFeed";
 import { errorText, formatDateTime, sourceReady } from "../../lib/format";
 import { api as getApi } from "../../lib/api";
@@ -41,15 +42,22 @@ export default function StudioPane({ projectId }: { projectId: string }) {
 
   const tasks = useTaskFeed(projectId, window.myNotebook.tasks?.subscribe, window.myNotebook.tasks?.list);
   const transformTask = tasks.find((task) => task.kind === "transformation" && (task.state === "queued" || task.state === "running" || task.state === "failed"));
-  const latestTransformTask = tasks.find((task) => task.kind === "transformation");
+  const completedTransformations = tasks.filter((task) => task.kind === "transformation" && task.state === "completed")
+    .map((task) => `${task.id}:${task.updatedAt}`).sort().join("|");
+  const insightRequest = useRef(0);
 
   const loadInsights = useCallback(async () => {
+    const request = ++insightRequest.current;
     const api = getApi().transformations;
-    const result = await api.listInsights({ projectId }).catch(() => undefined);
-    if (result?.ok) {
-      const unique = new Map(result.value.map((item) => [item.id, item]));
-      setInsights([...unique.values()].sort((a, b) => b.createdAt.localeCompare(a.createdAt)));
+    const items: InsightDto[] = [];
+    for (let offset = 0; ; offset += 100) {
+      const result = await api.listInsights({ projectId, limit: 100, offset }).catch(() => undefined);
+      if (request !== insightRequest.current || !result?.ok) return;
+      items.push(...result.value);
+      if (result.value.length < 100) break;
     }
+    const unique = new Map(items.map((item) => [item.id, item]));
+    setInsights([...unique.values()].sort((a, b) => b.createdAt.localeCompare(a.createdAt)));
   }, [projectId]);
 
   useEffect(() => {
@@ -68,12 +76,12 @@ export default function StudioPane({ projectId }: { projectId: string }) {
       setConversations(result.value);
       setMessages(messageResults.flatMap((item) => item?.ok ? item.value : []));
     }).catch(() => undefined);
-    return () => { alive = false; };
+    return () => { alive = false; insightRequest.current += 1; };
   }, [projectId, language, loadInsights]);
 
   useEffect(() => {
-    if (latestTransformTask?.state === "completed") void loadInsights();
-  }, [latestTransformTask?.id, latestTransformTask?.state, latestTransformTask?.updatedAt, loadInsights]);
+    if (completedTransformations) void loadInsights();
+  }, [completedTransformations, loadInsights]);
 
   const chosenBuiltin = builtins.find((item) => item.key === ruleKey);
   const chosenRule = rules.find((item) => item.id === ruleKey);
@@ -112,13 +120,14 @@ export default function StudioPane({ projectId }: { projectId: string }) {
         : target;
       const input = chosenRule
         ? { projectId, transformationId: chosenRule.id, ...payload }
-        : { projectId, builtinKey: ruleKey as "summary" | "key-points" | "qa", language, ...payload };
+        : { projectId, builtinKey: ruleKey as "summary" | "key-points" | "qa", language, ...(ruleKey === "qa" ? { force: true } : {}), ...payload };
       return api.run(input).catch(() => undefined);
     }));
     setRunning(false);
     const failure = results.find((result) => !result?.ok);
     if (failure && !failure.ok) { toast.error(errorText(failure, t)); return; }
     toast.info(t("transformations.started"));
+    void loadInsights();
   }
 
   async function cancelTask(): Promise<void> {
@@ -146,6 +155,13 @@ export default function StudioPane({ projectId }: { projectId: string }) {
     toast.success(t("transformations.converted"));
   }
 
+  async function deleteInsight(insightId: string): Promise<boolean> {
+    const result = await getApi().transformations.deleteInsight({ projectId, insightId });
+    if (!result.ok) { toast.error(errorText(result, t)); return false; }
+    setInsights((current) => current.filter((item) => item.id !== insightId));
+    return true;
+  }
+
   const taskPercent = transformTask ? Math.round(transformTask.progress / 10) : 0;
 
   return (
@@ -160,8 +176,13 @@ export default function StudioPane({ projectId }: { projectId: string }) {
               options={ruleOptions}
               ariaLabel={t("transformations.rule")}
               onChange={setRuleKey}
+              footer={<button type="button" className="rounded-select-option rule-create" onClick={() => setEditorRule(null)}><Icon name="plus" />{t("transformations.newRule")}</button>}
             />
           </label>
+          {chosenRule && <div className="run-actions">
+            <button type="button" className="btn ghost sm" onClick={() => setEditorRule(chosenRule)}><Icon name="edit" />{t("transformations.editRule")}</button>
+            <button type="button" className="btn ghost sm danger" onClick={() => void deleteRule(chosenRule)}><Icon name="trash" />{t("common.delete")}</button>
+          </div>}
 
           <div className="studio-target-picker">
             {(["source", "message", "answer"] as const).map((kind) => {
@@ -224,52 +245,20 @@ export default function StudioPane({ projectId }: { projectId: string }) {
         </form>
       </section>
 
-      <section className="panel studio-rules" aria-label={t("transformations.customRules")}>
-        <header className="panel-head">
-          <h2>{t("transformations.customRules")}</h2>
-          <span className="count">{rules.length}</span>
-          <span className="spacer" />
-          <button type="button" className="btn primary sm" onClick={() => setEditorRule(null)}>
-            <Icon name="plus" />{t("transformations.newRule")}
-          </button>
-        </header>
-        <div className="panel-body">
-          {rules.length === 0 ? (
-            <div className="empty" style={{ padding: "26px 12px" }}>
-              <span className="glyph" aria-hidden="true"><Icon name="sliders" /></span>
-              <p>{t("transformations.noRules")}</p>
-            </div>
-          ) : rules.map((rule) => (
-            <div className="rule-item" key={rule.id}>
-              <div className="rule-item-head">
-                <strong>{rule.name}</strong>
-                <span className="badge neutral">{t(`transformations.targetKinds.${rule.appliesTo}`, rule.appliesTo)}</span>
-                <span className="spacer" />
-                <button type="button" className="icon-btn" aria-label={`${t("common.edit")}: ${rule.name}`} onClick={() => setEditorRule(rule)}>
-                  <Icon name="edit" />
-                </button>
-                <button type="button" className="icon-btn danger" aria-label={`${t("common.delete")}: ${rule.name}`} onClick={() => void deleteRule(rule)}>
-                  <Icon name="trash" />
-                </button>
-              </div>
-              <p>{rule.prompt}</p>
-            </div>
-          ))}
-        </div>
-      </section>
+      <QuizPanel key={projectId} projectId={projectId} insights={insights.filter((item) => item.projectId === projectId)} onDelete={deleteInsight} />
 
       <section className="panel studio-insights" aria-label={t("transformations.insights")}>
         <header className="panel-head">
           <h2>{t("transformations.insights")}</h2>
-          <span className="count">{insights.length}</span>
+          <span className="count">{insights.filter((item) => item.builtinKey !== "qa").length}</span>
         </header>
         <div className="panel-body">
-          {insights.length === 0 ? (
+          {insights.filter((item) => item.builtinKey !== "qa").length === 0 ? (
             <div className="empty" style={{ padding: "26px 12px" }}>
               <span className="glyph" aria-hidden="true"><Icon name="sparkle" /></span>
               <p>{t("transformations.noInsights")}</p>
             </div>
-          ) : insights.map((insight) => (
+          ) : insights.filter((item) => item.builtinKey !== "qa").map((insight) => (
             <div className="insight-item" key={insight.id}>
               <div className="insight-item-head">
                 {insight.model && <span className="badge neutral">{insight.model}</span>}
@@ -283,6 +272,9 @@ export default function StudioPane({ projectId }: { projectId: string }) {
                 </button>
                 <button type="button" className="btn ghost sm" onClick={() => void convertToNote(insight)}>
                   <Icon name="notes" />{t("transformations.convert")}
+                </button>
+                <button type="button" className="btn danger-soft sm" aria-label={`${t("common.delete")}: ${insight.content.split("\n")[0]?.slice(0, 32) ?? t("transformations.insights")}`} onClick={() => void deleteInsight(insight.id)}>
+                  <Icon name="trash" />{t("common.delete")}
                 </button>
               </div>
             </div>
@@ -329,7 +321,8 @@ export default function StudioPane({ projectId }: { projectId: string }) {
   );
 }
 
-function RuleSelect({ value, options, ariaLabel, onChange }: {
+function RuleSelect({ value, options, ariaLabel, onChange, footer }: {
+  footer?: React.ReactNode;
   value: string;
   options: Array<{ value: string; label: string }>;
   ariaLabel: string;
@@ -381,7 +374,8 @@ function RuleSelect({ value, options, ariaLabel, onChange }: {
         <Icon name={open ? "chevron-up" : "chevron-down"} />
       </button>
       {open && (
-        <div className="rounded-select-menu" data-placement={placement} role="listbox" aria-label={ariaLabel}>
+        <div className="rounded-select-menu" data-placement={placement}>
+        <div role="listbox" aria-label={ariaLabel}>
           {options.map((option) => (
             <button
               type="button"
@@ -397,6 +391,8 @@ function RuleSelect({ value, options, ariaLabel, onChange }: {
               {option.label}
             </button>
           ))}
+        </div>
+        {footer && <div className="rule-select-footer" onClick={() => setOpen(false)}>{footer}</div>}
         </div>
       )}
     </div>

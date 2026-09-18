@@ -49,6 +49,7 @@ export const insightUsageSchema = z.object({
   totalTokens: z.number().int().nonnegative()
 }).strict();
 export const insightDtoSchema = z.object({
+  builtinKey: z.enum(["summary", "key-points", "qa"]).nullable().optional(),
   id: z.uuid(),
   projectId: z.uuid(),
   transformationId: z.uuid().nullable(),

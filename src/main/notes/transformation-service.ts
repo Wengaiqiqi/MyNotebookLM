@@ -77,6 +77,7 @@ function sha256(value: string): string { return createHash("sha256").update(valu
 
 function rowInsight(row: any): InsightDto {
   return insightDtoSchema.parse({
+    builtinKey: row.builtin_key ?? null,
     id: row.id, projectId: row.project_id, transformationId: row.transformation_id,
     taskId: row.task_id, inputKind: row.input_kind, inputHash: row.input_hash,
     ruleVersion: row.rule_version, content: row.content, provider: row.provider,
@@ -178,7 +179,13 @@ export class TransformationService {
   listInsights(input: { projectId: string; limit?: number; offset?: number }): InsightDto[] {
     const limit = Math.min(100, Math.max(1, input.limit ?? 50));
     const offset = Math.max(0, input.offset ?? 0);
-    const rows = this.deps.db.prepare("SELECT * FROM insights WHERE project_id = ? ORDER BY created_at DESC, id ASC LIMIT ? OFFSET ?").all(input.projectId, limit, offset) as any[];
+    const rows = this.deps.db.prepare(`SELECT i.*, CASE
+      WHEN s.rule_id LIKE 'builtin:qa:%' THEN 'qa'
+      WHEN s.rule_id LIKE 'builtin:summary:%' THEN 'summary'
+      WHEN s.rule_id LIKE 'builtin:key-points:%' THEN 'key-points'
+      END AS builtin_key FROM insights i
+      LEFT JOIN transformation_task_snapshots s ON s.task_id = i.task_id AND s.project_id = i.project_id
+      WHERE i.project_id = ? ORDER BY i.created_at DESC, i.id ASC LIMIT ? OFFSET ?`).all(input.projectId, limit, offset) as any[];
     return rows.map(rowInsight);
   }
 
@@ -369,6 +376,11 @@ export class TransformationService {
     const content = outputText(row.content);
     const title = content.split("\n")[0]?.replace(/^#+\s*/, "").trim() || "Transformation result";
     return this.deps.notes.create({ id: this.deps.id?.() ?? randomUUID(), projectId, title: title.slice(0, 200), body: content });
+  }
+
+  deleteInsight(input: { projectId: string; insightId: string }): void {
+    const result = this.deps.db.prepare("DELETE FROM insights WHERE id = ? AND project_id = ?").run(input.insightId, input.projectId);
+    if (result.changes === 0) throw new TransformationInsightNotFoundError(input.insightId);
   }
 
   retry(taskId: string, signal?: AbortSignal): Promise<InsightDto> { return this.resume(taskId, signal); }
