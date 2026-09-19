@@ -584,6 +584,11 @@ button:disabled { cursor: not-allowed; opacity: .5; }
   margin-left: auto; font-size: 12px; font-weight: 700;
   font-variant-numeric: tabular-nums; color: var(--ink-2);
 }
+.task-card-meta { margin-left: auto; display: inline-flex; align-items: baseline; gap: 8px; }
+.task-card-elapsed {
+  font-size: 11.5px; color: var(--ink-3); font-variant-numeric: tabular-nums;
+}
+.task-card-meta .task-card-percent { margin-left: 0; }
 .task-card.is-completed .task-card-percent {
   color: var(--ok);
 }
@@ -599,6 +604,25 @@ button:disabled { cursor: not-allowed; opacity: .5; }
 .progress > i {
   display: block; height: 100%; border-radius: 999px; background: var(--accent);
   transition: width .3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+/* Milestone bar: a long, eased tween so 20% -> 40% reads as movement rather
+   than a jump, plus a travelling sheen so a slow provider never looks stuck. */
+.progress.running > i {
+  position: relative; overflow: hidden;
+  transition: width .9s cubic-bezier(0.25, 0.8, 0.35, 1);
+}
+.progress.running > i::after {
+  content: ""; position: absolute; inset: 0;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, .55), transparent);
+  animation: progress-sheen 1.6s ease-in-out infinite;
+}
+@keyframes progress-sheen {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(100%); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .progress.running > i { transition: none; }
+  .progress.running > i::after { animation: none; opacity: 0; }
 }
 .progress.indeterminate > i { width: 36%; transition: none; animation: indeterminate 1.15s ease-in-out infinite; }
 @keyframes indeterminate {

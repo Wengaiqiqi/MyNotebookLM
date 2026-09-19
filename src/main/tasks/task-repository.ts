@@ -145,7 +145,7 @@ export class TaskRepository {
         SET state = ?, stage = ?, progress_1000 = COALESCE(?, progress_1000),
             attempt = COALESCE(?, attempt), error_code = ?, error_message = ?, updated_at = ?
         WHERE id = ? AND state = ?
-          AND (? IS NULL OR progress_1000 <= ?)
+          AND (? IS NULL OR ? <> 'running' OR progress_1000 <= ?)
       `).run(
         input.nextState,
         input.stage,
@@ -157,6 +157,7 @@ export class TaskRepository {
         input.id,
         input.expectedState,
         progress,
+        input.nextState,
         progress
       );
       if (result.changes === 0) {

@@ -84,6 +84,25 @@ describe("TransformationService", () => {
     expect(db.connection.prepare("SELECT input_hash, rendered_prompt, route_snapshot_json, transformation_id FROM transformation_task_snapshots WHERE task_id = ?").get(insight.taskId)).toMatchObject({ input_hash: expect.any(String), rendered_prompt: expect.stringContaining("source text"), route_snapshot_json: expect.stringContaining("router-profile"), transformation_id: null });
   });
 
+  it("advances 20% -> 40% only when the provider actually answers", async () => {
+    const seen: number[] = [];
+    const advance = baseDeps.tasks.advance.bind(baseDeps.tasks);
+    baseDeps.tasks.advance = (taskId: string, stage: string, progress: number) => {
+      seen.push(progress);
+      return advance(taskId, stage as never, progress);
+    };
+    // A stalled dial must not leave the bar at 40%.
+    baseDeps.generation = { generateRouted: async function* () { yield { type: "attempt-started" as const, attempt: { provider: "openai", model: "m", profileId: null }, attemptOrder: 0 }; throw new ProviderRequestError(classifyProviderError({ timeout: true })); } };
+    service = new TransformationService(baseDeps);
+    await expect(service.run({ projectId: PROJECT, builtinKey: "summary", language: "en", sourceRevisionId: REVISION })).rejects.toThrow();
+    expect(seen).toEqual([200]);
+
+    seen.length = 0;
+    service = new TransformationService({ ...baseDeps, generation: { generateRouted: async function* () { yield { type: "attempt-started" as const, attempt: { provider: "openai", model: "m", profileId: null }, attemptOrder: 0 }; yield* successful("ok"); } } });
+    await service.run({ projectId: PROJECT, builtinKey: "summary", language: "en", sourceRevisionId: REVISION, force: true });
+    expect(seen).toEqual([200, 400, 800]);
+  });
+
   it("snapshots every current ready source for a project target", async () => {
     const source2 = "22222222-2222-4222-8222-222222222223";
     const revision2 = "33333333-3333-4333-8333-333333333334";

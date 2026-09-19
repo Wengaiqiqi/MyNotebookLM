@@ -327,6 +327,7 @@ export class TransformationService {
     }
     task = claimed.task!;
     this.deps.tasks.advance(task.id, "generating", 200);
+    let acknowledged = false;
     let content = "";
     let usage: InsightUsage = { inputTokens: 0, outputTokens: 0, totalTokens: 0 };
     let actual: { provider: any; model: string; profileId: string | null } | undefined;
@@ -338,6 +339,12 @@ export class TransformationService {
       }
       notifyTaskOwnership(task.id, true);
       for await (const event of this.deps.generation.generateRouted(rule.taskKind, request, input.profileId, input.signal)) {
+        // attempt-started/fallback are local bookkeeping; only a real provider
+        // response may advance the milestone, so a stalled dial stays at 20%.
+        if (!acknowledged && event.type !== "attempt-started" && event.type !== "fallback") {
+          acknowledged = true;
+          this.deps.tasks.advance(task.id, "generating", 400);
+        }
         if (event.type === "text-delta") content += event.text;
         else if (event.type === "usage") {
           usage = {
@@ -349,7 +356,7 @@ export class TransformationService {
         else if (event.type === "routed-complete") actual = event.profile;
       }
       const safe = outputText(content);
-      this.deps.tasks.advance(task.id, "saving", 900);
+      this.deps.tasks.advance(task.id, "saving", 800);
       const insightId = this.deps.id?.() ?? randomUUID();
       const persistedProfileId = actual?.profileId && this.deps.db.prepare("SELECT 1 FROM model_profiles WHERE id = ?").get(actual.profileId)
         ? actual.profileId : null;
@@ -425,16 +432,22 @@ export class TransformationService {
       }
       const request = JSON.parse(snapshot.request_json) as RoutedGenerateRequest;
       notifyOwnership({ taskId, owned: true });
+      this.deps.tasks.advance(taskId, "generating", 200);
+      let acknowledged = false;
       let content = "";
       let usage: InsightUsage = { inputTokens: 0, outputTokens: 0, totalTokens: 0 };
       let actual: { provider: any; model: string; profileId: string | null } | undefined;
       for await (const event of this.deps.generation.generateRouted(taskKind, request, persistedRouteProfileId, signal)) {
+        if (!acknowledged && event.type !== "attempt-started" && event.type !== "fallback") {
+          acknowledged = true;
+          this.deps.tasks.advance(taskId, "generating", 400);
+        }
         if (event.type === "text-delta") content += event.text;
         else if (event.type === "usage") { usage.inputTokens += event.inputTokens ?? 0; usage.outputTokens += event.outputTokens ?? 0; usage.totalTokens += (event.inputTokens ?? 0) + (event.outputTokens ?? 0); }
         else if (event.type === "routed-complete") actual = event.profile;
       }
       const safe = outputText(content);
-      this.deps.tasks.advance(taskId, "saving", 900);
+      this.deps.tasks.advance(taskId, "saving", 800);
       const id = this.deps.id?.() ?? randomUUID();
       const completedProfileId = actual?.profileId && this.deps.db.prepare("SELECT 1 FROM model_profiles WHERE id = ?").get(actual.profileId)
         ? actual.profileId : null;

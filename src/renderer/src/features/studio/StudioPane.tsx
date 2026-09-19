@@ -23,6 +23,14 @@ function normalizeInsightMarkdown(text: string): string {
   return text.replace(/\*\*([^*\n]+?)\*\*(?=[\u3400-\u9fff])/gu, "**$1**&#8203;");
 }
 
+/** Milestone copy: 20% = inputs ready, 40% = provider answered, 80% = text done. */
+function transformationPhase(progress: number): "preparing" | "connecting" | "generating" | "saving" {
+  if (progress >= 800) return "saving";
+  if (progress >= 400) return "generating";
+  if (progress >= 200) return "connecting";
+  return "preparing";
+}
+
 export default function StudioPane({ projectId }: { projectId: string }) {
   const { t, i18n } = useTranslation();
   const language: AppLanguage = i18n.resolvedLanguage === "en" ? "en" : "zh-CN";
@@ -194,6 +202,19 @@ export default function StudioPane({ projectId }: { projectId: string }) {
   const starting = running && transformTask?.state !== "queued" && transformTask?.state !== "running";
   const taskState = starting ? "queued" : transformTask?.state;
   const taskPercent = starting ? 0 : transformTask ? (transformTask.state === "completed" ? 100 : Math.round(transformTask.progress / 10)) : 0;
+  // One replacement label per milestone; the bar tweens between milestones in CSS.
+  const taskLabel = taskState === "running"
+    ? t(`transformations.phases.${transformationPhase(transformTask?.progress ?? 0)}`)
+    : t(`transformations.states.${taskState}`, taskState ?? "");
+  // A sliver keeps the bar visible while the first milestone is still pending.
+  const taskBarPercent = taskState === "running" || taskState === "queued" ? Math.max(taskPercent, 3) : taskPercent;
+  const [elapsedSeconds, setElapsedSeconds] = useState(0);
+  useEffect(() => {
+    if (taskState !== "running" && taskState !== "queued") { setElapsedSeconds(0); return; }
+    const startedAt = Date.now();
+    const timer = setInterval(() => setElapsedSeconds(Math.floor((Date.now() - startedAt) / 1000)), 1000);
+    return () => clearInterval(timer);
+  }, [taskState, transformTask?.id, transformTask?.attempt]);
 
   return (
     <div className="pane studio">
@@ -278,9 +299,12 @@ export default function StudioPane({ projectId }: { projectId: string }) {
                       <span className="spinner sm" />
                     )}
                   </span>
-                  <strong>{t(`transformations.states.${taskState}`, taskState)}</strong>
+                  <strong>{taskLabel}</strong>
                 </div>
-                <span className="task-card-percent">{taskPercent}%</span>
+                <span className="task-card-meta">
+                  {elapsedSeconds > 0 && <span className="task-card-elapsed">{t("transformations.elapsed", { seconds: elapsedSeconds })}</span>}
+                  <span className="task-card-percent">{taskPercent}%</span>
+                </span>
               </div>
               <div
                 className={`progress${
@@ -289,17 +313,11 @@ export default function StudioPane({ projectId }: { projectId: string }) {
                     : taskState === "completed"
                     ? " ok"
                     : taskState === "running" || taskState === "queued"
-                    ? " indeterminate"
+                    ? " running"
                     : ""
                 }`}
               >
-                <i
-                  style={
-                    taskState === "failed" || taskState === "completed"
-                      ? { width: `${taskPercent}%` }
-                      : undefined
-                  }
-                />
+                <i style={{ width: `${taskBarPercent}%` }} />
               </div>
               {!starting && transformTask?.error && (
                 <p className="err" role="alert">

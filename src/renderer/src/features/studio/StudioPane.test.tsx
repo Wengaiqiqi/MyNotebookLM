@@ -258,6 +258,26 @@ describe("StudioPane", () => {
     expect(progressFill.style.width).toBe("100%");
   });
 
+  it("replaces the milestone label and tweens the bar as progress advances", async () => {
+    const api = mockApi();
+    let emit!: (task: TaskDto) => void;
+    api.tasks!.subscribe = vi.fn((_id, listener) => { emit = listener; return () => undefined; });
+    vi.mocked(api.tasks!.list).mockResolvedValue([{ ...taskDto(), state: "running", stage: "preparing", progress: 0 }]);
+    render(<StudioPane projectId={projectId} />);
+
+    expect(await screen.findByText("准备资料")).toBeTruthy();
+    await act(async () => { emit({ ...taskDto(), state: "running", stage: "generating", progress: 200, updatedAt: "2026-01-01T00:00:01.000Z" }); });
+    expect(screen.getByText("等待模型响应")).toBeTruthy();
+    expect(screen.queryByText("准备资料")).toBeNull();
+    await act(async () => { emit({ ...taskDto(), state: "running", stage: "generating", progress: 400, updatedAt: "2026-01-01T00:00:02.000Z" }); });
+    expect(screen.getByText("正在生成内容")).toBeTruthy();
+    await act(async () => { emit({ ...taskDto(), state: "running", stage: "saving", progress: 800, updatedAt: "2026-01-01T00:00:03.000Z" }); });
+    expect(screen.getByText("正在整理结果")).toBeTruthy();
+    const fill = screen.getByRole("status").querySelector(".progress i") as HTMLElement;
+    expect(fill.style.width).toBe("80%");
+    expect(fill.parentElement?.className).toContain("running");
+  });
+
   it("shows only ready sources as pickable targets", async () => {
     mockApi({
       sources: {

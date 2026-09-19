@@ -115,6 +115,14 @@ describe("TaskService", () => {
     expect(service.retry(TASK_ID, "staging")).toMatchObject({ state: "queued", stage: "staging" });
   });
 
+  it("restarts progress at zero when a failed task is retried", () => {
+    service.createTask({ projectId: PROJECT_ID, sourceId: null, kind: "transformation" });
+    service.start(TASK_ID, "preparing");
+    service.advance(TASK_ID, "generating", 800);
+    service.fail(TASK_ID, { code: "PROVIDER", messageKey: "errors.providerFailure", recoverable: false }, false);
+    expect(service.retry(TASK_ID, "preparing").progress).toBe(0);
+  });
+
   it("cancels a queued or running task on request", () => {
     service.createTask({
       projectId: PROJECT_ID,

@@ -68,7 +68,7 @@ export class TaskService {
   retry(taskId: string, stage: TaskStage): TaskDto {
     const current = this.repository.findById(taskId);
     if (!current) throw new Error(`Task not found: ${taskId}`);
-    return this.repository.transition({ id: taskId, expectedState: "failed", nextState: "queued", stage, attempt: current.attempt, updatedAt: this.deps.now() });
+    return this.repository.transition({ id: taskId, expectedState: "failed", nextState: "queued", stage, progress: 0, attempt: current.attempt, updatedAt: this.deps.now() });
   }
 
   advance(taskId: string, stage: TaskStage, progress: number): TaskDto {
@@ -124,7 +124,7 @@ export class TaskService {
   retryCancelled(taskId: string, stage: TaskStage): TaskDto {
     const current = this.repository.findById(taskId);
     if (!current) throw new Error(`Task not found: ${taskId}`);
-    return this.repository.transition({ id: taskId, expectedState: "cancelled", nextState: "queued", stage, attempt: current.attempt, updatedAt: this.deps.now() });
+    return this.repository.transition({ id: taskId, expectedState: "cancelled", nextState: "queued", stage, progress: 0, attempt: current.attempt, updatedAt: this.deps.now() });
   }
 
   cancel(taskId: string): TaskDto {
@@ -142,6 +142,7 @@ export class TaskService {
           expectedState: "running",
           nextState: "queued",
           stage: "embedding",
+          progress: 0,
           attempt: task.attempt,
           updatedAt: this.deps.now()
         });
@@ -153,6 +154,7 @@ export class TaskService {
           expectedState: "running",
           nextState: "queued",
           stage: task.stage,
+          progress: 0,
           attempt: nextAttempt,
           updatedAt: this.deps.now()
         });
