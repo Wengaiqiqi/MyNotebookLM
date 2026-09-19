@@ -258,24 +258,56 @@ describe("StudioPane", () => {
     expect(progressFill.style.width).toBe("100%");
   });
 
-  it("replaces the milestone label and tweens the bar as progress advances", async () => {
-    const api = mockApi();
-    let emit!: (task: TaskDto) => void;
-    api.tasks!.subscribe = vi.fn((_id, listener) => { emit = listener; return () => undefined; });
-    vi.mocked(api.tasks!.list).mockResolvedValue([{ ...taskDto(), state: "running", stage: "preparing", progress: 0 }]);
-    render(<StudioPane projectId={projectId} />);
+  it("climbs the percentage continuously and replaces the milestone label", async () => {
+    vi.useFakeTimers();
+    try {
+      const api = mockApi();
+      let emit!: (task: TaskDto) => void;
+      api.tasks!.subscribe = vi.fn((_id, listener) => { emit = listener; return () => undefined; });
+      vi.mocked(api.tasks!.list).mockResolvedValue([{ ...taskDto(), state: "running", stage: "preparing", progress: 0 }]);
+      render(<StudioPane projectId={projectId} />);
+      // Flush the initial task list before touching the card.
+      await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+      const fill = (): HTMLElement => screen.getByRole("status").querySelector(".progress i") as HTMLElement;
+      const percent = (): number => Number((screen.getByRole("status").querySelector(".task-card-percent") as HTMLElement).textContent!.replace("%", ""));
 
-    expect(await screen.findByText("准备资料")).toBeTruthy();
-    await act(async () => { emit({ ...taskDto(), state: "running", stage: "generating", progress: 200, updatedAt: "2026-01-01T00:00:01.000Z" }); });
-    expect(screen.getByText("等待模型响应")).toBeTruthy();
-    expect(screen.queryByText("准备资料")).toBeNull();
-    await act(async () => { emit({ ...taskDto(), state: "running", stage: "generating", progress: 400, updatedAt: "2026-01-01T00:00:02.000Z" }); });
-    expect(screen.getByText("正在生成内容")).toBeTruthy();
-    await act(async () => { emit({ ...taskDto(), state: "running", stage: "saving", progress: 800, updatedAt: "2026-01-01T00:00:03.000Z" }); });
-    expect(screen.getByText("正在整理结果")).toBeTruthy();
-    const fill = screen.getByRole("status").querySelector(".progress i") as HTMLElement;
-    expect(fill.style.width).toBe("80%");
-    expect(fill.parentElement?.className).toContain("running");
+      expect(screen.getByText("准备资料")).toBeTruthy();
+      // Preparing takes 4s of visible climb toward 20%, even before the main
+      // process reports the first milestone.
+      await act(async () => { vi.advanceTimersByTime(4_000); });
+      expect(percent()).toBe(20);
+      expect(fill().style.width).toBe("20%");
+      // The copy replaces in place once the number reaches the milestone.
+      expect(screen.queryByText("准备资料")).toBeNull();
+      expect(screen.getByText("等待模型响应")).toBeTruthy();
+
+      // Inputs confirmed ready: the number holds at 20 until the provider answers.
+      await act(async () => { emit({ ...taskDto(), state: "running", stage: "generating", progress: 200, updatedAt: "2026-01-01T00:00:01.500Z" }); });
+      expect(percent()).toBe(20);
+      expect(screen.getByText("等待模型响应")).toBeTruthy();
+
+      // Only a real provider response may raise the ceiling past 20%.
+      await act(async () => { emit({ ...taskDto(), state: "running", stage: "generating", progress: 400, updatedAt: "2026-01-01T00:00:02.000Z" }); });
+      await act(async () => { vi.advanceTimersByTime(5_000); });
+      expect(percent()).toBe(50);
+      expect(screen.getByText("正在生成内容")).toBeTruthy();
+
+      // 20 -> 80 takes 10s, then stops at the reported ceiling, never past it.
+      await act(async () => { vi.advanceTimersByTime(5_000); });
+      expect(percent()).toBe(80);
+      await act(async () => { vi.advanceTimersByTime(60_000); });
+      expect(percent()).toBe(80);
+      await act(async () => { emit({ ...taskDto(), state: "running", stage: "saving", progress: 800, updatedAt: "2026-01-01T00:00:03.000Z" }); });
+      await act(async () => { vi.advanceTimersByTime(120_000); });
+      expect(percent()).toBe(99);
+      expect(screen.getByText("正在整理结果")).toBeTruthy();
+      expect(fill().parentElement?.className).toContain("running");
+
+      await act(async () => { emit({ ...taskDto(), state: "completed", progress: 1000, updatedAt: "2026-01-01T00:00:04.000Z" }); });
+      expect(percent()).toBe(100);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("shows only ready sources as pickable targets", async () => {

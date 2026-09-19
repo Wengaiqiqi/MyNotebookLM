@@ -10,6 +10,7 @@ import Modal, { DialogHead } from "../../ui/Modal";
 import { toast } from "../../ui/Toast";
 import SafeMarkdown from "../../chat/SafeMarkdown";
 import QuizPanel from "./QuizPanel";
+import { advancePercent, progressCeiling, progressPhase } from "./progress-motion";
 import { useTaskFeed } from "../../hooks/useTaskFeed";
 import { errorText, formatDateTime, sourceReady } from "../../lib/format";
 import { api as getApi } from "../../lib/api";
@@ -21,14 +22,6 @@ function normalizeInsightMarkdown(text: string): string {
   // Marked treats **label** immediately followed by CJK text as literal
   // punctuation; an entity boundary keeps the emphasis without visible space.
   return text.replace(/\*\*([^*\n]+?)\*\*(?=[\u3400-\u9fff])/gu, "**$1**&#8203;");
-}
-
-/** Milestone copy: 20% = inputs ready, 40% = provider answered, 80% = text done. */
-function transformationPhase(progress: number): "preparing" | "connecting" | "generating" | "saving" {
-  if (progress >= 800) return "saving";
-  if (progress >= 400) return "generating";
-  if (progress >= 200) return "connecting";
-  return "preparing";
 }
 
 export default function StudioPane({ projectId }: { projectId: string }) {
@@ -201,20 +194,68 @@ export default function StudioPane({ projectId }: { projectId: string }) {
 
   const starting = running && transformTask?.state !== "queued" && transformTask?.state !== "running";
   const taskState = starting ? "queued" : transformTask?.state;
-  const taskPercent = starting ? 0 : transformTask ? (transformTask.state === "completed" ? 100 : Math.round(transformTask.progress / 10)) : 0;
-  // One replacement label per milestone; the bar tweens between milestones in CSS.
+  const reportedPercent = starting ? 0 : transformTask ? (transformTask.state === "completed" ? 100 : Math.round(transformTask.progress / 10)) : 0;
+  const ceiling = progressCeiling(reportedPercent);
+  const taskKey = `${transformTask?.id ?? ""}:${transformTask?.attempt ?? 0}`;
+  const [displayedPercent, setDisplayedPercent] = useState(0);
+  const [elapsedSeconds, setElapsedSeconds] = useState(0);
+  const displayedRef = useRef(0);
+  // Wall-clock start of the current run; a ref so milestone updates do not
+  // restart the clock (and the 4s "preparing" dwell) mid-run.
+  const runStartedAt = useRef(Date.now());
+  const previousState = useRef<TaskDto["state"] | undefined>(undefined);
+  const runKey = useRef<string>("");
+
+  // A completed card must paint 100% on its first frame, so the value shown is
+  // clamped up rather than waiting for the reset effect below.
+  const shownPercent = taskState === "completed" ? 100 : displayedPercent;
+
+  // One effect owns the whole animation:
+  //   completed -> snap to 100 (the result is persisted)
+  //   a fresh or retried run -> start over at 0
+  //   queued / failed / cancelled -> freeze the last shown value
+  //   running -> climb toward the reported ceiling, so the bar moves
+  //              continuously instead of stepping at milestone boundaries
+  useEffect(() => {
+    const previous = previousState.current;
+    previousState.current = taskState;
+    if (taskState === "completed") {
+      displayedRef.current = 100;
+      setDisplayedPercent(100);
+      return;
+    }
+    if (taskState !== "running") return; // failed/cancelled freeze
+    if (previous !== "running" || runKey.current !== taskKey) {
+      runKey.current = taskKey;
+      runStartedAt.current = Date.now();
+      displayedRef.current = 0;
+      setDisplayedPercent(0);
+      setElapsedSeconds(0);
+    }
+    let last = Date.now();
+    const timer = setInterval(() => {
+      const now = Date.now();
+      const delta = now - last;
+      last = now;
+      const elapsed = now - runStartedAt.current;
+      const next = advancePercent(displayedRef.current, ceiling, delta);
+      if (next !== displayedRef.current) {
+        displayedRef.current = next;
+        setDisplayedPercent(next);
+      }
+      setElapsedSeconds(Math.floor(elapsed / 1000));
+    }, 100);
+    return () => clearInterval(timer);
+  }, [taskState, taskKey, ceiling]);
+
+  const taskPercent = Math.round(shownPercent);
+  // The label is driven by the animated number, so "preparing" stays readable
+  // for the full 4s climb to 20% instead of flipping the instant inputs are ready.
   const taskLabel = taskState === "running"
-    ? t(`transformations.phases.${transformationPhase(transformTask?.progress ?? 0)}`)
+    ? t(`transformations.phases.${progressPhase(shownPercent, reportedPercent)}`)
     : t(`transformations.states.${taskState}`, taskState ?? "");
   // A sliver keeps the bar visible while the first milestone is still pending.
   const taskBarPercent = taskState === "running" || taskState === "queued" ? Math.max(taskPercent, 3) : taskPercent;
-  const [elapsedSeconds, setElapsedSeconds] = useState(0);
-  useEffect(() => {
-    if (taskState !== "running" && taskState !== "queued") { setElapsedSeconds(0); return; }
-    const startedAt = Date.now();
-    const timer = setInterval(() => setElapsedSeconds(Math.floor((Date.now() - startedAt) / 1000)), 1000);
-    return () => clearInterval(timer);
-  }, [taskState, transformTask?.id, transformTask?.attempt]);
 
   return (
     <div className="pane studio">
