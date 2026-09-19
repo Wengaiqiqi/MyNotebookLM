@@ -246,7 +246,20 @@ export class ChatService {
         if (match) retrievalsByLabel[c.label] = match;
       }
 
-      return await this.runGeneration({ repo, turn, profile, generationProfileId, ...(thinking ? { thinking } : {}), retrievals: retrievalsByLabel, contextMessages: context.messages, assistantId: assistant.id, requestId, signal, emit });
+      return await this.runGeneration({
+        repo,
+        turn,
+        profile,
+        generationProfileId,
+        ...(thinking ? { thinking } : {}),
+        retrievals: retrievalsByLabel,
+        contextMessages: context.messages,
+        outputTokenReserve: context.tokenBudget.outputTokenReserve,
+        assistantId: assistant.id,
+        requestId,
+        signal,
+        emit
+      });
     } finally {
       this.registry.complete(requestId, owner);
       this.inFlightConversations.delete(turn.conversationId);
@@ -261,12 +274,13 @@ export class ChatService {
     thinking?: "off" | "low" | "medium" | "high" | undefined;
     retrievals: Record<string, RetrievedCitation>;
     contextMessages: ChatTurn[];
+    outputTokenReserve: number;
     assistantId: string;
     requestId: string;
     signal: AbortSignal;
     emit: (event: StreamEvent) => void;
   }): Promise<Result<{ requestId: string; assistantMessageId: string }>> {
-    const { repo, turn, profile, generationProfileId, thinking, retrievals, contextMessages, assistantId, requestId, signal, emit } = args;
+    const { repo, turn, profile, generationProfileId, thinking, retrievals, contextMessages, outputTokenReserve, assistantId, requestId, signal, emit } = args;
     const now = this.clock.bind(this);
     let fullText = "";
     let lastCheckpointAt = now().getTime();
@@ -290,7 +304,14 @@ export class ChatService {
     };
 
     try {
-      const routedRequest = { projectId: turn.projectId, operationId: requestId, model: profile.modelId, messages: contextMessages, ...(thinking === undefined ? {} : { thinking }) };
+      const routedRequest = {
+        projectId: turn.projectId,
+        operationId: requestId,
+        model: profile.modelId,
+        messages: contextMessages,
+        maxTokens: outputTokenReserve,
+        ...(thinking === undefined ? {} : { thinking })
+      };
       for await (const event of generateRouted(this.routedDeps(), "chat", routedRequest, generationProfileId, signal)) {
         if (event.type === "attempt-started") {
           continue;

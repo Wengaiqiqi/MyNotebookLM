@@ -4,6 +4,7 @@ import { transformationPromptSchema } from "../../../../shared/transformations";
 import type { BuiltinTransformationDto, InsightDto, TransformationAppliesTo, TransformationDto } from "../../../../shared/transformations";
 import type { ConversationDto, MessageDto } from "../../../../shared/chat";
 import type { SourceDto } from "../../../../shared/sources";
+import type { TaskDto } from "../../../../shared/tasks";
 import Icon from "../../ui/Icon";
 import Modal, { DialogHead } from "../../ui/Modal";
 import { toast } from "../../ui/Toast";
@@ -39,9 +40,13 @@ export default function StudioPane({ projectId }: { projectId: string }) {
   const [editorRule, setEditorRule] = useState<TransformationDto | null | undefined>(undefined); // undefined = closed
   const [running, setRunning] = useState(false);
   const [detailInsight, setDetailInsight] = useState<InsightDto | null>(null);
+  const [submittedTasks, setSubmittedTasks] = useState<TaskDto[]>([]);
 
-  const tasks = useTaskFeed(projectId, window.myNotebook.tasks?.subscribe, window.myNotebook.tasks?.list);
-  const transformTask = tasks.find((task) => task.kind === "transformation" && (task.state === "queued" || task.state === "running" || task.state === "failed"));
+  const feedTasks = useTaskFeed(projectId, window.myNotebook.tasks?.subscribe, window.myNotebook.tasks?.list);
+  const tasks = useMemo(() => [...feedTasks, ...submittedTasks.filter((submitted) => !feedTasks.some((task) => task.id === submitted.id))]
+    .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)), [feedTasks, submittedTasks]);
+  const transformTask = tasks.find((task) => task.kind === "transformation" && (task.state === "queued" || task.state === "running"))
+    ?? tasks.find((task) => task.kind === "transformation");
   const completedTransformations = tasks.filter((task) => task.kind === "transformation" && task.state === "completed")
     .map((task) => `${task.id}:${task.updatedAt}`).sort().join("|");
   const insightRequest = useRef(0);
@@ -83,12 +88,18 @@ export default function StudioPane({ projectId }: { projectId: string }) {
     if (completedTransformations) void loadInsights();
   }, [completedTransformations, loadInsights]);
 
+  useEffect(() => {
+    setSubmittedTasks((current) => current.filter((submitted) => !feedTasks.some((task) => task.id === submitted.id)));
+  }, [feedTasks]);
+
+  useEffect(() => { setSubmittedTasks([]); }, [projectId]);
+
   const chosenBuiltin = builtins.find((item) => item.key === ruleKey);
   const chosenRule = rules.find((item) => item.id === ruleKey);
   const ruleOptions = [
     ...builtins
       .filter((item) => item.key !== "key-points")
-      .map((item) => ({ value: item.key, label: item.name })),
+      .map((item) => ({ value: item.key, label: item.key === "summary" ? t("transformations.summary") : item.name })),
     ...rules
       .filter((item) => item.appliesTo !== "note" && item.appliesTo !== "sources")
       .map((item) => ({ value: item.id, label: item.name }))
@@ -108,7 +119,7 @@ export default function StudioPane({ projectId }: { projectId: string }) {
   async function run(): Promise<void> {
     const api: TransformApi = getApi().transformations;
     const hasSelection = Object.values(targetSelections).some((ids) => ids.length > 0);
-    if (!hasSelection || transformTask?.state === "running" || transformTask?.state === "queued") return;
+    if (!hasSelection || running || retrying || transformTask?.state === "running" || transformTask?.state === "queued") return;
     setRunning(true);
     const targets: Array<Record<string, string>> = [];
     if (targetSelections.source.length > 0) targets.push({ sourceRevisionIds: targetSelections.source.join(",") });
@@ -119,14 +130,18 @@ export default function StudioPane({ projectId }: { projectId: string }) {
         ? { sourceRevisionIds: (target.sourceRevisionIds as string).split(",") }
         : target;
       const input = chosenRule
-        ? { projectId, transformationId: chosenRule.id, ...payload }
-        : { projectId, builtinKey: ruleKey as "summary" | "key-points" | "qa", language, ...(ruleKey === "qa" ? { force: true } : {}), ...payload };
+        ? { projectId, transformationId: chosenRule.id, force: true, ...payload }
+        : { projectId, builtinKey: ruleKey as "summary" | "key-points" | "qa", language, force: true, ...payload };
       return api.run(input).catch(() => undefined);
     }));
+    const started = results.flatMap((result) => result?.ok ? [result.value] : []);
+    if (started.length > 0) setSubmittedTasks((current) => [...started, ...current.filter((task) => !started.some((item) => item.id === task.id))]);
     setRunning(false);
-    const failure = results.find((result) => !result?.ok);
-    if (failure && !failure.ok) { toast.error(errorText(failure, t)); return; }
-    toast.info(t("transformations.started"));
+    if (results.some((result) => !result?.ok)) {
+      const failure = results.find((result) => result && !result.ok);
+      toast.error(failure && !failure.ok ? errorText(failure, t) : t("errors.internal"));
+      return;
+    }
     void loadInsights();
   }
 
@@ -136,10 +151,24 @@ export default function StudioPane({ projectId }: { projectId: string }) {
     if (!result.ok) toast.error(errorText(result, t));
   }
 
+  const [retrying, setRetrying] = useState(false);
   async function retryTask(): Promise<void> {
-    if (!transformTask) return;
-    const result = await getApi().transformations.retry({ projectId, taskId: transformTask.id });
-    if (!result.ok) toast.error(errorText(result, t));
+    if (transformTask?.state !== "failed" || retrying || running) return;
+    setRetrying(true);
+    try {
+      const result = await getApi().transformations.retry({ projectId, taskId: transformTask.id });
+      if (!result.ok) { toast.error(errorText(result, t)); return; }
+      if (result.value.state === "failed") {
+        toast.error(t(result.value.error?.messageKey ?? "errors.internal"));
+        return;
+      }
+      setSubmittedTasks((current) => [result.value, ...current.filter((task) => task.id !== result.value.id)]);
+      void loadInsights();
+    } catch {
+      toast.error(t("errors.internal"));
+    } finally {
+      setRetrying(false);
+    }
   }
 
   async function deleteRule(rule: TransformationDto): Promise<void> {
@@ -162,7 +191,9 @@ export default function StudioPane({ projectId }: { projectId: string }) {
     return true;
   }
 
-  const taskPercent = transformTask ? Math.round(transformTask.progress / 10) : 0;
+  const starting = running && transformTask?.state !== "queued" && transformTask?.state !== "running";
+  const taskState = starting ? "queued" : transformTask?.state;
+  const taskPercent = starting ? 0 : transformTask ? (transformTask.state === "completed" ? 100 : Math.round(transformTask.progress / 10)) : 0;
 
   return (
     <div className="pane studio">
@@ -218,34 +249,67 @@ export default function StudioPane({ projectId }: { projectId: string }) {
             <button
               type="submit"
               className="btn primary"
-              disabled={Object.values(targetSelections).every((ids) => ids.length === 0) || running || transformTask?.state === "running" || transformTask?.state === "queued" || (!chosenBuiltin && !chosenRule)}
+              disabled={Object.values(targetSelections).every((ids) => ids.length === 0) || running || retrying || transformTask?.state === "running" || transformTask?.state === "queued" || (!chosenBuiltin && !chosenRule)}
             >
               {running ? <span className="spinner light" aria-hidden="true" /> : <Icon name="sparkle" />}
               {t("transformations.run")}
             </button>
             {transformTask?.state === "failed" && (
-              <button type="button" className="btn" onClick={() => void retryTask()}><Icon name="retry" />{t("transformations.retry")}</button>
+              <button type="button" className="btn" disabled={retrying || running} onClick={() => void retryTask()}>
+                {retrying ? <span className="spinner light" aria-hidden="true" /> : <Icon name="retry" />}
+                {t("transformations.retry")}
+              </button>
             )}
             {(transformTask?.state === "running" || transformTask?.state === "queued") && (
               <button type="button" className="btn" onClick={() => void cancelTask()}>{t("common.cancel")}</button>
             )}
           </div>
 
-          {transformTask && (
-            <div className="task-card" role="status">
-              <div className="row">
-                <strong>{t(`transformations.states.${transformTask.state}`, transformTask.state)}</strong>
+          {taskState && (
+            <div className={`task-card is-${taskState}`} role="status">
+              <div className="task-card-header">
+                <div className="task-card-status">
+                  <span className={`task-status-icon ${taskState}`}>
+                    {taskState === "completed" ? (
+                      <Icon name="check" />
+                    ) : taskState === "failed" ? (
+                      <Icon name="close" />
+                    ) : (
+                      <span className="spinner sm" />
+                    )}
+                  </span>
+                  <strong>{t(`transformations.states.${taskState}`, taskState)}</strong>
+                </div>
+                <span className="task-card-percent">{taskPercent}%</span>
               </div>
-              <div className={`progress${transformTask.state === "failed" ? " danger" : transformTask.state === "completed" ? " ok" : transformTask.state === "running" || transformTask.state === "queued" ? " indeterminate" : ""}`}>
-                <i style={transformTask.state === "failed" || transformTask.state === "completed" ? { width: `${taskPercent}%` } : undefined} />
+              <div
+                className={`progress${
+                  taskState === "failed"
+                    ? " danger"
+                    : taskState === "completed"
+                    ? " ok"
+                    : taskState === "running" || taskState === "queued"
+                    ? " indeterminate"
+                    : ""
+                }`}
+              >
+                <i
+                  style={
+                    taskState === "failed" || taskState === "completed"
+                      ? { width: `${taskPercent}%` }
+                      : undefined
+                  }
+                />
               </div>
-              {transformTask.error && <p className="err" role="alert">{t(transformTask.error.messageKey, transformTask.error.messageKey)}</p>}
+              {!starting && transformTask?.error && (
+                <p className="err" role="alert">
+                  {t(transformTask.error.messageKey, transformTask.error.messageKey)}
+                </p>
+              )}
             </div>
           )}
         </form>
       </section>
-
-      <QuizPanel key={projectId} projectId={projectId} insights={insights.filter((item) => item.projectId === projectId)} onDelete={deleteInsight} />
 
       <section className="panel studio-insights" aria-label={t("transformations.insights")}>
         <header className="panel-head">
@@ -281,6 +345,8 @@ export default function StudioPane({ projectId }: { projectId: string }) {
           ))}
         </div>
       </section>
+
+      <QuizPanel key={projectId} projectId={projectId} insights={insights.filter((item) => item.projectId === projectId)} onDelete={deleteInsight} />
 
       <Modal open={detailInsight !== null} wide onClose={() => setDetailInsight(null)} labelledBy="insight-detail-title">
         {detailInsight && (

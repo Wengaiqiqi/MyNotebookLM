@@ -9,7 +9,7 @@ import { NoteRepository } from "./note-repository";
 import { TransformationRepository } from "./transformation-repository";
 import { TransformationService } from "./transformation-service";
 import { ModelRouter } from "../models/model-router";
-import { RoutedGeneration } from "../models/routed-generation";
+import { RoutedGeneration, RoutedGenerationError } from "../models/routed-generation";
 import { ProviderRequestError } from "../models/http-client";
 import { classifyProviderError } from "../models/provider-errors";
 
@@ -333,6 +333,50 @@ describe("TransformationService", () => {
     const insight = await service.retry(task.id);
     expect(insight.content).toBe("retried");
     expect(taskEvents).toEqual(expect.arrayContaining(["queued:preparing", "running:preparing", "running:generating", "running:saving", "completed:saving"]));
+  });
+
+  it("retries a real routed failure without reusing attempt numbers or duplicating insights", async () => {
+    let release!: () => void;
+    const pending = new Promise<void>((resolve) => { release = resolve; });
+    const routed = new RoutedGeneration({ db: db.connection, router: baseDeps.router, providerFactory: () => ({
+      discover: async () => [], embed: async () => [[]], generate: async function* () {
+        calls += 1;
+        if (calls === 1) throw new ProviderRequestError(classifyProviderError({ timeout: true }));
+        await pending;
+        yield { type: "text-delta" as const, text: "retried result" };
+        yield { type: "done" as const };
+      }
+    }) });
+    service = new TransformationService({ ...baseDeps, generation: routed });
+    await expect(service.run({ projectId: PROJECT, builtinKey: "summary", sourceRevisionId: REVISION })).rejects.toMatchObject({ error: { code: "TIMEOUT" } });
+    const task = db.connection.prepare("SELECT id FROM tasks").get() as { id: string };
+    expect(baseDeps.taskRepository.findById(task.id).error.code).toBe("TIMEOUT");
+    let finished!: () => void;
+    const completion = new Promise<void>((resolve) => { finished = resolve; });
+    expect(service.retryTask({ projectId: PROJECT, taskId: task.id }, undefined, finished)).toMatchObject({ state: "running", error: null });
+    expect(() => service.retryTask({ projectId: PROJECT, taskId: task.id })).toThrow(/running/i);
+    release();
+    await completion;
+    expect(calls).toBe(2);
+    expect(baseDeps.taskRepository.findById(task.id).state).toBe("completed");
+    expect(service.listInsights({ projectId: PROJECT })).toHaveLength(1);
+    expect(db.connection.prepare("SELECT attempt_order, state FROM model_route_attempts ORDER BY attempt_order").all()).toEqual([
+      { attempt_order: 0, state: "failed" }, { attempt_order: 1, state: "completed" }
+    ]);
+  });
+
+  it("settles route-resolution failures instead of leaving a retry running", async () => {
+    service = new TransformationService({ ...baseDeps, generation: { generateRouted: async function* () { throw new Error("first failure"); } } });
+    await expect(service.run({ projectId: PROJECT, builtinKey: "summary", sourceRevisionId: REVISION })).rejects.toThrow("first failure");
+    const task = db.connection.prepare("SELECT id FROM tasks").get() as { id: string };
+    service = new TransformationService({ ...baseDeps, router: { resolve: () => { throw new RoutedGenerationError({ code: "VALIDATION", messageKey: "errors.generationProfileMissing", recoverable: false }); } } });
+    const ownership: Array<{ taskId: string; owned: boolean }> = [];
+    const result = service.retryTask({ projectId: PROJECT, taskId: task.id }, undefined, undefined, (value) => ownership.push(value));
+    expect(result).toMatchObject({ state: "failed", error: { code: "VALIDATION" } });
+    expect(db.connection.prepare("SELECT error_message FROM tasks WHERE id = ?").get(task.id)).toEqual({ error_message: "errors.generationProfileMissing" });
+    expect(ownership).toEqual([{ taskId: task.id, owned: false }]);
+    const recovered = await new TransformationService(baseDeps).retry(task.id);
+    expect(recovered.content).toBe("# Result");
   });
 
   it("fails a retry before provider use when the persisted route drifts", async () => {

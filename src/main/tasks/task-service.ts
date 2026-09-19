@@ -88,6 +88,7 @@ export class TaskService {
       expectedState: "running",
       nextState: "completed",
       stage,
+      progress: 1000,
       updatedAt: this.deps.now()
     });
   }

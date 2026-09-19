@@ -173,7 +173,9 @@ export class SettingsRepository {
   listRouteAttempts(input: { projectId: string; operationId?: string; taskKind?: ModelTaskKind; limit?: number; offset?: number }): ModelRouteAttemptDto[] {
     const limit = Math.min(100, Math.max(1, input.limit ?? 50));
     const offset = Math.max(0, input.offset ?? 0);
-    const clauses = ["project_id = ?"];
+    // This endpoint feeds the routing panel's fallback history. Keep manual
+    // retries out: they are attempts, not automatic fallback transitions.
+    const clauses = ["project_id = ?", "is_fallback = 1"];
     const params: Array<string | number> = [input.projectId];
     if (input.operationId !== undefined) { clauses.push("operation_id = ?"); params.push(input.operationId); }
     if (input.taskKind !== undefined) { clauses.push("task_kind = ?"); params.push(modelTaskKindSchema.parse(input.taskKind)); }

@@ -17,10 +17,84 @@ const makeInsight = (id: string, content: string): InsightDto => ({
 
 it("parses current and legacy bilingual questions without including incomplete questions", () => {
   expect(parseQuiz("# 练习\n## 问：首都？\n答：北京\n\n1. **问：** 日期？\n   **答：**六月。\n## Q: Why?\nA: Because.\nMore detail.\n## Q: Incomplete"))
-    .toEqual([{ question: "首都？", answer: "北京" }, { question: "日期？", answer: "六月。" }, { question: "Why?", answer: "Because.\nMore detail." }]);
+    .toMatchObject([{ question: "首都？", answer: "北京" }, { question: "日期？", answer: "六月。" }, { question: "Why?", answer: "Because.\nMore detail." }]);
   expect(parseQuiz("A plain summary.")).toEqual([]);
   expect(parseQuiz("1. **问：日期？**\n**答：**六月。\n## 问：解释 **重点**\n答：保留格式。"))
-    .toEqual([{ question: "日期？", answer: "六月。" }, { question: "解释 **重点**", answer: "保留格式。" }]);
+    .toMatchObject([{ question: "日期？", answer: "六月。" }, { question: "解释 **重点**", answer: "保留格式。" }]);
+});
+
+it("parses multiple-choice quiz questions and cleans stray markdown artifacts", () => {
+  const markdown = `# 六级核心考点测验
+
+## 1. 2026年上半年英语六级笔试什么时候举行？ **
+A. 2026年6月13日
+B. 2026年6月14日
+C. 2026年12月12日
+D. 2026年12月13日
+正确答案：A
+解析：根据资料，考试时间为2026年6月13日。
+
+## 2. 考试报到时间是几点？
+A. 13:00
+B. 14:00
+C. 15:00
+D. 15:30
+正确答案：B
+解析：准考证载明14:00报到。`;
+
+  const parsed = parseQuiz(markdown);
+  expect(parsed).toHaveLength(2);
+  expect(parsed[0]!.question).toBe("2026年上半年英语六级笔试什么时候举行？");
+  expect(parsed[0]!.options).toHaveLength(4);
+  expect(parsed[0]!.options[0]).toEqual({ key: "A", text: "2026年6月13日" });
+  expect(parsed[0]!.correctAnswer).toBe("A");
+  expect(parsed[0]!.explanation).toBe("根据资料，考试时间为2026年6月13日。");
+
+  expect(parsed[1]!.question).toBe("考试报到时间是几点？");
+  expect(parsed[1]!.correctAnswer).toBe("B");
+});
+
+it("interacts with multiple-choice quiz providing instant feedback and explanation", () => {
+  const mcInsight = makeInsight("mc-set", `# 测验
+## 1. 英语六级考试时间？
+A. 6月13日
+B. 6月14日
+C. 12月12日
+D. 12月13日
+正确答案：A
+解析：官方资料明确为6月13日。
+
+## 2. 报到时间？
+A. 13:00
+B. 14:00
+C. 15:00
+D. 16:00
+正确答案：B
+解析：14:00报到。`);
+
+  render(<QuizPanel projectId="project" insights={[mcInsight]} onDelete={async () => true} />);
+  expect(screen.getByText("英语六级考试时间？")).toBeTruthy();
+  expect(screen.getByText("6月13日")).toBeTruthy();
+  expect(screen.getByText("报到时间？")).toBeTruthy();
+  expect(screen.queryByRole("button", { name: /下一题|上一题|单题聚焦/ })).toBeNull();
+
+  // Pick wrong option B
+  const optB = screen.getByRole("radio", { name: /6月14日/ });
+  fireEvent.click(optB);
+
+  // Expect incorrect feedback and showing correct answer
+  expect(screen.getByText("回答错误")).toBeTruthy();
+  expect(screen.getByText(/官方资料明确为6月13日/)).toBeTruthy();
+
+  // Pick correct option B
+  const q2OptB = screen.getByRole("radio", { name: /14:00/ });
+  fireEvent.click(q2OptB);
+  expect(screen.getByText("回答正确")).toBeTruthy();
+
+  // View summary
+  fireEvent.click(screen.getByRole("button", { name: /查看测试成绩/ }));
+  expect(screen.getByText("50%")).toBeTruthy();
+  expect(screen.getByText("答对 1 / 2 题")).toBeTruthy();
 });
 
 it("switches question sets, hides answers and persists independent attempts after remount", () => {

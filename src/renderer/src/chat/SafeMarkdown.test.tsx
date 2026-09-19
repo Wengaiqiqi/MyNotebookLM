@@ -169,6 +169,32 @@ describe("SafeMarkdown sanitization", () => {
     expect(container.textContent).toContain("[S2]");
   });
 
+  it("renders inline and block LaTeX while keeping adjacent citations interactive", async () => {
+    const citation = citationSchema.parse({ ...baseCitation, label: "S11", id: "msg-1:S11:12" });
+    const container = await render(
+      <SafeMarkdown
+        text={String.raw`电子排布为 \[\text{[Kr]}4d^5 5s^1\]，离子为 \(\text{W}_2^{4+}\)，点群为 $D_{nh}$ [S11]。`}
+        citations={[citation]}
+      />
+    );
+
+    expect(container.querySelectorAll(".katex")).toHaveLength(3);
+    expect(container.querySelectorAll(".katex-display")).toHaveLength(1);
+    expect(container.querySelector("math")).not.toBeNull();
+    expect(container.querySelector<HTMLButtonElement>("button.citation-chip")?.textContent).toBe("[S11]");
+    expect(container.querySelector(".katex-html")?.textContent).toContain("[Kr]");
+  });
+
+  it("leaves LaTeX-looking code untouched", async () => {
+    const container = await render(
+      <SafeMarkdown text={[String.raw`Inline: \(x^2\)`, "", "```tex", String.raw`\[x^2\]`, "```"].join("\n")} />
+    );
+
+    expect(container.querySelectorAll(".katex")).toHaveLength(1);
+    expect(container.querySelector("pre code")?.textContent).toContain(String.raw`\[x^2\]`);
+    expect(container.querySelector("pre .katex")).toBeNull();
+  });
+
   it("shows one canonical citation target for fragments from the same DOCX table", async () => {
     const table = (label: string, sheet: string, quote: string): CitationDto => citationSchema.parse({
       ...baseCitation,

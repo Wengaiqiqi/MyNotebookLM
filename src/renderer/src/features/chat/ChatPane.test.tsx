@@ -133,6 +133,84 @@ describe("ChatPane conversation creation", () => {
     expect((screen.getByRole("button", { name: "发送" }) as HTMLButtonElement).disabled).toBe(false);
     fireEvent.click(retryButton);
     await waitFor(() => expect(api.chat.regenerate).toHaveBeenCalledWith(expect.objectContaining({ messageId: "assistant-failed" })));
+    expect(document.querySelector(".assistant-error")).toBeNull();
+  });
+
+  it("shows the configuration name in the model switcher", async () => {
+    const api = mockApi();
+    vi.mocked(api.models.listProfiles).mockResolvedValueOnce({
+      ok: true,
+      value: {
+        profiles: [{
+          id: "profile-1", name: "闲卡 / 11", provider: "anthropic", capability: "generation", baseUrl: "https://example.com",
+          modelId: "glm-5.3", enabled: true, createdAt: "2026-08-30T07:00:00.000Z", updatedAt: "2026-08-30T07:00:00.000Z"
+        }],
+        builtInProfiles: [],
+        credentials: []
+      }
+    });
+    render(
+      <ChatPane
+        projectId={projectId}
+        generationProfileId="profile-1"
+        sources={readySources}
+        onOpenSettings={() => undefined}
+        onImport={() => undefined}
+      />
+    );
+
+    const modelButton = await screen.findByRole("button", { name: "模型" });
+    fireEvent.click(modelButton);
+    const menu = screen.getByRole("menu", { name: "模型" });
+    expect(within(menu).getByText("闲卡")).toBeTruthy();
+    expect(within(menu).queryByText("Anthropic")).toBeNull();
+  });
+
+  it("keeps the manually selected model across route changes", async () => {
+    const api = mockApi();
+    const profiles = [
+      {
+        id: "profile-1", name: "DS", provider: "openai" as const, capability: "generation" as const, baseUrl: "https://example.com",
+        modelId: "deepseek-flash", enabled: true, createdAt: "2026-08-30T07:00:00.000Z", updatedAt: "2026-08-30T07:00:00.000Z"
+      },
+      {
+        id: "profile-2", name: "DS", provider: "openai" as const, capability: "generation" as const, baseUrl: "https://example.com",
+        modelId: "deepseek-v4-pro", enabled: true, createdAt: "2026-08-30T07:00:00.000Z", updatedAt: "2026-08-30T07:00:00.000Z"
+      },
+      {
+        id: "profile-3", name: "闲卡", provider: "anthropic" as const, capability: "generation" as const, baseUrl: "https://example.org",
+        modelId: "glm-5.3-flash", enabled: true, createdAt: "2026-08-30T07:00:00.000Z", updatedAt: "2026-08-30T07:00:00.000Z"
+      }
+    ];
+    vi.mocked(api.models.listProfiles).mockResolvedValue({
+      ok: true,
+      value: { profiles, builtInProfiles: [], credentials: [] }
+    });
+    const view = render(
+      <ChatPane
+        projectId={projectId}
+        generationProfileId="profile-1"
+        sources={readySources}
+        onOpenSettings={() => undefined}
+        onImport={() => undefined}
+      />
+    );
+
+    const modelButton = await screen.findByRole("button", { name: "模型" });
+    fireEvent.click(modelButton);
+    fireEvent.click(screen.getByRole("menuitem", { name: /deepseek-v4-pro/ }));
+    expect(localStorage.getItem("mynotebooklm.selectedGenerationProfileId")).toBe("profile-2");
+
+    view.rerender(
+      <ChatPane
+        projectId={projectId}
+        generationProfileId="profile-3"
+        sources={readySources}
+        onOpenSettings={() => undefined}
+        onImport={() => undefined}
+      />
+    );
+    await waitFor(() => expect(screen.getByRole("button", { name: "模型" }).textContent).toContain("deepseek-v4-pro"));
   });
 
   it("explains restored failures with the error code and target model", async () => {

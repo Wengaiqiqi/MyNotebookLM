@@ -17,7 +17,7 @@ import type { AppLanguage, AppTheme } from "../../i18n";
 
 type Section = "general" | "models" | "routes" | "index";
 
-const GENERATION_TASKS: ModelTaskKind[] = ["chat", "note-title", "summary", "key-points", "qa", "custom-transformation"];
+const GENERATION_TASKS: ModelTaskKind[] = ["chat", "note-title", "summary", "qa", "custom-transformation"];
 const ALL_TASKS: ModelTaskKind[] = [...GENERATION_TASKS, "embedding"];
 
 const providerLabel = (t: (key: string) => string, provider: ProviderKind): string =>
@@ -34,8 +34,41 @@ function profileDisplayName(name: string): string {
 type RouteProfile = ModelProfileDto | BuiltInModelProfileDto;
 
 function routeModelLabel(profile: RouteProfile | undefined, fallback: string): string {
-  return profile ? `${profile.name} / ${profile.modelId}` : fallback;
+  return profile ? `${profileDisplayName(profile.name)} / ${profile.modelId}` : fallback;
 }
+
+type ProviderGroup = {
+  key: string;
+  name: string;
+  provider: ProviderKind;
+  baseUrl: string;
+  profiles: ModelProfileDto[];
+};
+
+function groupProfilesByProvider(profiles: ModelProfileDto[]): ProviderGroup[] {
+  const map = new Map<string, ProviderGroup>();
+  for (const profile of profiles) {
+    const cleanName = profileDisplayName(profile.name);
+    const key = `${profile.provider}:::${cleanName}:::${profile.baseUrl.trim()}`;
+    const existing = map.get(key);
+    if (existing) {
+      existing.profiles.push(profile);
+    } else {
+      map.set(key, {
+        key,
+        name: cleanName,
+        provider: profile.provider,
+        baseUrl: profile.baseUrl.trim(),
+        profiles: [profile]
+      });
+    }
+  }
+  return Array.from(map.values());
+}
+
+type DeletingTarget =
+  | { kind: "single"; profile: ModelProfileDto }
+  | { kind: "group"; groupName: string; profiles: ModelProfileDto[] };
 
 export default function Settings({ projectId, language, theme, onLanguage, onTheme, onRoutesChanged, onClose }: {
   projectId?: string | undefined;
@@ -50,8 +83,17 @@ export default function Settings({ projectId, language, theme, onLanguage, onThe
   const [section, setSection] = useState<Section>("models");
   const [profiles, setProfiles] = useState<ModelProfileDto[]>([]);
   const [builtIns, setBuiltIns] = useState<BuiltInModelProfileDto[]>([]);
-  const [editorOpen, setEditorOpen] = useState<{ capability: "generation" | "embedding"; existing?: ModelProfileDto }>();
-  const [deleting, setDeleting] = useState<ModelProfileDto>();
+  const [editorOpen, setEditorOpen] = useState<{ capability: "generation" | "embedding"; existing?: ModelProfileDto; existingGroup?: ProviderGroup }>();
+  const [deletingTarget, setDeletingTarget] = useState<DeletingTarget>();
+  const [expandedKeys, setExpandedKeys] = useState<Set<string>>(() => new Set());
+  const toggleExpanded = (key: string) => {
+    setExpandedKeys((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  };
   const [loaded, setLoaded] = useState(false);
 
   const reload = useCallback(async () => {
@@ -118,61 +160,140 @@ export default function Settings({ projectId, language, theme, onLanguage, onThe
 
             {section === "models" && (
               <>
-                {(["generation", "embedding"] as const).map((capability) => (
-                  <div key={capability} className="pref-card card model-service-card">
-                    <div className="pref-row">
-                      <div className="copy">
-                        <strong>{t(capability === "generation" ? "model.generation.title" : "model.embedding.title")}</strong>
-                        <small>{t(capability === "generation" ? "model.generation.description" : "model.embedding.description")}</small>
+                {(["generation", "embedding"] as const).map((capability) => {
+                  const capabilityProfiles = profiles.filter((profile) => profile.capability === capability);
+                  const providerGroups = groupProfilesByProvider(capabilityProfiles);
+                  return (
+                    <div key={capability} className="pref-card card model-service-card">
+                      <div className="pref-row">
+                        <div className="copy">
+                          <strong>{t(capability === "generation" ? "model.generation.title" : "model.embedding.title")}</strong>
+                          <small>{t(capability === "generation" ? "model.generation.description" : "model.embedding.description")}</small>
+                        </div>
+                        <button
+                          type="button"
+                          className="btn primary sm"
+                          onClick={() => setEditorOpen({ capability })}
+                        >
+                          <Icon name="plus" />{t("model.newProfile", { capability: t(capability === "generation" ? "model.generation.title" : "model.embedding.title") })}
+                        </button>
                       </div>
-                      <button
-                        type="button"
-                        className="btn primary sm"
-                        onClick={() => setEditorOpen({ capability })}
-                      >
-                        <Icon name="plus" />{t("model.newProfile", { capability: t(capability === "generation" ? "model.generation.title" : "model.embedding.title") })}
-                      </button>
+                      {loaded && capabilityProfiles.length === 0 && (
+                        <p className="model-service-empty">{t("model.noProfiles")}</p>
+                      )}
+                      <div className="model-service-list">
+                        {providerGroups.map((group) => {
+                          const isExpanded = expandedKeys.has(group.key);
+                          return (
+                            <div className="provider-card card" key={group.key}>
+                              <div className="provider-card-main">
+                                <span className="p-icon" aria-hidden="true">
+                                  <Icon name={capability === "generation" ? "brain" : "database"} />
+                                </span>
+                                <div className="provider-card-info">
+                                  <div className="provider-card-title-row">
+                                    <strong className="provider-name">{group.name}</strong>
+                                    <span className="badge neutral provider-tag">{providerLabel(t, group.provider)}</span>
+                                    <span className="provider-count-badge">
+                                      {t("model.configuredModels", { count: group.profiles.length })}
+                                    </span>
+                                  </div>
+                                  {group.baseUrl ? (
+                                    <span className="provider-url" title={group.baseUrl}>{group.baseUrl}</span>
+                                  ) : null}
+                                </div>
+                                <div className="provider-actions">
+                                  <button
+                                    type="button"
+                                    className="btn outline sm provider-detail-btn"
+                                    onClick={() => toggleExpanded(group.key)}
+                                    aria-expanded={isExpanded}
+                                  >
+                                    <Icon name={isExpanded ? "chevron-up" : "chevron-down"} />
+                                    {isExpanded ? t("model.hideDetails") : t("model.viewDetails")}
+                                  </button>
+                                  <button
+                                    type="button"
+                                    className="icon-btn"
+                                    aria-label={`${t("common.edit")}: ${group.name}`}
+                                    onClick={() => setEditorOpen({ capability, existingGroup: group })}
+                                    title={t("common.edit")}
+                                  >
+                                    <Icon name="edit" />
+                                  </button>
+                                  <button
+                                    type="button"
+                                    className="icon-btn danger"
+                                    aria-label={`${t("common.delete")}: ${group.name}`}
+                                    onClick={() => setDeletingTarget({ kind: "group", groupName: group.name, profiles: group.profiles })}
+                                    title={t("common.delete")}
+                                  >
+                                    <Icon name="trash" />
+                                  </button>
+                                </div>
+                              </div>
+
+                              {isExpanded && (
+                                <div className="provider-models-drawer">
+                                  <div className="models-drawer-head">
+                                    <span className="models-drawer-label">{t("model.modelsList")}</span>
+                                    <span className="models-drawer-count">{t("model.configuredModels", { count: group.profiles.length })}</span>
+                                  </div>
+                                  <div className="models-drawer-list">
+                                    {group.profiles.map((profile) => (
+                                      <div className="model-chip-row" key={profile.id}>
+                                        <div className="model-chip-info">
+                                          <span className="model-chip-dot" />
+                                          <span className="model-chip-title" title={profile.modelId}>{profile.modelId}</span>
+                                          {!profile.enabled && <span className="badge neutral">{t("model.disabled")}</span>}
+                                        </div>
+                                        <div className="model-chip-actions">
+                                          <button
+                                            type="button"
+                                            className="icon-btn"
+                                            aria-label={`${t("common.edit")}: ${profile.modelId}`}
+                                            onClick={() => setEditorOpen({ capability, existing: profile, existingGroup: group })}
+                                            title={t("common.edit")}
+                                          >
+                                            <Icon name="edit" />
+                                          </button>
+                                          <button
+                                            type="button"
+                                            className="icon-btn danger"
+                                            aria-label={`${t("common.delete")}: ${profile.modelId}`}
+                                            onClick={() => setDeletingTarget({ kind: "single", profile })}
+                                            title={t("common.delete")}
+                                          >
+                                            <Icon name="trash" />
+                                          </button>
+                                        </div>
+                                      </div>
+                                    ))}
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })}
+                        {capability === "embedding" && builtIns.map((builtIn) => (
+                          <div className="provider-card card built-in-card" key={builtIn.id}>
+                            <div className="provider-card-main">
+                              <span className="p-icon" aria-hidden="true"><Icon name="cpu" /></span>
+                              <div className="provider-card-info">
+                                <div className="provider-card-title-row">
+                                  <strong className="provider-name">{builtIn.name}</strong>
+                                  <span className="badge accent">{t("model.builtIn")}</span>
+                                  <span className="provider-count-badge">384 {t("model.dimension", { defaultValue: "维" })}</span>
+                                </div>
+                                <span className="provider-url">{t("model.builtInHint", { dimension: builtIn.dimension })}</span>
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
                     </div>
-                    {loaded && profiles.filter((profile) => profile.capability === capability).length === 0 && (
-                      <p className="model-service-empty">{t("model.noProfiles")}</p>
-                    )}
-                    <div className="model-service-list">
-                      {profiles.filter((profile) => profile.capability === capability).map((profile) => (
-                        <div className="profile-row" key={profile.id}>
-                          <span className="p-icon" aria-hidden="true">
-                            <Icon name={capability === "generation" ? "brain" : "database"} />
-                          </span>
-                          <span className="copy">
-                            <strong>
-                              <span>{profileDisplayName(profile.name)}</span>
-                              <span className="profile-model-id">{profile.modelId}</span>
-                            </strong>
-                          </span>
-                          {!profile.enabled && <span className="badge neutral">{t("model.disabled")}</span>}
-                          <span className="row-actions">
-                            <button type="button" className="icon-btn" aria-label={`${t("common.edit")}: ${profile.name}`} onClick={() => setEditorOpen({ capability, existing: profile })}>
-                              <Icon name="edit" />
-                            </button>
-                            <button type="button" className="icon-btn danger" aria-label={`${t("common.delete")}: ${profile.name}`} onClick={() => setDeleting(profile)}>
-                              <Icon name="trash" />
-                            </button>
-                          </span>
-                        </div>
-                      ))}
-                      {capability === "embedding" && builtIns.map((builtIn) => (
-                        <div className="profile-row" key={builtIn.id} style={{ opacity: 0.85 }}>
-                          <span className="p-icon" aria-hidden="true"><Icon name="cpu" /></span>
-                          <span className="copy">
-                            <strong>{builtIn.name}</strong>
-                            <small>{t("model.builtInHint", { dimension: builtIn.dimension })}</small>
-                          </span>
-                          <span className="badge accent">{t("model.builtIn")}</span>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                ))}
-              </>
+                  );
+                })}</>
             )}
 
             {section === "routes" && (
@@ -190,11 +311,12 @@ export default function Settings({ projectId, language, theme, onLanguage, onThe
 
       {editorOpen && (
         <Modal open wide onClose={() => setEditorOpen(undefined)} labelledBy="model-editor-title">
-          <h2 id="model-editor-title">{editorOpen.existing ? t("model.editProfile") : t("model.newProfileTitle")}</h2>
+          <h2 id="model-editor-title">{editorOpen.existing || editorOpen.existingGroup ? t("model.editProfile") : t("model.newProfileTitle")}</h2>
           <div style={{ marginTop: 14 }}>
             <ModelForm
               capability={editorOpen.capability}
               existing={editorOpen.existing}
+              existingProfiles={editorOpen.existingGroup?.profiles ?? (editorOpen.existing ? [editorOpen.existing] : undefined)}
               {...(editorOpen.capability === "embedding" ? { builtIn: builtIns[0], initialProvider: "local" as const } : {})}
               onCancel={() => setEditorOpen(undefined)}
               onSaved={() => { setEditorOpen(undefined); void reload(); }}
@@ -203,19 +325,19 @@ export default function Settings({ projectId, language, theme, onLanguage, onThe
         </Modal>
       )}
 
-      {deleting && (
+      {deletingTarget && (
         <DeleteProfileDialog
-          profile={deleting}
-          onDone={() => { setDeleting(undefined); void reload(); }}
-          onClose={() => setDeleting(undefined)}
+          target={deletingTarget}
+          onDone={() => { setDeletingTarget(undefined); void reload(); }}
+          onClose={() => setDeletingTarget(undefined)}
         />
       )}
     </div>
   );
 }
 
-function DeleteProfileDialog({ profile, onClose, onDone }: {
-  profile: ModelProfileDto;
+function DeleteProfileDialog({ target, onClose, onDone }: {
+  target: DeletingTarget;
   onClose: () => void;
   onDone: () => void;
 }) {
@@ -223,15 +345,38 @@ function DeleteProfileDialog({ profile, onClose, onDone }: {
   const [busy, setBusy] = useState(false);
   async function confirm(): Promise<void> {
     setBusy(true);
-    const result = await window.myNotebook.models.deleteProfile({ id: profile.id }).catch(() => undefined);
-    setBusy(false);
-    if (!result?.ok) { toast.error(t(result?.error.messageKey ?? "errors.internal")); return; }
+    if (target.kind === "single") {
+      const result = await window.myNotebook.models.deleteProfile({ id: target.profile.id }).catch(() => undefined);
+      setBusy(false);
+      if (!result?.ok) { toast.error(t(result?.error.messageKey ?? "errors.internal")); return; }
+    } else {
+      let anyFailed = false;
+      for (const p of target.profiles) {
+        const result = await window.myNotebook.models.deleteProfile({ id: p.id }).catch(() => undefined);
+        if (!result?.ok) anyFailed = true;
+      }
+      setBusy(false);
+      if (anyFailed) {
+        toast.error(t("errors.internal"));
+        onDone();
+        return;
+      }
+    }
     toast.success(t("model.profileDeleted"));
     onDone();
   }
+  const title = t("model.deleteProfile");
+  const body = target.kind === "single"
+    ? t("model.deleteProfileBody", { name: `${profileDisplayName(target.profile.name)} (${target.profile.modelId})` })
+    : t("model.deleteProviderBody", {
+        name: target.groupName,
+        count: target.profiles.length,
+        defaultValue: `确定要删除提供商“${target.groupName}”及其包含的 ${target.profiles.length} 个模型配置吗？`
+      });
+
   return (
     <Modal open alert onClose={onClose} labelledBy="delete-profile-title">
-      <DialogHead id="delete-profile-title" icon="trash" title={t("model.deleteProfile")} body={t("model.deleteProfileBody", { name: profile.name })} />
+      <DialogHead id="delete-profile-title" icon="trash" title={title} body={body} />
       <div className="dialog-foot">
         <button type="button" className="btn" disabled={busy} onClick={onClose}>{t("common.cancel")}</button>
         <button type="button" className="btn danger" disabled={busy} onClick={() => void confirm()}>
@@ -253,6 +398,8 @@ function RoutesPanel({ profiles, builtIns, projectId, onSaved }: {
   const [taskKind, setTaskKind] = useState<ModelTaskKind>("chat");
   const [route, setRoute] = useState<ModelRouteDto[]>([]);
   const [attempts, setAttempts] = useState<ModelRouteAttemptDto[]>([]);
+  const [attemptPage, setAttemptPage] = useState(0);
+  const [attemptHasNext, setAttemptHasNext] = useState(false);
   const [busy, setBusy] = useState(false);
   const [dirty, setDirty] = useState(false);
 
@@ -276,23 +423,92 @@ function RoutesPanel({ profiles, builtIns, projectId, onSaved }: {
       ? t("routing.emptyRoute")
       : t("routing.fallbackProfile");
 
+  const [selectedProviderKey, setSelectedProviderKey] = useState<string>("");
+
+  const unusedProviderGroups = useMemo(() => {
+    const groups = new Map<string, { key: string; name: string; provider: ProviderKind | "builtin"; models: RouteProfile[] }>();
+    for (const p of unused) {
+      const isBuiltin = "editable" in p && !p.editable;
+      const groupKey = isBuiltin ? "builtin" : `${p.provider}:::${profileDisplayName(p.name)}`;
+      const groupName = isBuiltin ? t("model.builtIn") : profileDisplayName(p.name);
+      const existing = groups.get(groupKey);
+      if (existing) {
+        existing.models.push(p);
+      } else {
+        groups.set(groupKey, {
+          key: groupKey,
+          name: groupName,
+          provider: isBuiltin ? "builtin" : p.provider,
+          models: [p]
+        });
+      }
+    }
+    return Array.from(groups.values());
+  }, [unused, t]);
+
+  useEffect(() => {
+    if (selectedProviderKey && !unusedProviderGroups.some((g) => g.key === selectedProviderKey)) {
+      setSelectedProviderKey("");
+    }
+  }, [selectedProviderKey, unusedProviderGroups]);
+
+  const currentProviderGroup = unusedProviderGroups.find((g) => g.key === selectedProviderKey);
+  const currentGroupModels = currentProviderGroup?.models ?? [];
+
+  const providerOptions = [
+    { value: "", label: t("model.chooseProvider") },
+    ...unusedProviderGroups.map((group) => {
+      const pLabel = group.provider === "builtin" ? t("model.builtIn") : providerLabel(t, group.provider as ProviderKind);
+      return {
+        value: group.key,
+        label: `${group.name} (${pLabel}) · ${group.models.length} ${t("model.modelsCount")}`
+      };
+    })
+  ];
+
+  const modelOptions = [
+    {
+      value: "",
+      label: !selectedProviderKey
+        ? t("model.selectProviderFirst")
+        : currentGroupModels.length === 0
+          ? t("model.noProfiles")
+          : addProfileLabel
+    },
+    ...currentGroupModels.map((p) => ({
+      value: p.id,
+      label: p.modelId
+    }))
+  ];
+
+  useEffect(() => {
+    setAttemptPage(0);
+    setDirty(false);
+  }, [taskKind, projectId]);
+
   useEffect(() => {
     let alive = true;
-    setDirty(false);
     void window.myNotebook.models.getRoutes?.({ taskKind }).then((result) => {
       if (!alive) return;
       setRoute(result.ok ? [...result.value].sort((a, b) => a.position - b.position) : []);
     }).catch(() => undefined);
     if (projectId) {
-      void window.myNotebook.models.listRouteAttempts?.({ projectId, taskKind, limit: 10 }).then((result) => {
+      void window.myNotebook.models.listRouteAttempts?.({ projectId, taskKind, limit: 6, offset: attemptPage * 5 }).then((result) => {
         if (!alive) return;
-        setAttempts(result.ok ? result.value : []);
+        if (!result.ok) {
+          setAttempts([]);
+          setAttemptHasNext(false);
+          return;
+        }
+        setAttempts(result.value.slice(0, 5));
+        setAttemptHasNext(result.value.length > 5);
       }).catch(() => undefined);
     } else {
       setAttempts([]);
+      setAttemptHasNext(false);
     }
     return () => { alive = false; };
-  }, [taskKind, projectId]);
+  }, [taskKind, projectId, attemptPage]);
 
   function move(index: number, delta: -1 | 1): void {
     setRoute((current) => {
@@ -332,11 +548,10 @@ function RoutesPanel({ profiles, builtIns, projectId, onSaved }: {
     toast.success(t("routing.saved"));
   }
 
-  const taskLabels: Record<ModelTaskKind, string> = {
+  const taskLabels: Partial<Record<ModelTaskKind, string>> = {
     chat: t("routing.tasks.chat"),
     "note-title": t("routing.tasks.note-title"),
     summary: t("routing.tasks.summary"),
-    "key-points": t("routing.tasks.key-points"),
     qa: t("routing.tasks.qa"),
     "custom-transformation": t("routing.tasks.custom-transformation"),
     embedding: t("routing.tasks.embedding")
@@ -351,7 +566,7 @@ function RoutesPanel({ profiles, builtIns, projectId, onSaved }: {
             className="route-task-select"
             ariaLabel={t("routing.task")}
             value={taskKind}
-            options={ALL_TASKS.map((kind) => ({ value: kind, label: taskLabels[kind] }))}
+            options={ALL_TASKS.map((kind) => ({ value: kind, label: taskLabels[kind] ?? kind }))}
             onChange={(value) => setTaskKind(value as ModelTaskKind)}
           />
         </div>
@@ -371,15 +586,23 @@ function RoutesPanel({ profiles, builtIns, projectId, onSaved }: {
           {!isEmbedding && route.length > 1 && <span className="fallback-hint">{t("routing.fallbackRule")}</span>}
         </div>
 
-        <div className="input-row">
+        <div className="input-row route-cascade-picker">
           <RoundedSelect
-            ariaLabel={addProfileLabel}
+            className="cascade-provider-select"
+            ariaLabel={t("model.chooseProvider")}
+            value={selectedProviderKey}
+            options={providerOptions}
+            onChange={(val) => setSelectedProviderKey(val)}
+          />
+          <RoundedSelect
+            className="cascade-model-select"
+            ariaLabel={selectedProviderKey ? addProfileLabel : t("model.selectProviderFirst")}
             value=""
-            options={[
-              { value: "", label: addProfileLabel },
-              ...unused.map((profile) => ({ value: profile.id, label: routeModelLabel(profile, profile.id) }))
-            ]}
-            onChange={addProfile}
+            disabled={!selectedProviderKey || currentGroupModels.length === 0}
+            options={modelOptions}
+            onChange={(profileId) => {
+              if (profileId) addProfile(profileId);
+            }}
           />
           <button type="button" className="btn primary" disabled={busy || !dirty || route.length === 0} onClick={() => void save()}>
             {busy ? <span className="spinner light" aria-hidden="true" /> : <Icon name="check" />}
@@ -388,7 +611,7 @@ function RoutesPanel({ profiles, builtIns, projectId, onSaved }: {
         </div>
       </div>
 
-      {projectId && attempts.length > 0 && (
+      {projectId && (attempts.length > 0 || attemptPage > 0) && (
         <div className="pref-card card">
           <h3>{t("routing.fallbackHistory")}</h3>
           {attempts.map((attempt) => (
@@ -396,23 +619,33 @@ function RoutesPanel({ profiles, builtIns, projectId, onSaved }: {
               <span className={`badge ${attempt.state === "completed" ? "ok" : attempt.state === "failed" ? "danger" : "neutral"}`}>
                 {t(`routing.states.${attempt.state}`, attempt.state)}
               </span>
-              <span className="model">{providerLabel(t, attempt.provider)} / {attempt.model}</span>
+              <span className="model">{profileDisplayName(profiles.find((profile) => profile.id === attempt.profileId)?.name ?? providerLabel(t, attempt.provider))} / {attempt.model}</span>
               {attempt.errorCode && <span style={{ color: "var(--danger)" }}>{attempt.errorCode}</span>}
               <span className="when">{new Date(attempt.startedAt).toLocaleString()}</span>
             </div>
           ))}
+          <div className="route-history-pagination" aria-label={t("routing.fallbackHistory")}>
+            <button type="button" className="btn outline sm" disabled={attemptPage === 0} onClick={() => setAttemptPage((page) => Math.max(0, page - 1))}>
+              {t("routing.previousPage")}
+            </button>
+            <span>{t("routing.page", { page: attemptPage + 1 })}</span>
+            <button type="button" className="btn outline sm" disabled={!attemptHasNext} onClick={() => setAttemptPage((page) => page + 1)}>
+              {t("routing.nextPage")}
+            </button>
+          </div>
         </div>
       )}
     </div>
   );
 }
 
-function RoundedSelect({ value, options, ariaLabel, onChange, className = "" }: {
+function RoundedSelect({ value, options, ariaLabel, onChange, className = "", disabled = false }: {
   value: string;
   options: Array<{ value: string; label: string }>;
   ariaLabel: string;
   onChange: (value: string) => void;
   className?: string;
+  disabled?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const [placement, setPlacement] = useState<"up" | "down">("down");
@@ -441,15 +674,19 @@ function RoundedSelect({ value, options, ariaLabel, onChange, className = "" }: 
   }, [open]);
 
   return (
-    <div className={`rounded-select ${className}`.trim()} ref={rootRef}>
+    <div className={`rounded-select ${className}${disabled ? " is-disabled" : ""}`.trim()} ref={rootRef}>
       <button
         type="button"
         className="select rounded-select-trigger"
         aria-label={ariaLabel}
         aria-haspopup="listbox"
         aria-expanded={open}
-        onClick={() => setOpen((current) => !current)}
+        disabled={disabled}
+        onClick={() => {
+          if (!disabled) setOpen((current) => !current);
+        }}
         onKeyDown={(event) => {
+          if (disabled) return;
           if (event.key === "ArrowDown" || event.key === "ArrowUp") {
             event.preventDefault();
             setOpen(true);
@@ -459,7 +696,7 @@ function RoundedSelect({ value, options, ariaLabel, onChange, className = "" }: 
         <span className="select-value">{selected?.label}</span>
         <Icon name={open ? "chevron-up" : "chevron-down"} />
       </button>
-      {open && (
+      {open && !disabled && (
         <div className="rounded-select-menu" data-placement={placement} role="listbox" aria-label={ariaLabel}>
           {options.map((option) => (
             <button

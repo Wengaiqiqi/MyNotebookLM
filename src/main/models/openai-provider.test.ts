@@ -78,6 +78,27 @@ describe("OpenAI-compatible provider", () => {
     });
   });
 
+  it("accepts nullable content in reasoning-only DeepSeek stream chunks", async () => {
+    const fake = await server((_request, response) => {
+      response.writeHead(200, { "content-type": "text/event-stream" });
+      response.end([
+        'data: {"choices":[{"delta":{"role":"assistant","content":null,"reasoning_content":"thinking"},"finish_reason":null}]}',
+        'data: {"choices":[{"delta":{"content":"ok"},"finish_reason":null}]}',
+        'data: {"choices":[{"delta":{"content":null},"finish_reason":"stop"}]}',
+        "data: [DONE]"
+      ].join("\n\n") + "\n\n");
+    });
+    const events = [];
+    for await (const event of new OpenAiProvider({ baseUrl: fake.baseUrl }).generate({
+      model: "deepseek-v4-pro", messages: [{ role: "user", content: "ping" }], maxTokens: 1
+    }, new AbortController().signal)) events.push(event);
+
+    expect(events).toEqual([
+      { type: "text-delta", text: "ok" },
+      { type: "done", finishReason: "stop" }
+    ]);
+  });
+
   it("maps thinking levels onto the GLM dialect for glm models", async () => {
     const fake = await server((request, response) => {
       response.writeHead(200, { "content-type": "text/event-stream" });

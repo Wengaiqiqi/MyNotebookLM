@@ -26,6 +26,7 @@
     "fast-xml-parser": "5.11.0",
     "i18next": "26.4.0",
     "jszip": "3.10.1",
+    "katex": "0.16.22",
     "linkedom": "0.18.13",
     "marked": "18.0.11",
     "pdfjs-dist": "6.2.108",

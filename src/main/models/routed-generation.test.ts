@@ -68,9 +68,58 @@ describe("transparent generation fallback", () => {
     expect(events.find((event) => event.type === "routed-complete")).toMatchObject({ profile: { profileId: FALLBACK_ID, model: "fallback" } });
   });
 
+  it("falls back when a provider closes cleanly without visible text", async () => {
+    const primary = providerWith(async function* () {
+      yield { type: "usage", outputTokens: 12 };
+      yield { type: "done", finishReason: "stop" };
+    });
+    const fallback = providerWith(async function* () {
+      yield { type: "text-delta", text: "fallback answer" };
+      yield { type: "done", finishReason: "stop" };
+    });
+
+    const events = await collect(generateRouted(
+      deps({ [PRIMARY_ID]: primary, [FALLBACK_ID]: fallback }),
+      "chat",
+      { projectId: PROJECT_ID, operationId: OPERATION_ID, model: "ignored", messages: [] }
+    ));
+
+    expect(events.find((event) => event.type === "fallback")).toMatchObject({
+      errorCode: "PROVIDER",
+      attempted: { profileId: PRIMARY_ID },
+      next: { profileId: FALLBACK_ID }
+    });
+    expect(events).toContainEqual({ type: "text-delta", text: "fallback answer" });
+    expect(database.connection.prepare("SELECT profile_id, state, error_code FROM model_route_attempts WHERE operation_id = ? ORDER BY attempt_order").all(OPERATION_ID)).toEqual([
+      { profile_id: PRIMARY_ID, state: "failed", error_code: "PROVIDER" },
+      { profile_id: FALLBACK_ID, state: "completed", error_code: null }
+    ]);
+  });
+
+  it("appends retry attempts while preserving primary-to-fallback ordering", async () => {
+    let recover = false;
+    const primary = providerWith(async function* () { throw failure(503); });
+    const fallback = providerWith(async function* () {
+      if (!recover) throw failure(503);
+      yield { type: "text-delta", text: "retried" };
+      yield { type: "done" };
+    });
+    const config = deps({ [PRIMARY_ID]: primary, [FALLBACK_ID]: fallback });
+    const request = { projectId: PROJECT_ID, operationId: OPERATION_ID, model: "ignored", messages: [] };
+    await expect(collect(generateRouted(config, "chat", request))).rejects.toMatchObject({ error: { code: "PROVIDER" } });
+    recover = true;
+    const events = await collect(generateRouted(config, "chat", request));
+    expect(events.filter((event) => event.type === "attempt-started").map((event) => event.attemptOrder)).toEqual([2, 3]);
+    expect(events.find((event) => event.type === "routed-complete")).toMatchObject({ profile: { profileId: FALLBACK_ID } });
+    expect(database.connection.prepare("SELECT attempt_order, is_fallback, state FROM model_route_attempts ORDER BY attempt_order").all()).toEqual([
+      { attempt_order: 0, is_fallback: 0, state: "failed" }, { attempt_order: 1, is_fallback: 1, state: "failed" },
+      { attempt_order: 2, is_fallback: 0, state: "failed" }, { attempt_order: 3, is_fallback: 1, state: "completed" }
+    ]);
+  });
+
   it("classifies an eligible 503 through the shared classifier", async () => {
     const primary = providerWith(async function* () { throw new ProviderRequestError(classifyProviderError({ status: 503 })); });
-    const fallback = providerWith(async function* () { yield { type: "done" }; });
+    const fallback = providerWith(async function* () { yield { type: "text-delta", text: "ok" }; yield { type: "done" }; });
     const events = await collect(generateRouted(deps({ [PRIMARY_ID]: primary, [FALLBACK_ID]: fallback }), "chat", { projectId: PROJECT_ID, operationId: OPERATION_ID, model: "ignored", messages: [] }));
     expect(events.find((event) => event.type === "fallback")).toMatchObject({ errorCode: "PROVIDER" });
   });
@@ -124,7 +173,7 @@ describe("transparent generation fallback", () => {
   it("does not fallback after partial output and strips routing context", async () => {
     let received: unknown;
     const primary = { ...providerWith(async function* () { yield { type: "text-delta", text: "partial" }; throw failure(503); }), generate: (request: unknown) => { received = request; return (async function* () { yield { type: "text-delta", text: "partial" }; throw failure(503); })(); } } as ModelProvider;
-    const fallback = providerWith(async function* () { yield { type: "done" }; });
+    const fallback = providerWith(async function* () { yield { type: "text-delta", text: "ok" }; yield { type: "done" }; });
     await expect(collect(generateRouted(deps({ [PRIMARY_ID]: primary, [FALLBACK_ID]: fallback }), "chat", { projectId: PROJECT_ID, operationId: OPERATION_ID, model: "primary", messages: [] }))).rejects.toMatchObject({ error: { code: "PROVIDER" } });
     expect(received).toEqual({ model: "primary", messages: [] });
     expect(database.connection.prepare("SELECT count(*) AS n FROM model_route_attempts WHERE operation_id = ? AND state = 'failed'").get(OPERATION_ID)).toEqual({ n: 1 });
@@ -132,7 +181,7 @@ describe("transparent generation fallback", () => {
 
   it("persists attempt lifecycle and exposes only safe fallback fields", async () => {
     const primary = providerWith(async function* () { throw new ProviderRequestError({ error: { code: "TIMEOUT", messageKey: "errors.timeout", recoverable: true, details: { secret: "do-not-send" } }, fallbackEligible: true }); });
-    const fallback = providerWith(async function* () { yield { type: "done" }; });
+    const fallback = providerWith(async function* () { yield { type: "text-delta", text: "ok" }; yield { type: "done" }; });
     const events = await collect(generateRouted(deps({ [PRIMARY_ID]: primary, [FALLBACK_ID]: fallback }), "chat", { projectId: PROJECT_ID, operationId: OPERATION_ID, model: "primary", messages: [] }));
     const fallbackEvent = events.find((event) => event.type === "fallback")!;
     expect(Object.keys(fallbackEvent).sort()).toEqual(["attempted", "errorCode", "next", "type"]);
@@ -174,7 +223,7 @@ describe("transparent generation fallback", () => {
   });
 
   it("uses an explicit override before configured routes", async () => {
-    const primary = providerWith(async function* () { yield { type: "done" }; });
+    const primary = providerWith(async function* () { yield { type: "text-delta", text: "ok" }; yield { type: "done" }; });
     const events = await collect(generateRouted(deps({ [PRIMARY_ID]: primary, [FALLBACK_ID]: primary }), "chat", { projectId: PROJECT_ID, operationId: OPERATION_ID, model: "ignored", messages: [] }, FALLBACK_ID));
     expect(events.find((event) => event.type === "attempt-started")).toMatchObject({ attempt: { profileId: FALLBACK_ID } });
   });
@@ -206,10 +255,10 @@ describe("transparent generation fallback", () => {
       }
     }) as ModelProvider;
     const succeeds = (id: string) => ({
-      ...providerWith(async function* () { yield { type: "done" }; }),
+      ...providerWith(async function* () { yield { type: "text-delta", text: "ok" }; yield { type: "done" }; }),
       generate: (request: { model: string }) => {
         received.push([id, request.model]);
-        return (async function* () { yield { type: "done" }; })();
+        return (async function* () { yield { type: "text-delta", text: "ok" }; yield { type: "done" }; })();
       }
     }) as ModelProvider;
 
@@ -231,10 +280,10 @@ describe("transparent generation fallback", () => {
       }
     }) as ModelProvider;
     const succeeds = (id: string) => ({
-      ...providerWith(async function* () { yield { type: "done" }; }),
+      ...providerWith(async function* () { yield { type: "text-delta", text: "ok" }; yield { type: "done" }; }),
       generate: (request: { model: string }) => {
         received.push([id, request.model]);
-        return (async function* () { yield { type: "done" }; })();
+        return (async function* () { yield { type: "text-delta", text: "ok" }; yield { type: "done" }; })();
       }
     }) as ModelProvider;
 

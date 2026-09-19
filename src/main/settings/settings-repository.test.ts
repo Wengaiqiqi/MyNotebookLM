@@ -286,4 +286,19 @@ describe("SettingsRepository", () => {
     })).toThrow(/route|capability/i);
     expect(repository.getProfile(GENERATION_ID)?.capability).toBe("generation");
   });
+
+  it("lists fallback attempts instead of successful primary attempts", () => {
+    appDatabase.connection.prepare("INSERT INTO projects(id, name) VALUES (?, ?)").run(GENERATION_ID, "Project");
+    const insert = appDatabase.connection.prepare(`
+      INSERT INTO model_route_attempts(id, project_id, operation_id, task_kind, attempt_order, provider, model, is_fallback, state)
+      VALUES (?, ?, ?, 'chat', ?, 'openai', ?, ?, ?)
+    `);
+    insert.run(FALLBACK_ID, GENERATION_ID, "operation-1", 0, "primary", 0, "completed");
+    insert.run(EMBEDDING_ID, GENERATION_ID, "operation-1", 1, "fallback", 1, "completed");
+    insert.run(OTHER_EMBEDDING_ID, GENERATION_ID, "operation-2", 1, "manual-retry", 0, "completed");
+
+    expect(repository.listRouteAttempts({ projectId: GENERATION_ID })).toMatchObject([
+      { operationId: "operation-1", attemptOrder: 1, model: "fallback" }
+    ]);
+  });
 });

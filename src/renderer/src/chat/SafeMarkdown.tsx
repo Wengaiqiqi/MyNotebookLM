@@ -1,5 +1,8 @@
 import * as React from "react";
 import DOMPurify from "dompurify";
+import katex from "katex";
+import "katex/contrib/mhchem";
+import "katex/dist/katex.min.css";
 import { marked } from "marked";
 import { useTranslation } from "react-i18next";
 import type { CitationDto, MessageDto } from "../../../shared/chat";
@@ -33,6 +36,72 @@ function ensureLinkHardening(): void {
 }
 
 marked.setOptions({ async: false });
+
+interface MathExpression {
+  token: string;
+  source: string;
+  display: boolean;
+}
+
+function extractMath(text: string): { markdown: string; expressions: MathExpression[] } {
+  const expressions: MathExpression[] = [];
+  const code = /(```[\s\S]*?```|~~~[\s\S]*?~~~|`[^`\r\n]*`)/g;
+  const math = /\\\[([\s\S]*?)\\\]|\$\$([\s\S]*?)\$\$|\\\(([\s\S]*?)\\\)|(?<!\\)\$([^\r\n$]*?\S)(?<!\\)\$/g;
+  const markdown = text.split(code).map((part, index) => {
+    if (index % 2 === 1) return part;
+    return part.replace(math, (original, blockSlash, blockDollar, inlineSlash, inlineDollar) => {
+      const source = blockSlash ?? blockDollar ?? inlineSlash ?? inlineDollar;
+      if (!source?.trim()) return original;
+      const token = `MNLATEX${expressions.length}END`;
+      expressions.push({ token, source, display: blockSlash !== undefined || blockDollar !== undefined });
+      return token;
+    });
+  }).join("");
+  return { markdown, expressions };
+}
+
+function hydrateMath(host: HTMLElement, expressions: MathExpression[]): void {
+  if (!expressions.length) return;
+  const byToken = new Map(expressions.map((expression) => [expression.token, expression]));
+  const tokenPattern = /MNLATEX\d+END/g;
+  const walker = document.createTreeWalker(host, NodeFilter.SHOW_TEXT);
+  const nodes: Text[] = [];
+  let current = walker.nextNode() as Text | null;
+  while (current) {
+    nodes.push(current);
+    current = walker.nextNode() as Text | null;
+  }
+  for (const node of nodes) {
+    if (!tokenPattern.test(node.data)) {
+      tokenPattern.lastIndex = 0;
+      continue;
+    }
+    tokenPattern.lastIndex = 0;
+    const fragment = document.createDocumentFragment();
+    let cursor = 0;
+    for (const match of node.data.matchAll(tokenPattern)) {
+      fragment.append(document.createTextNode(node.data.slice(cursor, match.index)));
+      const expression = byToken.get(match[0]);
+      if (expression) {
+        const wrapper = document.createElement("span");
+        wrapper.className = expression.display ? "math-block" : "math-inline";
+        katex.render(expression.source, wrapper, {
+          displayMode: expression.display,
+          output: "htmlAndMathml",
+          throwOnError: false,
+          strict: "ignore",
+          trust: false
+        });
+        fragment.append(wrapper);
+      } else {
+        fragment.append(document.createTextNode(match[0]));
+      }
+      cursor = (match.index ?? 0) + match[0].length;
+    }
+    fragment.append(document.createTextNode(node.data.slice(cursor)));
+    node.replaceWith(fragment);
+  }
+}
 
 /** Render Markdown to allowlisted HTML; chat escapes raw HTML, source previews may sanitize it. */
 export function renderSafeMarkdown(text: string, allowSafeHtml = false): string {
@@ -103,7 +172,9 @@ export default function SafeMarkdown({ text, citations = [], onCitationOpen, all
     if (!host) return;
     // Rebuild the sanitized tree imperatively so we can splice citation buttons
     // into exact text positions without dangerouslySetInnerHTML bypassing React.
-    host.innerHTML = renderSafeMarkdown(text, allowSafeHtml);
+    const prepared = extractMath(text);
+    host.innerHTML = renderSafeMarkdown(prepared.markdown, allowSafeHtml);
+    hydrateMath(host, prepared.expressions);
     const walker = document.createTreeWalker(host, NodeFilter.SHOW_TEXT);
     const replacements: Array<{ node: Text; parent: Node; next: ChildNode | null }> = [];
     let current = walker.nextNode() as Text | null;
@@ -112,6 +183,7 @@ export default function SafeMarkdown({ text, citations = [], onCitationOpen, all
       current = walker.nextNode() as Text | null;
     }
     for (const item of replacements) {
+      if (item.node.parentElement?.closest("code, pre, .katex")) continue;
       const pieces = citationPieces(item.node.data ?? "", canonical.byLabel);
       if (pieces.length === 1 && typeof pieces[0] === "string") continue;
       const fragment = document.createDocumentFragment();

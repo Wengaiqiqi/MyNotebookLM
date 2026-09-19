@@ -15,6 +15,11 @@ import { errorText, formatDateTime, sourceReady } from "../../lib/format";
 
 type ConversationsApi = typeof window.myNotebook.conversations;
 type ChatApi = typeof window.myNotebook.chat;
+const SELECTED_MODEL_STORAGE_KEY = "mynotebooklm.selectedGenerationProfileId";
+
+function profileDisplayName(name: string): string {
+  return name.replace(/\s+\/\s+\d+$/, "").trim() || name;
+}
 
 const assistantErrorMessageKeys: Record<string, string> = {
   VALIDATION: "errors.validation",
@@ -46,7 +51,9 @@ export default function ChatPane({ projectId, generationProfileId, sources, onOp
   const [conversationId, setConversationId] = useState("");
   const [restored, setRestored] = useState<MessageDto[]>([]);
   const [profiles, setProfiles] = useState<ModelProfileDto[]>([]);
-  const [selectedProfileId, setSelectedProfileId] = useState(generationProfileId ?? "");
+  const [selectedProfileId, setSelectedProfileId] = useState(() =>
+    localStorage.getItem(SELECTED_MODEL_STORAGE_KEY) ?? generationProfileId ?? ""
+  );
   const [convMenuOpen, setConvMenuOpen] = useState(false);
   const [editingTitle, setEditingTitle] = useState(false);
   const [titleDraft, setTitleDraft] = useState("");
@@ -56,6 +63,7 @@ export default function ChatPane({ projectId, generationProfileId, sources, onOp
     return stored === "low" || stored === "medium" || stored === "high" ? stored : "off";
   });
   const [thinkingMenuOpen, setThinkingMenuOpen] = useState(false);
+  const [dismissedErrorIds, setDismissedErrorIds] = useState<Set<string>>(() => new Set());
   useEffect(() => {
     if (!thinkingMenuOpen) return;
     const close = (event: MouseEvent): void => {
@@ -110,11 +118,21 @@ export default function ChatPane({ projectId, generationProfileId, sources, onOp
   // Generation profile options.
   useEffect(() => {
     let alive = true;
-    setSelectedProfileId(generationProfileId ?? "");
     if (!generationProfileId) { setProfiles([]); return; }
     void window.myNotebook.models.listProfiles().then((result) => {
       if (!alive || !result.ok) return;
-      setProfiles(result.value.profiles.filter((profile) => profile.enabled && profile.capability === "generation"));
+      const nextProfiles = result.value.profiles.filter((profile) => profile.enabled && profile.capability === "generation");
+      setProfiles(nextProfiles);
+      if (nextProfiles.length === 0) return;
+      setSelectedProfileId((current) => {
+        const stored = localStorage.getItem(SELECTED_MODEL_STORAGE_KEY);
+        const preferred = stored || current || generationProfileId;
+        const selected = nextProfiles.some((profile) => profile.id === preferred)
+          ? preferred
+          : nextProfiles.find((profile) => profile.id === generationProfileId)?.id ?? nextProfiles[0]!.id;
+        localStorage.setItem(SELECTED_MODEL_STORAGE_KEY, selected);
+        return selected;
+      });
     }).catch(() => undefined);
     return () => { alive = false; };
   }, [generationProfileId]);
@@ -173,6 +191,25 @@ export default function ChatPane({ projectId, generationProfileId, sources, onOp
     setThinking(level);
     localStorage.setItem("mynotebooklm.thinking", level);
     setThinkingMenuOpen(false);
+  }
+
+  function retryFailedMessage(messageId: string, retry: () => Promise<boolean>): void {
+    setDismissedErrorIds((current) => new Set(current).add(messageId));
+    void retry().then((accepted) => {
+      if (!accepted) {
+        setDismissedErrorIds((current) => {
+          const next = new Set(current);
+          next.delete(messageId);
+          return next;
+        });
+      }
+    }).catch(() => {
+      setDismissedErrorIds((current) => {
+        const next = new Set(current);
+        next.delete(messageId);
+        return next;
+      });
+    });
   }
 
   async function send(): Promise<void> {
@@ -346,6 +383,7 @@ export default function ChatPane({ projectId, generationProfileId, sources, onOp
           </div>
         )}
         {messages.map((message, index) => {
+          if (message.role === "assistant" && message.state === "failed" && dismissedErrorIds.has(message.id)) return null;
           const reply = messages[index + 1];
           const canEditAndResend = message.role === "user" && reply?.role === "assistant" && reply.state === "cancelled";
           const editing = editingMessageId === message.id;
@@ -394,7 +432,7 @@ export default function ChatPane({ projectId, generationProfileId, sources, onOp
                         message={errorInfo.text}
                         details={errorInfo.details}
                         disabled={!stream.canSend}
-                        onRetry={() => void (stream.repairableMessageId === message.id ? stream.repair({ thinking }) : stream.regenerate(message.id, { thinking }))}
+                        onRetry={() => retryFailedMessage(message.id, () => stream.repairableMessageId === message.id ? stream.repair({ thinking }) : stream.regenerate(message.id, { thinking }))}
                       />}
                     </>
                   ) : message.state === "streaming" && !message.content
@@ -440,7 +478,7 @@ export default function ChatPane({ projectId, generationProfileId, sources, onOp
                   message={errorInfo.text}
                   details={errorInfo.details}
                   disabled={!stream.canSend}
-                  {...(stream.repairableMessageId ? { onRetry: () => void stream.repair({ thinking }) } : {})}
+                  {...(stream.repairableMessageId ? { onRetry: () => retryFailedMessage(stream.repairableMessageId!, () => stream.repair({ thinking })) } : {})}
                 />;
               })()}
             </div>
@@ -515,11 +553,15 @@ export default function ChatPane({ projectId, generationProfileId, sources, onOp
                         type="button"
                         role="menuitem"
                         className={`model-option${profile.id === selectedProfileId ? " selected" : ""}`}
-                        onClick={() => { setSelectedProfileId(profile.id); setModelMenuOpen(false); }}
+                        onClick={() => {
+                          setSelectedProfileId(profile.id);
+                          localStorage.setItem(SELECTED_MODEL_STORAGE_KEY, profile.id);
+                          setModelMenuOpen(false);
+                        }}
                       >
                         <span className="model-option-copy">
                           <strong>{profile.modelId}</strong>
-                          <small>{t(`model.providers.${profile.provider}`)}</small>
+                          <small>{profileDisplayName(profile.name)}</small>
                         </span>
                         {profile.id === selectedProfileId && <Icon name="check" />}
                       </button>

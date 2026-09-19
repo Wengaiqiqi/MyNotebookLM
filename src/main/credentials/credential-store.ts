@@ -11,6 +11,8 @@ export interface CredentialStore {
   set(profileId: string, apiKey: string): Promise<void>;
   prepare(connection: CredentialConnection, apiKey: string): Promise<PreparedCredential>;
   storePrepared(profileId: string, credential: PreparedCredential): void;
+  updateConnection(profileId: string, connection: CredentialConnection): void;
+  findPrepared(connection: CredentialConnection): PreparedCredential | undefined;
   remove(profileId: string): void;
   status(profileId: string): { hasCredential: boolean; mask?: string };
   withSecret<T>(
@@ -140,6 +142,49 @@ export class CredentialStore implements CredentialStore {
     }
   }
 
+  updateConnection(profileId: string, connection: CredentialConnection): void {
+    try {
+      this.db.prepare(`
+        UPDATE credentials
+        SET provider = ?, base_url = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+        WHERE profile_id = ?
+      `).run(connection.provider, canonicalCredentialBaseUrl(connection.baseUrl), profileId);
+    } catch {
+      throw new Error("Credential binding could not be updated");
+    }
+  }
+
+  findPrepared(connection: CredentialConnection): PreparedCredential | undefined {
+    let targetCanonical: string;
+    try {
+      targetCanonical = canonicalCredentialBaseUrl(connection.baseUrl);
+    } catch {
+      targetCanonical = connection.baseUrl;
+    }
+    const rows = this.db.prepare(`
+      SELECT encrypted_secret, provider, base_url
+      FROM credentials
+      WHERE provider = ?
+    `).all(connection.provider) as Array<{
+      encrypted_secret: Buffer;
+      provider: ProviderKind;
+      base_url: string;
+    }>;
+    const match = rows.find((item) => {
+      try {
+        return canonicalCredentialBaseUrl(item.base_url) === targetCanonical;
+      } catch {
+        return item.base_url === connection.baseUrl;
+      }
+    });
+    if (!match) return undefined;
+    return {
+      encryptedSecret: match.encrypted_secret,
+      provider: match.provider,
+      baseUrl: match.base_url
+    };
+  }
+
   remove(profileId: string): void {
     this.db.prepare("DELETE FROM credentials WHERE profile_id = ?").run(profileId);
   }
@@ -166,22 +211,28 @@ export class CredentialStore implements CredentialStore {
       JOIN model_profiles ON model_profiles.id = credentials.profile_id
       WHERE credentials.profile_id = ?
     `).get(profileId) as StoredCredentialRow | undefined;
-    if (!row) return use();
-
-    if (row.credential_provider !== row.profile_provider
-      || canonicalCredentialBaseUrl(row.credential_base_url)
-        !== canonicalCredentialBaseUrl(row.profile_base_url)
-      || row.credential_provider !== connection.provider
-      || canonicalCredentialBaseUrl(row.credential_base_url)
-        !== canonicalCredentialBaseUrl(connection.baseUrl)) {
-      throw new Error("Credential binding does not match profile");
+    let encryptedSecret = row?.encrypted_secret;
+    if (!row) {
+      const fallback = this.findPrepared(connection);
+      if (!fallback) return use();
+      encryptedSecret = fallback.encryptedSecret;
+    } else {
+      if (row.credential_provider !== row.profile_provider
+        || canonicalCredentialBaseUrl(row.credential_base_url)
+          !== canonicalCredentialBaseUrl(row.profile_base_url)
+        || row.credential_provider !== connection.provider
+        || canonicalCredentialBaseUrl(row.credential_base_url)
+          !== canonicalCredentialBaseUrl(connection.baseUrl)) {
+        throw new Error("Credential binding does not match profile");
+      }
     }
 
     await this.assertStorageAvailable();
 
     let apiKey: string;
     try {
-      apiKey = await this.protector.decrypt(row.encrypted_secret);
+      if (!encryptedSecret) throw new Error("Credential could not be read");
+      apiKey = await this.protector.decrypt(encryptedSecret);
     } catch {
       throw new Error("Credential could not be read");
     }

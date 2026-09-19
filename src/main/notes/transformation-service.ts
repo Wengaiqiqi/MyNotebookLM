@@ -219,6 +219,8 @@ export class TransformationService {
   retryTask(input: { projectId: string; taskId: string }, signal?: AbortSignal, onFinished?: () => void, onOwnership?: (ownership: { taskId: string; owned: boolean }) => void): TaskDto {
     const current = this.deps.taskRepository.findById(input.taskId);
     if (!current || current.projectId !== input.projectId || current.kind !== "transformation") throw new TransformationTaskNotFoundError(input.taskId);
+    if (current.state === "running" || current.state === "queued") throw new TransformationInProgressError(input.taskId);
+    if (!this.deps.db.prepare("SELECT 1 FROM transformation_task_snapshots WHERE task_id = ?").get(input.taskId)) throw new TransformationTaskNotFoundError(input.taskId);
     const promise = this.resume(input.taskId, signal, oneShotOwnership(onOwnership));
     void promise.finally(onFinished).catch(() => undefined);
     return this.deps.taskRepository.findById(input.taskId)!;
@@ -361,7 +363,7 @@ export class TransformationService {
       const cancelled = input.signal?.aborted || (error instanceof RoutedGenerationError && error.error.code === "CANCELLED");
       if (cancelled) { try { this.deps.tasks.cancel?.(task.id); } catch { /* already cancelled */ } throw error; }
       const current = this.deps.taskRepository.findById(task.id);
-      if (current?.state === "running") this.deps.tasks.fail(task.id, { code: "PROVIDER", messageKey: "errors.providerFailure", recoverable: false }, false);
+      if (current?.state === "running") this.deps.tasks.fail(task.id, error instanceof RoutedGenerationError ? { code: error.error.code, messageKey: error.error.messageKey, recoverable: error.error.recoverable } : { code: "PROVIDER", messageKey: "errors.providerFailure", recoverable: false }, false);
       throw error;
     }
   }
@@ -408,28 +410,24 @@ export class TransformationService {
       notifyOwnership({ taskId, owned: false });
       return claimed.insight;
     }
-    const persistedRoute = JSON.parse(snapshot.route_snapshot_json) as { taskKind?: string; profileId?: string | null; routes?: readonly RoutedProfile[] } | readonly RoutedProfile[];
-    const routeObject = Array.isArray(persistedRoute) ? undefined : persistedRoute as { taskKind?: string; profileId?: string | null; routes?: readonly RoutedProfile[] };
-    const taskKind = routeObject?.taskKind ? routeObject.taskKind as "summary" | "key-points" | "qa" | "custom-transformation" : "custom-transformation";
-    const persistedRouteProfileId = routeObject?.profileId ?? undefined;
-    const persistedRoutes = routeObject ? routeObject.routes ?? [] : persistedRoute;
-    const currentRoutes = this.deps.router.resolve(taskKind, persistedRouteProfileId).map((profile) => ({ profileId: profile.id, provider: profile.provider, model: profile.modelId }));
-    if (stable(currentRoutes) !== stable(persistedRoutes)) {
-      notifyOwnership({ taskId, owned: false });
-      this.deps.tasks.fail(taskId, { code: "VALIDATION", messageKey: "errors.validation", recoverable: false }, false);
-      throw new RoutedGenerationError({ code: "VALIDATION", messageKey: "errors.validation", recoverable: false });
-    }
-    if (signal?.aborted) {
-      try { this.deps.tasks.cancel(taskId); } catch {}
-      notifyOwnership({ taskId, owned: false });
-      throw new RoutedGenerationError({ code: "CANCELLED", messageKey: "errors.cancelled", recoverable: false });
-    }
-    notifyOwnership({ taskId, owned: true });
-    const request = JSON.parse(snapshot.request_json) as RoutedGenerateRequest;
-    let content = "";
-    let usage: InsightUsage = { inputTokens: 0, outputTokens: 0, totalTokens: 0 };
-    let actual: { provider: any; model: string; profileId: string | null } | undefined;
     try {
+      const persistedRoute = JSON.parse(snapshot.route_snapshot_json) as { taskKind?: string; profileId?: string | null; routes?: readonly RoutedProfile[] } | readonly RoutedProfile[];
+      const routeObject = Array.isArray(persistedRoute) ? undefined : persistedRoute as { taskKind?: string; profileId?: string | null; routes?: readonly RoutedProfile[] };
+      const taskKind = routeObject?.taskKind ? routeObject.taskKind as "summary" | "key-points" | "qa" | "custom-transformation" : "custom-transformation";
+      const persistedRouteProfileId = routeObject?.profileId ?? undefined;
+      const persistedRoutes = routeObject ? routeObject.routes ?? [] : persistedRoute;
+      const currentRoutes = this.deps.router.resolve(taskKind, persistedRouteProfileId).map((profile) => ({ profileId: profile.id, provider: profile.provider, model: profile.modelId }));
+      if (stable(currentRoutes) !== stable(persistedRoutes)) {
+        throw new RoutedGenerationError({ code: "VALIDATION", messageKey: "errors.validation", recoverable: false });
+      }
+      if (signal?.aborted) {
+        throw new RoutedGenerationError({ code: "CANCELLED", messageKey: "errors.cancelled", recoverable: false });
+      }
+      const request = JSON.parse(snapshot.request_json) as RoutedGenerateRequest;
+      notifyOwnership({ taskId, owned: true });
+      let content = "";
+      let usage: InsightUsage = { inputTokens: 0, outputTokens: 0, totalTokens: 0 };
+      let actual: { provider: any; model: string; profileId: string | null } | undefined;
       for await (const event of this.deps.generation.generateRouted(taskKind, request, persistedRouteProfileId, signal)) {
         if (event.type === "text-delta") content += event.text;
         else if (event.type === "usage") { usage.inputTokens += event.inputTokens ?? 0; usage.outputTokens += event.outputTokens ?? 0; usage.totalTokens += (event.inputTokens ?? 0) + (event.outputTokens ?? 0); }
@@ -446,8 +444,10 @@ export class TransformationService {
       })();
       return rowInsight(this.deps.db.prepare("SELECT * FROM insights WHERE id = ?").get(id));
     } catch (error) {
-      if (signal?.aborted) { try { this.deps.tasks.cancel(taskId); } catch {} }
-      else if (this.deps.taskRepository.findById(taskId)?.state === "running") this.deps.tasks.fail(taskId, { code: "PROVIDER", messageKey: "errors.providerFailure", recoverable: false }, false);
+      const cancelled = signal?.aborted || (error instanceof RoutedGenerationError && error.error.code === "CANCELLED");
+      if (cancelled) { try { this.deps.tasks.cancel(taskId); } catch {} }
+      else if (this.deps.taskRepository.findById(taskId)?.state === "running") this.deps.tasks.fail(taskId, error instanceof RoutedGenerationError ? { code: error.error.code, messageKey: error.error.messageKey, recoverable: error.error.recoverable } : { code: "PROVIDER", messageKey: "errors.providerFailure", recoverable: false }, false);
+      notifyOwnership({ taskId, owned: false });
       throw error;
     }
   }

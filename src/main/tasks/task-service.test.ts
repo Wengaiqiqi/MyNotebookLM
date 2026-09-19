@@ -62,6 +62,7 @@ describe("TaskService", () => {
     clock.value = "2026-08-25T00:00:03.000Z";
     const completed = service.complete(TASK_ID);
     expect(completed.state).toBe("completed");
+    expect(completed.progress).toBe(1000);
   });
 
   it("publishes one post-commit completion for a deletion task", () => {

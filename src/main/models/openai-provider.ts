@@ -134,7 +134,9 @@ export class OpenAiProvider implements ModelProvider {
           if (choice.delta !== undefined) {
             if (!isRecord(choice.delta)) throw malformedResponse();
             const content = choice.delta.content;
-            if (content !== undefined && typeof content !== "string") throw malformedResponse();
+            // OpenAI-compatible thinking streams (including DeepSeek) may
+            // emit a reasoning-only delta with `content: null`.
+            if (content !== undefined && content !== null && typeof content !== "string") throw malformedResponse();
             if (content) yield { type: "text-delta", text: content };
           }
           if (choice.finish_reason !== undefined && choice.finish_reason !== null) {

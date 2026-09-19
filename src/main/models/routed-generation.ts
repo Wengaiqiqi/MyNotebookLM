@@ -101,8 +101,9 @@ export async function* generateRouted(
   const insert = deps.db.prepare(`
     INSERT INTO model_route_attempts(
       id, project_id, operation_id, task_kind, attempt_order, profile_id,
-      provider, model, state, started_at, created_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'started', ?, ?)
+      provider, model, is_fallback, state, started_at, created_at
+    ) VALUES (?, ?, ?, ?, (SELECT COALESCE(MAX(attempt_order), -1) + 1 FROM model_route_attempts WHERE operation_id = ?), ?, ?, ?, ?, 'started', ?, ?)
+    RETURNING attempt_order
   `);
   const finish = deps.db.prepare(`
     UPDATE model_route_attempts
@@ -118,8 +119,8 @@ export async function* generateRouted(
     const startedAt = started.toISOString();
     const attemptId = createId();
     const persistedProfileId = deps.db.prepare("SELECT 1 FROM model_profiles WHERE id = ?").get(profile.id) ? profile.id : null;
-    insert.run(attemptId, request.projectId, request.operationId, taskKind, attemptOrder, persistedProfileId, profile.provider, profile.modelId, startedAt, startedAt);
-    let emittedNormalEvent = false;
+    const recorded = insert.get(attemptId, request.projectId, request.operationId, taskKind, request.operationId, persistedProfileId, profile.provider, profile.modelId, attemptOrder > 0 ? 1 : 0, startedAt, startedAt) as { attempt_order: number };
+    let emittedText = false;
     let sawDone = false;
     let pendingDone: Extract<GenerationEvent, { type: "done" }> | undefined;
     let terminal = false;
@@ -131,7 +132,7 @@ export async function* generateRouted(
     };
 
     try {
-      yield { type: "attempt-started", attempt: current, attemptOrder };
+      yield { type: "attempt-started", attempt: current, attemptOrder: recorded.attempt_order };
       if (signal.aborted) {
         completeAttempt("cancelled", "CANCELLED");
         throw new RoutedGenerationError({ code: "CANCELLED", messageKey: "errors.cancelled", recoverable: false });
@@ -147,7 +148,7 @@ export async function* generateRouted(
           throw new RoutedGenerationError({ code: "CANCELLED", messageKey: "errors.cancelled", recoverable: false });
         }
         if (sawDone) throw new ProviderRequestError(classifyProviderError({ malformedResponse: true }));
-        if (event.type === "text-delta" || event.type === "usage") emittedNormalEvent = true;
+        if (event.type === "text-delta" && event.text.trim()) emittedText = true;
         if (event.type === "done") {
           sawDone = true;
           pendingDone = event;
@@ -159,10 +160,10 @@ export async function* generateRouted(
         completeAttempt("cancelled", "CANCELLED");
         throw new RoutedGenerationError({ code: "CANCELLED", messageKey: "errors.cancelled", recoverable: false });
       }
-      if (!sawDone) {
-        const incomplete = { code: "PROVIDER", messageKey: "errors.providerIncomplete", recoverable: false } satisfies AppErrorDto;
+      if (!sawDone || !emittedText) {
+        const incomplete = { code: "PROVIDER", messageKey: "errors.providerIncomplete", recoverable: true } satisfies AppErrorDto;
         completeAttempt("failed", incomplete.code);
-        throw new RoutedGenerationError(incomplete);
+        throw new ProviderRequestError({ error: incomplete, fallbackEligible: true });
       }
       completeAttempt("completed", null);
       yield pendingDone!;
@@ -178,7 +179,10 @@ export async function* generateRouted(
       }
       completeAttempt("failed", failure.error.code);
       const nextProfile = profiles[attemptOrder + 1];
-      if (!sawDone && !emittedNormalEvent && failure.fallbackEligible && nextProfile) {
+      const canFallback = failure.fallbackEligible && (
+        !sawDone || failure.error.messageKey === "errors.providerIncomplete"
+      );
+      if (!emittedText && canFallback && nextProfile) {
         const next = profileDto(nextProfile);
         yield { type: "fallback", attempted: current, next, errorCode: failure.error.code };
         continue;

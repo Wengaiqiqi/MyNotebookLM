@@ -8,9 +8,10 @@ import "../../i18n";
 import type { DesktopApi } from "../../../../shared/ipc";
 import type { BuiltinTransformationDto, InsightDto, TransformationDto } from "../../../../shared/transformations";
 import type { TaskDto } from "../../../../shared/tasks";
+import { toast } from "../../ui/Toast";
 
 const builtin: BuiltinTransformationDto = {
-  key: "summary", language: "zh-CN", name: "总结", appliesTo: "source", prompt: "总结 {{content}}"
+  key: "summary", language: "zh-CN", name: "摘要", appliesTo: "source", prompt: "摘要 {{content}}"
 };
 
 const keyPointsBuiltin: BuiltinTransformationDto = {
@@ -97,6 +98,68 @@ afterEach(() => {
 });
 
 describe("StudioPane", () => {
+  it("does not announce a retry as started when preflight already failed", async () => {
+    const api = mockApi();
+    const failed: TaskDto = { ...taskDto(), state: "failed", error: { code: "VALIDATION", messageKey: "errors.validation", recoverable: false } };
+    vi.mocked(api.tasks!.list).mockResolvedValue([failed]);
+    vi.mocked(api.transformations!.retry).mockResolvedValue({ ok: true, value: failed });
+    const info = vi.spyOn(toast, "info").mockImplementation(() => undefined);
+    const error = vi.spyOn(toast, "error").mockImplementation(() => undefined);
+    render(<StudioPane projectId={projectId} />);
+    fireEvent.click(await screen.findByRole("button", { name: "重试" }));
+    await waitFor(() => expect(error).toHaveBeenCalled());
+    expect(info).not.toHaveBeenCalled();
+    info.mockRestore();
+    error.mockRestore();
+  });
+
+  it("unlocks retry after a rejected request and prevents repeated clicks while pending", async () => {
+    const api = mockApi();
+    const failed: TaskDto = { ...taskDto(), state: "failed" };
+    vi.mocked(api.tasks!.list).mockResolvedValue([failed]);
+    let reject!: (reason: Error) => void;
+    vi.mocked(api.transformations!.retry).mockImplementationOnce(() => new Promise((_resolve, fail) => { reject = fail; }));
+    const errorToast = vi.spyOn(toast, "error").mockImplementation(() => undefined);
+    render(<StudioPane projectId={projectId} />);
+    const retry = await screen.findByRole("button", { name: "重试" });
+    fireEvent.click(retry);
+    fireEvent.click(retry);
+    expect((retry as HTMLButtonElement).disabled).toBe(true);
+    expect(api.transformations!.retry).toHaveBeenCalledTimes(1);
+    await act(async () => { reject(new Error("IPC disconnected")); });
+    expect((retry as HTMLButtonElement).disabled).toBe(false);
+    expect(errorToast).toHaveBeenCalled();
+    errorToast.mockRestore();
+  });
+
+  it("prioritizes active work and does not resurrect an older failure after retry completion", async () => {
+    const api = mockApi();
+    let emit!: (task: TaskDto) => void;
+    api.tasks!.subscribe = vi.fn((_id, listener) => { emit = listener; return () => undefined; });
+    const active: TaskDto = { ...taskDto(), state: "running" };
+    vi.mocked(api.tasks!.list).mockResolvedValue([
+      { ...taskDto(), id: "old-failure", state: "failed", updatedAt: "2026-01-02T00:00:00.000Z" }, active
+    ]);
+    render(<StudioPane projectId={projectId} />);
+    await screen.findByRole("button", { name: "取消" });
+    expect(screen.queryByRole("button", { name: "重试" })).toBeNull();
+    await act(async () => { emit({ ...active, state: "completed", progress: 1000, updatedAt: "2026-01-03T00:00:00.000Z" }); });
+    expect(screen.queryByRole("button", { name: "重试" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "取消" })).toBeNull();
+  });
+
+  it("keeps a live retry completion when an older initial task list arrives late", async () => {
+    const api = mockApi();
+    let emit!: (task: TaskDto) => void;
+    let resolve!: (items: TaskDto[]) => void;
+    api.tasks!.subscribe = vi.fn((_id, listener) => { emit = listener; return () => undefined; });
+    vi.mocked(api.tasks!.list).mockImplementation(() => new Promise((done) => { resolve = done; }));
+    render(<StudioPane projectId={projectId} />);
+    await act(async () => { emit({ ...taskDto(), state: "completed", progress: 1000 }); });
+    await act(async () => { resolve([{ ...taskDto(), state: "failed" }]); });
+    expect(screen.queryByRole("button", { name: "重试" })).toBeNull();
+  });
+
   it("lists built-in and custom rules plus insights", async () => {
     mockApi();
     render(<StudioPane projectId={projectId} />);
@@ -106,16 +169,19 @@ describe("StudioPane", () => {
     const ruleSelect = screen.getByRole("button", { name: "规则" });
     expect(ruleSelect.className).toContain("rounded-select-trigger");
     fireEvent.click(ruleSelect);
-    expect(screen.getByRole("option", { name: "总结" })).toBeTruthy();
+    expect(screen.getByRole("option", { name: "摘要" })).toBeTruthy();
     expect(screen.queryByRole("option", { name: "要点" })).toBeNull();
     expect(screen.getByRole("option", { name: "我的规则" })).toBeTruthy();
+    const insightsRegion = screen.getByRole("region", { name: "洞察" });
+    const practiceRegion = screen.getByRole("region", { name: "互动答题" });
+    expect(insightsRegion.compareDocumentPosition(practiceRegion) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
   it("runs a builtin transformation against the selected ready source revision", async () => {
     mockApi();
     render(<StudioPane projectId={projectId} />);
 
-    await screen.findByText("总结");
+    await screen.findByText("摘要");
     const runButton = screen.getByRole("button", { name: /运行转换/ });
     expect((runButton as HTMLButtonElement).disabled).toBe(true);
 
@@ -129,6 +195,7 @@ describe("StudioPane", () => {
       projectId,
       builtinKey: "summary",
       language: "zh-CN",
+      force: true,
       sourceRevisionIds: [revisionId]
     });
   });
@@ -151,8 +218,44 @@ describe("StudioPane", () => {
     expect(api.transformations!.run).toHaveBeenCalledWith({
       projectId,
       transformationId: rule.id,
+      force: true,
       sourceRevisionIds: [revisionId]
     });
+  });
+
+  it("resets a completed progress card immediately when starting the same transformation again", async () => {
+    const api = mockApi();
+    vi.mocked(api.tasks!.list).mockResolvedValue([{ ...taskDto(), state: "completed", progress: 1000 }]);
+    let resolveRun!: (value: Awaited<ReturnType<NonNullable<DesktopApi["transformations"]>["run"]>>) => void;
+    vi.mocked(api.transformations!.run).mockImplementation(() => new Promise((resolve) => { resolveRun = resolve; }));
+    const info = vi.spyOn(toast, "info").mockImplementation(() => undefined);
+    render(<StudioPane projectId={projectId} />);
+
+    await screen.findByText("已完成");
+    expect(screen.getByText("100%")).toBeTruthy();
+    const progressFill = screen.getByRole("status").querySelector(".progress i") as HTMLElement;
+    expect(progressFill.style.width).toBe("100%");
+    fireEvent.click(screen.getByLabelText("来源"));
+    fireEvent.click(await screen.findByRole("option", { name: "论文.pdf" }));
+    fireEvent.click(screen.getByRole("button", { name: /运行转换/ }));
+    expect(await screen.findByText("排队中")).toBeTruthy();
+    expect(screen.queryByText("已完成")).toBeNull();
+
+    await act(async () => { resolveRun({ ok: true, value: { ...taskDto(), id: "7a1a1111-1111-4111-8111-111111111112" } }); });
+    expect(screen.getByText("排队中")).toBeTruthy();
+    expect(info).not.toHaveBeenCalled();
+    info.mockRestore();
+  });
+
+  it("forces 100% progress when task is marked completed even if reported progress is incomplete", async () => {
+    const api = mockApi();
+    vi.mocked(api.tasks!.list).mockResolvedValue([{ ...taskDto(), state: "completed", progress: 900 }]);
+    render(<StudioPane projectId={projectId} />);
+
+    await screen.findByText("已完成");
+    expect(screen.getByText("100%")).toBeTruthy();
+    const progressFill = screen.getByRole("status").querySelector(".progress i") as HTMLElement;
+    expect(progressFill.style.width).toBe("100%");
   });
 
   it("shows only ready sources as pickable targets", async () => {
@@ -175,7 +278,7 @@ describe("StudioPane", () => {
     });
     render(<StudioPane projectId={projectId} />);
 
-    await screen.findByText("总结");
+    await screen.findByText("摘要");
     fireEvent.click(screen.getByLabelText("来源"));
     const options = await screen.findAllByRole("option", { name: "就绪.pdf" });
     expect(options).toHaveLength(1);

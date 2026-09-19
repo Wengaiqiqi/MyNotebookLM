@@ -8,6 +8,7 @@ import { ProviderRequestError } from "../models/http-client";
 import { CredentialStore, type SecretProtector } from "./credential-store";
 
 const PROFILE_ID = "11111111-1111-4111-8111-111111111111";
+const SHARED_PROFILE_ID = "22222222-2222-4222-8222-222222222222";
 
 class DeterministicProtector implements SecretProtector {
   async isAvailable(): Promise<boolean> {
@@ -100,6 +101,27 @@ describe("CredentialStore", () => {
       { provider: "openai", baseUrl: "https://api.openai.com/v1" },
       async (value) => value
     )).resolves.toBe(apiKey);
+  });
+
+  it("can reuse a prepared credential for another profile on the same endpoint", async () => {
+    const settings = new SettingsRepository(appDatabase.connection);
+    settings.saveProfile({
+      id: SHARED_PROFILE_ID,
+      name: "Shared",
+      provider: "openai",
+      capability: "generation",
+      baseUrl: "https://api.openai.com/v1",
+      modelId: "gpt-shared",
+      enabled: true
+    });
+    const store = new CredentialStore(appDatabase.connection, new DeterministicProtector());
+    await store.set(PROFILE_ID, "shared-key");
+
+    await expect(store.withSecret(
+      SHARED_PROFILE_ID,
+      { provider: "openai", baseUrl: "https://api.openai.com/v1" },
+      async (value) => value
+    )).resolves.toBe("shared-key");
   });
 
   it("refuses to decrypt when durable credential binding no longer matches the profile", async () => {

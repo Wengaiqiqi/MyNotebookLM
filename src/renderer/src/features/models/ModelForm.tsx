@@ -24,13 +24,18 @@ const EMBEDDING_PROVIDERS: ProviderKind[] = ["openai", "openai-compatible", "gem
 
 export const providerLabelKey = (provider: ProviderKind): string => `model.providers.${provider}`;
 
+function cleanDisplayName(name: string): string {
+  return name.replace(/\s+\/\s+\d+$/, "").trim() || name;
+}
+
 /**
- * Create-or-edit form for one model profile. Calls models.discover for model
+ * Create-or-edit form for one model profile or a provider group. Calls models.discover for model
  * listing and models.saveProfile (which persists the credential server-side).
  */
-export default function ModelForm({ capability, existing, initialProvider, builtIn: builtInModel, onProfileSelected, onSaved, onCancel }: {
+export default function ModelForm({ capability, existing, existingProfiles, initialProvider, builtIn: builtInModel, onProfileSelected, onSaved, onCancel }: {
   capability: ModelCapability;
   existing?: ModelProfileDto | BuiltInModelProfileDto | undefined;
+  existingProfiles?: ModelProfileDto[] | undefined;
   initialProvider?: ProviderKind;
   builtIn?: BuiltInModelProfileDto | undefined;
   onProfileSelected?: (profile: ModelProfileDto | BuiltInModelProfileDto | undefined) => void;
@@ -40,29 +45,43 @@ export default function ModelForm({ capability, existing, initialProvider, built
   const { t } = useTranslation();
   const existingBuiltIn = existing && "editable" in existing ? existing : undefined;
   const userExisting = existing && !("editable" in existing) ? existing : undefined;
-  const isEdit = Boolean(userExisting);
+  const allExistingProfiles: ModelProfileDto[] = existingProfiles && existingProfiles.length > 0
+    ? existingProfiles
+    : (userExisting ? [userExisting] : []);
+  const primaryExisting = allExistingProfiles[0];
+  const isEdit = allExistingProfiles.length > 0;
 
-  const initialProviderValue = userExisting?.provider ?? initialProvider ?? "openai";
+  const initialProviderValue = primaryExisting?.provider ?? initialProvider ?? "openai";
   const [provider, setProvider] = useState<ProviderKind>(initialProviderValue);
   const [localMode, setLocalMode] = useState<"builtin" | "custom">(
-    userExisting?.provider === "local" && userExisting.baseUrl
+    primaryExisting?.provider === "local" && primaryExisting.baseUrl
       ? "custom"
       : initialProviderValue === "local" && builtInModel
         ? "builtin"
         : "custom"
   );
-  const [name, setName] = useState(userExisting?.name ?? "");
-  const [baseUrl, setBaseUrl] = useState(userExisting?.baseUrl ?? (initialProviderValue === "local" ? "" : PROVIDER_DEFAULT_BASE_URL.openai ?? ""));
-  const [modelId, setModelId] = useState(userExisting?.modelId ?? (initialProviderValue === "local" && builtInModel ? builtInModel.modelId : ""));
+  const [name, setName] = useState(primaryExisting ? cleanDisplayName(primaryExisting.name) : "");
+  const [baseUrl, setBaseUrl] = useState(primaryExisting?.baseUrl ?? (initialProviderValue === "local" ? "" : PROVIDER_DEFAULT_BASE_URL.openai ?? ""));
+  const [modelId, setModelId] = useState(primaryExisting?.modelId ?? (initialProviderValue === "local" && builtInModel ? builtInModel.modelId : ""));
   const [apiKey, setApiKey] = useState("");
   const [showKey, setShowKey] = useState(false);
-  const [discovered, setDiscovered] = useState<ModelDescriptorDto[]>([]);
-  const [selectedModelIds, setSelectedModelIds] = useState<string[]>(userExisting?.modelId ? [userExisting.modelId] : []);
+
+  const initialDescriptors: ModelDescriptorDto[] = useMemo(() => {
+    return allExistingProfiles.map((p) => ({
+      id: p.modelId,
+      displayName: p.modelId,
+      capabilities: [capability],
+      capabilityEvidence: "authoritative" as const
+    }));
+  }, [allExistingProfiles, capability]);
+
+  const [discovered, setDiscovered] = useState<ModelDescriptorDto[]>(initialDescriptors);
+  const [selectedModelIds, setSelectedModelIds] = useState<string[]>(allExistingProfiles.map((p) => p.modelId));
   const [discovering, setDiscovering] = useState(false);
   const [discoveredNote, setDiscoveredNote] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
-  const localTouched = useRef(Boolean(userExisting?.provider === "local"));
+  const localTouched = useRef(Boolean(primaryExisting?.provider === "local"));
 
   const providers = capability === "generation" ? GENERATION_PROVIDERS : EMBEDDING_PROVIDERS;
   const needsKey = provider !== "ollama" && provider !== "local";
@@ -142,12 +161,29 @@ export default function ModelForm({ capability, existing, initialProvider, built
       provider,
       capability,
       baseUrl: baseUrl.trim(),
+      ...(primaryExisting?.id ? { profileId: primaryExisting.id } : {}),
       ...(apiKey.trim() ? { apiKey: apiKey.trim() } : {})
     }).catch(() => undefined);
     setDiscovering(false);
     if (!result?.ok) { setError(t(result?.error.messageKey ?? "errors.internal")); return; }
-    const usable = result.value.filter((descriptor) => descriptor.capabilities.includes(capability));
-    setDiscovered(usable);
+    // Model catalogs usually cannot prove capabilities from the listing alone
+    // (OpenAI-compatible and official DeepSeek endpoints return an empty
+    // capabilities array). Keep those probe-required entries selectable; the
+    // save/test path performs the authoritative capability check.
+    const usable = result.value.filter((descriptor) =>
+      descriptor.capabilityEvidence === "probe-required"
+      || descriptor.capabilities.includes(capability)
+    );
+    const mergedMap = new Map<string, ModelDescriptorDto>();
+    for (const descriptor of usable) {
+      mergedMap.set(descriptor.id, descriptor);
+    }
+    for (const d of initialDescriptors) {
+      if (!mergedMap.has(d.id)) {
+        mergedMap.set(d.id, d);
+      }
+    }
+    setDiscovered(Array.from(mergedMap.values()));
     setDiscoveredNote(t("model.fetchSuccess"));
     if (usable.length > 0 && !modelId) setModelId(usable[0]!.id);
   }
@@ -161,16 +197,29 @@ export default function ModelForm({ capability, existing, initialProvider, built
     if (!name.trim() || modelIds.length === 0 || saving) return;
     if (!baseUrl.trim()) { setError(provider === "local" ? t("model.validation.localModelPath") : t("model.validation.address")); return; }
     setSaving(true); setError("");
+
+    const existingByModelId = new Map<string, ModelProfileDto>();
+    for (const p of allExistingProfiles) {
+      existingByModelId.set(p.modelId, p);
+    }
+
+    // Delete profiles that the user unselected
+    const removedProfiles = allExistingProfiles.filter((p) => !modelIds.includes(p.modelId));
+    for (const removed of removedProfiles) {
+      await window.myNotebook.models.deleteProfile({ id: removed.id }).catch(() => undefined);
+    }
+
     let savedProfile: ModelProfileDto | undefined;
     for (const selectedId of modelIds) {
+      const match = existingByModelId.get(selectedId);
       const profile = {
-        id: userExisting?.id ?? crypto.randomUUID(),
+        id: match?.id ?? crypto.randomUUID(),
         name: name.trim(),
         provider,
         capability,
         baseUrl: baseUrl.trim(),
         modelId: selectedId,
-        enabled: true
+        enabled: match ? match.enabled : true
       };
       const result = await window.myNotebook.models.saveProfile({
         profile,
@@ -333,7 +382,7 @@ export default function ModelForm({ capability, existing, initialProvider, built
                   value={modelId}
                   selectedIds={selectedModelIds}
                   descriptors={discovered}
-                  multiple={!isEdit}
+                  multiple={provider !== "local"}
                   placeholder={t("model.modelName")}
                   ariaLabel={t("model.modelName")}
                   selectedLabel={(count) => t("model.selectedModels", { count })}

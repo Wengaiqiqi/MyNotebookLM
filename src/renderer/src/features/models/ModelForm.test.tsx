@@ -16,8 +16,8 @@ describe("ModelForm", () => {
     const api = {
       models: {
         discover: vi.fn(async () => ({ ok: true as const, value: [
-          { id: "model-a", displayName: "Model A", capabilities: ["generation" as const], capabilityEvidence: "authoritative" as const },
-          { id: "model-b", displayName: "Model B", capabilities: ["generation" as const], capabilityEvidence: "authoritative" as const }
+          { id: "model-a", displayName: "Model A", capabilities: [], capabilityEvidence: "probe-required" as const },
+          { id: "model-b", displayName: "Model B", capabilities: [], capabilityEvidence: "probe-required" as const }
         ] })),
         saveProfile
       }

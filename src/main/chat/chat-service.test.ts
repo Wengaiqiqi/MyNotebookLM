@@ -142,6 +142,38 @@ function expectOk(result: Result<{ requestId: string; assistantMessageId: string
     ]);
   });
 
+  it("passes the context output reserve to the provider", async () => {
+    let request: GenerateRequest | undefined;
+    const deps = baseDeps({
+      providerFactory: () => ({
+        ...fakeProvider(["Answer"]),
+        generate: (input: GenerateRequest, signal: AbortSignal) => {
+          request = input;
+          return fakeProvider(["Answer"]).generate(input, signal);
+        }
+      })
+    });
+
+    await collectEvents(deps, { requestId: REQUEST_ID, projectId: PROJECT_ID, conversationId: world.conversationId, question: "What?" });
+
+    expect(request?.maxTokens).toBe(3_200);
+  });
+
+  it("fails a completed provider response that contains no visible answer", async () => {
+    const { result, events } = await collectEvents(baseDeps({
+      providerFactory: () => fakeProvider([])
+    }), { requestId: REQUEST_ID, projectId: PROJECT_ID, conversationId: world.conversationId, question: "What?" });
+
+    expect(result).toMatchObject({ ok: false, error: { code: "PROVIDER", messageKey: "errors.providerIncomplete" } });
+    expect(events.at(-1)).toMatchObject({ type: "failed", error: { code: "PROVIDER", messageKey: "errors.providerIncomplete" } });
+    expect(world.repository.listMessages(PROJECT_ID, world.conversationId).at(-1)).toMatchObject({
+      role: "assistant",
+      state: "failed",
+      content: "",
+      errorCode: "PROVIDER"
+    });
+  });
+
   it("uses the real multi-profile route and writes the completing profile", async () => {
     const primary = makeProfile();
     const fallback = { ...makeProfile(), id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", name: "Fallback", modelId: "fallback" };

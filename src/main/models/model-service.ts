@@ -321,7 +321,22 @@ export class ModelService {
         });
         return { ok: true, value: saved };
       }
-      const saved = this.settings.saveProfile(profile);
+      const existingPrepared = this.credentials.findPrepared?.({
+        provider: profile.provider,
+        baseUrl: profile.baseUrl
+      });
+      const saved = this.settings.transaction(() => {
+        const persisted = this.settings.saveProfile(profile);
+        if (this.credentials.status(profile.id).hasCredential) {
+          this.credentials.updateConnection?.(profile.id, {
+            provider: profile.provider,
+            baseUrl: profile.baseUrl
+          });
+        } else if (existingPrepared) {
+          this.credentials.storePrepared(profile.id, existingPrepared);
+        }
+        return persisted;
+      });
       return { ok: true, value: saved };
     } catch (reason) {
       return resultFromError(reason);
@@ -468,20 +483,23 @@ export class ModelService {
       }
     };
 
-    if (connection.apiKey !== undefined || connection.profileId === undefined) {
+    if (connection.apiKey !== undefined) {
       return invoke();
     }
 
     let savedProfile: ModelProfileDto | undefined;
     try {
-      savedProfile = this.settings.getProfile(connection.profileId);
-      if (!savedProfile) return invoke();
-      if (!this.credentials.status(connection.profileId).hasCredential) {
+      if (connection.profileId) {
+        savedProfile = this.settings.getProfile(connection.profileId);
+      }
+      const hasDirectCredential = connection.profileId ? this.credentials.status(connection.profileId).hasCredential : false;
+      const fallbackPrepared = !hasDirectCredential ? this.credentials.findPrepared?.({ provider: connection.provider, baseUrl: connection.baseUrl }) : undefined;
+      if (!hasDirectCredential && !fallbackPrepared) {
         return invoke();
       }
-      if (savedProfile.provider !== connection.provider
+      if (savedProfile && (savedProfile.provider !== connection.provider
         || canonicalCredentialBaseUrl(savedProfile.baseUrl)
-          !== canonicalCredentialBaseUrl(connection.baseUrl)) {
+          !== canonicalCredentialBaseUrl(connection.baseUrl))) {
         return credentialBindingError();
       }
     } catch (reason) {
@@ -490,9 +508,9 @@ export class ModelService {
 
     try {
       return await this.credentials.withSecret(
-        connection.profileId,
+        connection.profileId ?? "",
         { provider: connection.provider, baseUrl: connection.baseUrl },
-        (apiKey) => invoke(apiKey, savedProfile.provider, savedProfile.baseUrl)
+        (apiKey) => invoke(apiKey, savedProfile?.provider ?? connection.provider, savedProfile?.baseUrl ?? connection.baseUrl)
       );
     } catch (reason) {
       return resultFromError(reason);

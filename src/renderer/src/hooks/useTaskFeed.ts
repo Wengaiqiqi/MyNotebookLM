@@ -13,12 +13,15 @@ export function useTaskFeed(projectId: string | undefined, subscribe: SubscribeF
     setTasks([]);
     if (!projectId) return;
     let alive = true;
-    void list?.({ projectId }).then((items) => { if (alive) setTasks(items); }).catch(() => undefined);
     const unsubscribe = subscribe?.(projectId, (task) => {
       if (!alive) return;
       setTasks((current) => [task, ...current.filter((item) => item.id !== task.id)]
         .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)));
     });
+    void list?.({ projectId }).then((items) => {
+      if (alive) setTasks((current) => [...current, ...items.filter((item) => !current.some((task) => task.id === item.id))]
+        .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)));
+    }).catch(() => undefined);
     return () => { alive = false; unsubscribe?.(); };
   }, [projectId, list, subscribe]);
   return tasks;
