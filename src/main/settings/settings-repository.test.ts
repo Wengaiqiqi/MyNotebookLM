@@ -110,6 +110,23 @@ describe("SettingsRepository", () => {
     ]);
   });
 
+  it("preserves advanced settings on provider save and restart, clears only explicit overrides", () => {
+    const profile = { id: GENERATION_ID, name: "Model", provider: "openai" as const, capability: "generation" as const, baseUrl: "https://example.test", modelId: "m", enabled: true };
+    repository.saveProfile(profile);
+    repository.updateGenerationSettings({ profileId: profile.id, contextTokensOverride: 1_000_000, maxOutputTokensOverride: 16384 });
+    repository.saveProfile({ ...profile, name: "Renamed" });
+    repository.updateGenerationLimits(profile.id, { contextWindowTokens: 1_000_000, windowKind: "shared", source: "provider", observedAt: new Date().toISOString(), identity: { provider: profile.provider, baseUrl: profile.baseUrl, modelId: profile.modelId } });
+    appDatabase.close();
+    appDatabase = openAppDatabase(path.join(temporaryRoot, "app.db"), path.resolve("src/main/db/migrations"));
+    repository = new SettingsRepository(appDatabase.connection);
+    expect(repository.getProfile(profile.id)).toMatchObject({ contextTokensOverride: 1_000_000, maxOutputTokensOverride: 16384, generationLimits: { contextWindowTokens: 1_000_000 } });
+    repository.updateGenerationSettings({ profileId: profile.id, contextTokensOverride: null });
+    expect(repository.getProfile(profile.id)).toMatchObject({ contextTokensOverride: null, maxOutputTokensOverride: 16384 });
+    repository.saveProfile({ ...profile, baseUrl: "https://other.test" });
+    expect(repository.getProfile(profile.id)?.generationLimits).toBeUndefined();
+    expect(repository.getProfile(profile.id)?.maxOutputTokensOverride).toBe(16384);
+  });
+
   it("does not persist disabled profiles into a route", () => {
     repository.saveProfile({
       id: GENERATION_ID,

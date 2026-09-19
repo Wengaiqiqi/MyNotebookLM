@@ -8,6 +8,7 @@ import {
   chatListConversationsInputSchema,
   chatListMessagesInputSchema,
   chatRegenerateInputSchema,
+  chatContinueInputSchema,
   chatRequestIdInputSchema,
   chatRequestEventSchemas,
   chatRenameConversationInputSchema,
@@ -29,6 +30,7 @@ export type ChatHandlersServiceLike = {
   listMessages(input: { projectId: string; conversationId: string }): unknown;
   send(input: ChatSendInput, emit: Emit): Promise<StreamOutcome>;
   regenerate(input: ChatRegenerateInput, emit: Emit): Promise<StreamOutcome>;
+  continue(input: z.infer<typeof chatContinueInputSchema>, emit: Emit): Promise<StreamOutcome>;
   stopRequest(requestId: string, caller: { projectId: string }): boolean;
 };
 
@@ -58,23 +60,26 @@ const FLUSH_INTERVAL_MS = 34;
  * concatenation; stop() flushes residue before the terminal event.
  */
 function createTextCoalescer(deliver: (value: Record<string, unknown>) => void): {
-  push(delta: { requestId?: unknown; messageId?: unknown; text?: unknown }): void;
+  push(delta: { requestId?: unknown; messageId?: unknown; text?: unknown; offset?: unknown }): void;
   stop(): void;
 } {
   let buffer: string[] = [];
   let currentRequestId = "";
   let currentMessageId = "";
+  let currentOffset: number | undefined;
   const flush = (): void => {
     if (buffer.length === 0) return;
     const text = buffer.join("");
     buffer = [];
-    deliver({ type: "text-delta", requestId: currentRequestId, messageId: currentMessageId, text });
+    deliver({ type: "text-delta", requestId: currentRequestId, messageId: currentMessageId, text, ...(currentOffset === undefined ? {} : { offset: currentOffset }) });
+    currentOffset = undefined;
   };
   const timer = setInterval(flush, FLUSH_INTERVAL_MS);
   return {
     push(delta) {
       if (typeof delta.requestId === "string") currentRequestId = delta.requestId;
       if (typeof delta.messageId === "string") currentMessageId = delta.messageId;
+      if (buffer.length === 0 && typeof delta.offset === "number") currentOffset = delta.offset;
       if (typeof delta.text === "string") buffer.push(delta.text);
     },
     stop() {
@@ -158,7 +163,7 @@ export function registerChatHandlers(args: {
         if (type === "delta" || type === "text-delta") {
           coalescer ??= createTextCoalescer((coalesced) =>
             deliverToRequest(String(coalesced["requestId"] ?? value["requestId"] ?? ""), coalesced));
-          coalescer.push({ requestId: value["requestId"], messageId: value["messageId"], text: value["text"] });
+          coalescer.push({ requestId: value["requestId"], messageId: value["messageId"], text: value["text"], offset: value["offset"] });
           return;
         }
         if (type === "completed" || type === "cancelled" || type === "failed") {
@@ -207,6 +212,7 @@ export function registerChatHandlers(args: {
     validatedCall(chatListMessagesInputSchema, input, (value) => ({ ok: true as const, value: args.service.listMessages(value) })));
   registerHandler(CHAT_CHANNELS.send, runStream(chatSendInputSchema, (input, emit) => args.service.send(input, emit)));
   registerHandler(CHAT_CHANNELS.regenerate, runStream(chatRegenerateInputSchema, (input, emit) => args.service.regenerate(input, emit)));
+  registerHandler(CHAT_CHANNELS.continue, runStream(chatContinueInputSchema, (input, emit) => args.service.continue(input, emit)));
   registerHandler(CHAT_CHANNELS.stop, (_e, input) =>
     validatedCall(chatStopInputSchema, input, (value) => ({ ok: true as const, value: args.service.stopRequest(value.requestId, { projectId: value.projectId }) })));
   registerHandler(CITATION_CHANNELS.open, (_e, input) =>

@@ -83,6 +83,23 @@ afterEach(() => {
 });
 
 describe("useChatStream", () => {
+  it("removes an optimistic question when the main process rejects it before starting", async () => {
+    const h = createApi();
+    h.send.mockResolvedValue({ ok: false, error: { code: "VALIDATION", messageKey: "errors.generationOutputLimit", recoverable: true, details: { limitTokens: 4096 } } });
+    const { result } = renderHook(() => useChatStream(h.api.chat, PROJECT_ID, CONVERSATION_ID));
+    await act(async () => { await result.current.send("not saved"); });
+    expect(result.current.messages).toEqual([]);
+    expect(result.current.error?.details).toEqual({ limitTokens: 4096 });
+  });
+
+  it("preserves safe detail values delivered by a failed stream", async () => {
+    const h = createApi();
+    h.send.mockResolvedValue(makeOk(REQUEST_ID, MESSAGE_ID));
+    const { result } = renderHook(() => useChatStream(h.api.chat, PROJECT_ID, CONVERSATION_ID));
+    await act(async () => { await result.current.send("q"); });
+    await emitAsync(h, REQUEST_ID, { type: "failed", requestId: REQUEST_ID, messageId: MESSAGE_ID, error: { code: "VALIDATION", messageKey: "errors.generationOutputLimit", recoverable: true, details: { limitTokens: 4096 } } });
+    expect(result.current.error?.details).toEqual({ limitTokens: 4096 });
+  });
   it("passes the selected generation profile as a per-request override", async () => {
     const h = createApi();
     h.send.mockResolvedValue(makeOk(REQUEST_ID, MESSAGE_ID));
@@ -237,6 +254,15 @@ describe("useChatStream", () => {
 
     rerender({ id: "new-conversation", messages: old });
     expect(result.current.messages).toEqual([]);
+  });
+
+  it("preserves the displayed original question when editing is rejected before generation", async () => {
+    const h = createApi();
+    h.regenerate.mockResolvedValue({ ok: false, error: { code: "VALIDATION", messageKey: "errors.generationLimitsConflict", recoverable: true } });
+    const history = [makeMessage({ id: "u1", role: "user", content: "Original question" }), makeMessage({ id: "a1", replyToMessageId: "u1", content: "Original answer" })];
+    const { result } = renderHook(() => useChatStream(h.api.chat, PROJECT_ID, CONVERSATION_ID, history));
+    await act(async () => { expect(await result.current.regenerate("a1", { question: "Replacement" })).toBe(false); });
+    expect(result.current.messages).toEqual(history);
   });
 
   it("regenerates from a completed assistant reply without duplicating the user message", async () => {

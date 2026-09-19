@@ -9,6 +9,7 @@ import type {
   ProviderKind
 } from "../../../../shared/models";
 import ModelForm from "../models/ModelForm";
+import ModelAdvancedForm from "../models/ModelAdvancedForm";
 import Icon, { type IconName } from "../../ui/Icon";
 import Modal, { DialogHead } from "../../ui/Modal";
 import { toast } from "../../ui/Toast";
@@ -45,6 +46,10 @@ type ProviderGroup = {
   profiles: ModelProfileDto[];
 };
 
+type ModelEditorState =
+  | { kind: "provider"; capability: "generation" | "embedding"; existingGroup?: ProviderGroup }
+  | { kind: "model"; profile: ModelProfileDto };
+
 function groupProfilesByProvider(profiles: ModelProfileDto[]): ProviderGroup[] {
   const map = new Map<string, ProviderGroup>();
   for (const profile of profiles) {
@@ -70,10 +75,12 @@ type DeletingTarget =
   | { kind: "single"; profile: ModelProfileDto }
   | { kind: "group"; groupName: string; profiles: ModelProfileDto[] };
 
-export default function Settings({ projectId, language, theme, onLanguage, onTheme, onRoutesChanged, onClose }: {
+export default function Settings({ projectId, language, theme, initialModelProfileId, onLanguage, onTheme, onRoutesChanged, onClose }: {
   projectId?: string | undefined;
   language: AppLanguage;
   theme: AppTheme;
+  /** When set, open the advanced editor for this model once profiles load. */
+  initialModelProfileId?: string | undefined;
   onLanguage: (language: AppLanguage) => void;
   onTheme: (theme: AppTheme) => void;
   onRoutesChanged: () => void;
@@ -83,7 +90,7 @@ export default function Settings({ projectId, language, theme, onLanguage, onThe
   const [section, setSection] = useState<Section>("models");
   const [profiles, setProfiles] = useState<ModelProfileDto[]>([]);
   const [builtIns, setBuiltIns] = useState<BuiltInModelProfileDto[]>([]);
-  const [editorOpen, setEditorOpen] = useState<{ capability: "generation" | "embedding"; existing?: ModelProfileDto; existingGroup?: ProviderGroup }>();
+  const [editorOpen, setEditorOpen] = useState<ModelEditorState>();
   const [deletingTarget, setDeletingTarget] = useState<DeletingTarget>();
   const [expandedKeys, setExpandedKeys] = useState<Set<string>>(() => new Set());
   const toggleExpanded = (key: string) => {
@@ -95,6 +102,7 @@ export default function Settings({ projectId, language, theme, onLanguage, onThe
     });
   };
   const [loaded, setLoaded] = useState(false);
+  const openedModelId = useRef<string | undefined>(undefined);
 
   const reload = useCallback(async () => {
     const result = await window.myNotebook.models.listProfiles();
@@ -105,6 +113,17 @@ export default function Settings({ projectId, language, theme, onLanguage, onThe
   }, [t]);
 
   useEffect(() => { void reload(); }, [reload]);
+
+  // Deep link from a chat answer: open that answer's model editor, and fall
+  // back to the model list with a notice when the profile no longer exists.
+  useEffect(() => {
+    if (!initialModelProfileId) { openedModelId.current = undefined; return; }
+    if (!loaded || openedModelId.current === initialModelProfileId) return;
+    openedModelId.current = initialModelProfileId;
+    const profile = profiles.find((candidate) => candidate.id === initialModelProfileId);
+    if (profile) setEditorOpen({ kind: "model", profile });
+    else toast.error(t("errors.modelProfileNotFound"));
+  }, [loaded, initialModelProfileId, profiles, t]);
 
   const sections: Array<{ id: Section; icon: IconName; label: string }> = [
     { id: "general", icon: "sliders", label: t("settings.general") },
@@ -173,7 +192,7 @@ export default function Settings({ projectId, language, theme, onLanguage, onThe
                         <button
                           type="button"
                           className="btn primary sm"
-                          onClick={() => setEditorOpen({ capability })}
+                           onClick={() => setEditorOpen({ kind: "provider", capability })}
                         >
                           <Icon name="plus" />{t("model.newProfile", { capability: t(capability === "generation" ? "model.generation.title" : "model.embedding.title") })}
                         </button>
@@ -216,7 +235,7 @@ export default function Settings({ projectId, language, theme, onLanguage, onThe
                                     type="button"
                                     className="icon-btn"
                                     aria-label={`${t("common.edit")}: ${group.name}`}
-                                    onClick={() => setEditorOpen({ capability, existingGroup: group })}
+                                     onClick={() => setEditorOpen({ kind: "provider", capability, existingGroup: group })}
                                     title={t("common.edit")}
                                   >
                                     <Icon name="edit" />
@@ -248,15 +267,17 @@ export default function Settings({ projectId, language, theme, onLanguage, onThe
                                           {!profile.enabled && <span className="badge neutral">{t("model.disabled")}</span>}
                                         </div>
                                         <div className="model-chip-actions">
-                                          <button
-                                            type="button"
-                                            className="icon-btn"
-                                            aria-label={`${t("common.edit")}: ${profile.modelId}`}
-                                            onClick={() => setEditorOpen({ capability, existing: profile, existingGroup: group })}
-                                            title={t("common.edit")}
-                                          >
-                                            <Icon name="edit" />
-                                          </button>
+                                          {capability === "generation" && (
+                                            <button
+                                              type="button"
+                                              className="icon-btn"
+                                              aria-label={`${t("common.edit")}: ${profile.modelId}`}
+                                              onClick={() => setEditorOpen({ kind: "model", profile })}
+                                              title={t("common.edit")}
+                                            >
+                                              <Icon name="edit" />
+                                            </button>
+                                          )}
                                           <button
                                             type="button"
                                             className="icon-btn danger"
@@ -311,16 +332,27 @@ export default function Settings({ projectId, language, theme, onLanguage, onThe
 
       {editorOpen && (
         <Modal open wide onClose={() => setEditorOpen(undefined)} labelledBy="model-editor-title">
-          <h2 id="model-editor-title">{editorOpen.existing || editorOpen.existingGroup ? t("model.editProfile") : t("model.newProfileTitle")}</h2>
+          <h2 id="model-editor-title">{editorOpen.kind === "model"
+            ? t("model.editModelConfig")
+            : editorOpen.existingGroup
+              ? t("model.editProvider")
+              : t("model.newProfileTitle")}</h2>
           <div style={{ marginTop: 14 }}>
-            <ModelForm
-              capability={editorOpen.capability}
-              existing={editorOpen.existing}
-              existingProfiles={editorOpen.existingGroup?.profiles ?? (editorOpen.existing ? [editorOpen.existing] : undefined)}
-              {...(editorOpen.capability === "embedding" ? { builtIn: builtIns[0], initialProvider: "local" as const } : {})}
-              onCancel={() => setEditorOpen(undefined)}
-              onSaved={() => { setEditorOpen(undefined); void reload(); }}
-            />
+            {editorOpen.kind === "model" ? (
+              <ModelAdvancedForm
+                profile={editorOpen.profile}
+                onCancel={() => setEditorOpen(undefined)}
+                onSaved={() => { setEditorOpen(undefined); void reload(); }}
+              />
+            ) : (
+              <ModelForm
+                capability={editorOpen.capability}
+                existingProfiles={editorOpen.existingGroup?.profiles}
+                {...(editorOpen.capability === "embedding" ? { builtIn: builtIns[0], initialProvider: "local" as const } : {})}
+                onCancel={() => setEditorOpen(undefined)}
+                onSaved={() => { setEditorOpen(undefined); void reload(); }}
+              />
+            )}
           </div>
         </Modal>
       )}

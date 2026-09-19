@@ -1,4 +1,4 @@
-import { ProviderHttpClient, ProviderRequestError } from "./http-client";
+import { ProviderHttpClient, ProviderRequestError, responseByteBudget } from "./http-client";
 import { isRecord, malformedResponse, optionalFiniteNumber } from "./provider-guards";
 import type {
   EmbeddingRequest,
@@ -121,7 +121,8 @@ export class OpenAiProvider implements ModelProvider {
       method: "POST",
       headers: this.headers(true),
       body: JSON.stringify(body),
-      signal
+      signal,
+      maxResponseBytes: responseByteBudget(request.maxTokens)
     })) {
       if (!isRecord(chunk)) throw malformedResponse();
       const choices = chunk.choices;

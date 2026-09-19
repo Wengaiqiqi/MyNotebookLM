@@ -50,7 +50,13 @@ describe("Settings Component", () => {
       pooling: "mean",
       normalized: true,
       preprocessingVersion: "1",
-      metadata: {},
+      metadata: {
+        dimension: 384,
+        distance: "cosine",
+        pooling: "mean",
+        normalized: true,
+        preprocessingVersion: "1"
+      },
       editable: false,
       requiresCredential: false
     }
@@ -90,6 +96,18 @@ describe("Settings Component", () => {
     (window as unknown as { myNotebook: DesktopApi }).myNotebook = api;
     return { listProfiles, deleteProfile, getRoutes, saveRoutes };
   }
+
+  it("opens a model deep link only once after saving and refreshing profiles", async () => {
+    const listProfiles = vi.fn(async () => ({ ok: true as const, value: { profiles: mockProfiles.map((profile) => ({ ...profile })), builtInProfiles: mockBuiltIns, credentials: [] } }));
+    const updateGenerationSettings = vi.fn(async () => ({ ok: true as const, value: mockProfiles[0]! }));
+    setupApi({ listProfiles, updateGenerationSettings });
+    render(<Settings initialModelProfileId="p-1" language="zh-CN" theme="light" onLanguage={() => {}} onTheme={() => {}} onRoutesChanged={() => {}} onClose={() => {}} />);
+    await screen.findByRole("dialog");
+    fireEvent.click(screen.getByRole("button", { name: /保存|Save/ }));
+    await waitFor(() => expect(listProfiles).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(updateGenerationSettings).toHaveBeenCalledTimes(1);
+  });
 
   it("groups models under provider card and toggles details drawer", async () => {
     setupApi();
@@ -293,7 +311,7 @@ describe("Settings Component", () => {
     fireEvent.click(editBtn);
 
     // Modal opens with edit title and pre-selected models
-    expect(await screen.findByRole("heading", { name: "编辑模型配置", level: 2 })).toBeTruthy();
+    expect(await screen.findByRole("heading", { name: "编辑提供商配置", level: 2 })).toBeTruthy();
     expect(screen.getByDisplayValue("https://api.xianka.com/v1")).toBeTruthy();
     expect(screen.getByDisplayValue("已选择 2 个模型")).toBeTruthy();
 

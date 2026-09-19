@@ -13,6 +13,8 @@ import { classifyProviderError } from "../models/provider-errors";
 import { SettingsRepository } from "../settings/settings-repository";
 import { RouteRepository } from "../models/route-repository";
 import { ModelRouter } from "../models/model-router";
+import { ModelService } from "../models/model-service";
+import type { CredentialStore } from "../credentials/credential-store";
 
 const PROJECT_ID = "11111111-1111-4111-8111-111111111111";
 const USER_ID = "44444444-4444-4444-8444-444444444444";
@@ -142,6 +144,208 @@ function expectOk(result: Result<{ requestId: string; assistantMessageId: string
     ]);
   });
 
+  it("pins an unfinished citation across continuation and refuses insufficient space", async () => {
+    const profile = { ...makeProfile(), contextTokensOverride: 8192, maxOutputTokensOverride: 2048 };
+    let calls = 0;
+    const svc = new ChatService(baseDeps({ generationProfile: profile, retrieval: async (input) => (await baseDeps().retrieval(input)).map((row) => ({ ...row, text: "Fact ".repeat(800) })), providerFactory: () => ({ ...fakeProvider(), async *generate() {
+      calls++; yield { type: "text-delta", text: calls === 1 ? "x".repeat(2000) + " [S1" : "]" };
+      yield { type: "done", finishReason: calls === 1 ? "length" : "stop" };
+    } }) }));
+    const first = expectOk(await svc.send({ requestId: REQUEST_ID, projectId: PROJECT_ID, conversationId: world.conversationId, question: "q" }, () => {}));
+    const message = world.repository.getMessage(PROJECT_ID, first.assistantMessageId)!;
+    profile.maxOutputTokensOverride = 4096;
+    const input = { requestId: crypto.randomUUID(), projectId: PROJECT_ID, conversationId: world.conversationId, messageId: message.id, expectedRevision: message.generation!.revision };
+    expect(await svc.continue(input, () => {})).toMatchObject({ ok: false, error: { messageKey: "errors.contextBudgetExceeded" } });
+    expect(calls).toBe(1);
+    expect(world.repository.getMessage(PROJECT_ID, message.id)).toEqual(message);
+    profile.maxOutputTokensOverride = 2048;
+    expectOk(await svc.continue({ ...input, requestId: crypto.randomUUID() }, () => {}));
+    expect(world.repository.getMessage(PROJECT_ID, message.id)!.citations[0]?.label).toBe("S1");
+  });
+
+  it.each(["partial", "split", "interrupted"])("tracks usage field completeness: %s", async (mode) => {
+    const svc = new ChatService(baseDeps({ retrieval: async () => [], providerFactory: () => ({ ...fakeProvider(), async *generate() {
+      yield { type: "usage", inputTokens: 10 };
+      yield { type: "text-delta", text: "answer" };
+      if (mode !== "partial") yield { type: "usage", outputTokens: 5 };
+      if (mode === "interrupted") throw new Error("disconnect");
+      yield { type: "done", finishReason: "stop" };
+    } }) }));
+    await svc.send({ requestId: REQUEST_ID, projectId: PROJECT_ID, conversationId: world.conversationId, question: "q" }, () => {});
+    const message = world.repository.listMessages(PROJECT_ID, world.conversationId).at(-1)!;
+    expect(message.generation?.usageComplete).toBe(mode === "split");
+    expect(message.usage).toEqual({ inputTokens: 10, outputTokens: mode === "partial" ? 0 : 5, totalTokens: mode === "partial" ? 10 : 15 });
+  });
+
+  it.each(["failure", "cancel", "terminal-write-failure"])("keeps initial partial citations and incomplete usage: %s", async (mode) => {
+    let svc: ChatService;
+    svc = new ChatService(baseDeps({ providerFactory: () => ({ ...fakeProvider(), async *generate() {
+      yield { type: "usage", inputTokens: 10 };
+      yield { type: "text-delta", text: "Grounded claim [S1]." };
+      if (mode === "cancel") { svc.stopRequest(REQUEST_ID, { projectId: PROJECT_ID }); return; }
+      throw new Error("disconnect");
+    } }) }));
+    if (mode === "terminal-write-failure") world.database.connection.exec("CREATE TRIGGER fail_initial_terminal BEFORE UPDATE OF runtime_json ON chat_generation_contexts WHEN NEW.active_request_id IS NULL BEGIN SELECT RAISE(ABORT,'terminal failed'); END");
+    const events: any[] = [];
+    await svc.send({ requestId: REQUEST_ID, projectId: PROJECT_ID, conversationId: world.conversationId, question: "q" }, (event) => events.push(event));
+    if (mode === "terminal-write-failure") {
+      expect(world.repository.listMessages(PROJECT_ID, world.conversationId).at(-1)!.state).toBe("streaming");
+      expect(events.some((event) => event.type === "failed")).toBe(false);
+      world.database.connection.exec("DROP TRIGGER fail_initial_terminal");
+      expect(recoverInterruptedStreams(world.database.connection)).toBe(1);
+      expect(recoverInterruptedStreams(world.database.connection)).toBe(0);
+    }
+    const message = world.repository.listMessages(PROJECT_ID, world.conversationId).at(-1)!;
+    expect(message.content).toBe("Grounded claim [S1].");
+    expect(message.citations[0]).toMatchObject({ label: "S1", sourceChunkId: world.chunkId });
+    expect(message.generation).toMatchObject({ usageComplete: false, canContinue: false });
+    expect(message.usage?.inputTokens).toBe(10);
+  });
+
+  it("keeps cumulative usage incomplete after a partial interrupted continuation", async () => {
+    let calls = 0;
+    const svc = new ChatService(baseDeps({ retrieval: async () => [], providerFactory: () => ({ ...fakeProvider(), async *generate() {
+      calls++;
+      yield { type: "usage", inputTokens: 10 };
+      yield { type: "text-delta", text: "part" };
+      if (calls === 2) throw new Error("disconnect");
+      yield { type: "usage", outputTokens: 5 };
+      yield { type: "done", finishReason: "length" };
+    } }) }));
+    const first = expectOk(await svc.send({ requestId: REQUEST_ID, projectId: PROJECT_ID, conversationId: world.conversationId, question: "q" }, () => {}));
+    for (let i = 0; i < 2; i++) {
+      const message = world.repository.getMessage(PROJECT_ID, first.assistantMessageId)!;
+      await svc.continue({ requestId: crypto.randomUUID(), projectId: PROJECT_ID, conversationId: world.conversationId, messageId: message.id, expectedRevision: message.generation!.revision }, () => {});
+      expect(world.repository.getMessage(PROJECT_ID, message.id)!.generation?.usageComplete).toBe(false);
+    }
+    expect(world.repository.getMessage(PROJECT_ID, first.assistantMessageId)!.usage).toEqual({ inputTokens: 30, outputTokens: 10, totalTokens: 40 });
+  });
+
+  it("keeps S100 through repeated length stops, changed settings and normal completion", async () => {
+    const rows: RetrievableChunk[] = [];
+    for (let i = 1; i <= 120; i++) {
+      const chunkId = "many-" + i;
+      world.database.connection.prepare("INSERT INTO source_chunks(id,revision_id,ordinal,text,locator_json,content_hash) VALUES (?,?,?,?,?,?)").run(chunkId, "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", i, "Fact " + i, JSON.stringify({ kind: "page", page: i }), "h" + i);
+      rows.push({ label: "S" + i, chunkId, sourceId: "88888888-8888-4888-8888-888888888888", revisionId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", contentHash: "h" + i, sourceDisplayName: "Doc", sourceKind: "pdf", locator: { kind: "page", page: i }, locatorSummary: "page " + i, text: "Fact " + i });
+    }
+    const profile = { ...makeProfile(), contextTokensOverride: 131072 };
+    const requests: GenerateRequest[] = [];
+    const svc = new ChatService(baseDeps({ generationProfile: profile, retrieval: async () => rows, providerFactory: () => ({ ...fakeProvider(), async *generate(request: GenerateRequest) {
+      requests.push(request);
+      yield { type: "text-delta", text: requests.length === 1 ? "Fact [S100]" : " more" };
+      yield { type: "usage", inputTokens: 10 };
+      yield { type: "usage", outputTokens: 5 };
+      yield { type: "usage", outputTokens: 5 };
+      yield { type: "done", finishReason: requests.length < 3 ? "length" : "stop" };
+    } }) }));
+    const first = expectOk(await svc.send({ requestId: REQUEST_ID, projectId: PROJECT_ID, conversationId: world.conversationId, question: "facts" }, () => {}));
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const current = world.repository.getMessage(PROJECT_ID, first.assistantMessageId)!;
+      expect(current.generation?.canContinue).toBe(true);
+      if (attempt === 1) profile.maxOutputTokensOverride = 16384;
+      expectOk(await svc.continue({ requestId: crypto.randomUUID(), projectId: PROJECT_ID, conversationId: world.conversationId, messageId: current.id, expectedRevision: current.generation!.revision }, () => {}));
+    }
+    const final = world.repository.getMessage(PROJECT_ID, first.assistantMessageId)!;
+    expect(final.content).toBe("Fact [S100] more more");
+    expect(final.citations[0]).toMatchObject({ label: "S100", sourceChunkId: "many-100" });
+    expect(final.generation).toMatchObject({ canContinue: false, finishKind: "stop", outputTokenLimit: 16384 });
+    expect(final.usage).toEqual({ inputTokens: 30, outputTokens: 15, totalTokens: 45 });
+    expect(requests.map((request) => request.maxTokens)).toEqual([8192,8192,16384]);
+    expect(world.repository.listMessages(PROJECT_ID, world.conversationId)).toHaveLength(2);
+  });
+
+  it("refuses deleted legacy evidence even when its snapshot has no version metadata", async () => {
+    const svc = new ChatService(baseDeps({ providerFactory: () => ({ ...fakeProvider(), async *generate() { yield { type: "text-delta", text: "Fact [S1]" }; yield { type: "done", finishReason: "length" }; } }) }));
+    const first = expectOk(await svc.send({ requestId: REQUEST_ID, projectId: PROJECT_ID, conversationId: world.conversationId, question: "facts" }, () => {}));
+    const current = world.repository.getMessage(PROJECT_ID, first.assistantMessageId)!;
+    world.database.connection.prepare("UPDATE sources SET status='deleting'").run();
+    expect(await svc.continue({ requestId: crypto.randomUUID(), projectId: PROJECT_ID, conversationId: world.conversationId, messageId: current.id, expectedRevision: current.generation!.revision }, () => {})).toMatchObject({ ok: false, error: { messageKey: "errors.continueSourceUnavailable" } });
+    expect(world.repository.getMessage(PROJECT_ID, current.id)!.content).toBe(current.content);
+  });
+
+  it("excludes a later regenerated answer from an earlier question's history", async () => {
+    const svc = new ChatService(baseDeps({ retrieval: async () => [] }));
+    const send = (question: string) => svc.send({ requestId: crypto.randomUUID(), projectId: PROJECT_ID, conversationId: world.conversationId, question }, () => {});
+    const first = expectOk(await send("Q1"));
+    const second = expectOk(await send("Q2"));
+    expectOk(await svc.regenerate({ requestId: crypto.randomUUID(), projectId: PROJECT_ID, conversationId: world.conversationId, messageId: first.assistantMessageId }, () => {}));
+    const question = world.repository.getMessage(PROJECT_ID, world.repository.getMessage(PROJECT_ID, second.assistantMessageId)!.replyToMessageId!)!;
+    expect(world.repository.listHistoryPairs({ projectId: PROJECT_ID, conversationId: world.conversationId, beforeSequence: question.sequence, cursor: 999 })).toEqual([]);
+  });
+
+  it.each(["deleting", "revision", "hash"])("rejects evidence invalidated after retrieval: %s", async (change) => {
+    const db = world.database.connection;
+    const sourceId = "88888888-8888-4888-8888-888888888888";
+    const revisionId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+    db.prepare("UPDATE sources SET current_revision_id=? WHERE id=?").run(revisionId, sourceId);
+    db.prepare("UPDATE source_revisions SET state='ready' WHERE id=?").run(revisionId);
+    const factory = vi.fn(() => fakeProvider());
+    const original = baseDeps().retrieval;
+    const svc = new ChatService(baseDeps({ providerFactory: factory, retrieval: async (input) => {
+      const rows = await original(input);
+      if (change === "deleting") db.prepare("UPDATE sources SET status='deleting' WHERE id=?").run(sourceId);
+      if (change === "revision") db.prepare("UPDATE sources SET current_revision_id=NULL WHERE id=?").run(sourceId);
+      if (change === "hash") db.prepare("UPDATE source_chunks SET content_hash='changed' WHERE id=?").run(world.chunkId);
+      return rows.map((row) => ({ ...row, revisionId, contentHash: "sha256:chunk" }));
+    } }));
+    expect(await svc.send({ requestId: REQUEST_ID, projectId: PROJECT_ID, conversationId: world.conversationId, question: "Q" }, () => {})).toMatchObject({ ok: false, error: { code: "CONFLICT" } });
+    expect(factory).not.toHaveBeenCalled();
+  });
+
+  it("expands evidence and history for a larger fallback without resolving the route twice", async () => {
+    const primary = { ...makeProfile(), contextTokensOverride: 8192 };
+    const larger = { ...primary, id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", contextTokensOverride: 1_000_000 };
+    const requests: GenerateRequest[] = [];
+    const original = baseDeps().retrieval;
+    const retrieval = vi.fn(async (input: Parameters<typeof original>[0]) => {
+      const [row] = await original(input);
+      return Array.from({ length: input.evidenceTokenBudget! < 1000 ? 1 : 40 }, (_, index) => ({ ...row!, chunkId: "candidate-" + index, text: "Fact " + index }));
+    });
+    const resolve = vi.fn(() => [primary, larger]);
+    const svc = new ChatService(baseDeps({ router: { resolve }, retrieval, providerFactory: (profile) => ({ ...fakeProvider(), async *generate(request: GenerateRequest) {
+      requests.push(request);
+      if (profile.id === primary.id) throw new ProviderRequestError({ error: { code: "TIMEOUT", messageKey: "errors.timeout", recoverable: true }, fallbackEligible: true });
+      yield { type: "text-delta", text: "Answer without markers" };
+      yield { type: "done", finishReason: "stop" };
+    } }) }));
+    expectOk(await svc.send({ requestId: REQUEST_ID, projectId: PROJECT_ID, conversationId: world.conversationId, question: "Q" }, () => {}));
+    expect(resolve).toHaveBeenCalledTimes(1);
+    expect(retrieval).toHaveBeenCalledTimes(2);
+    expect(retrieval.mock.calls[0]![0].signal).toBe(retrieval.mock.calls[1]![0].signal);
+    expect(requests[1]!.messages.map((item) => item.content).join(" ")).toContain('<evidence id="S40">');
+  });
+
+  it("keeps safe error details in initial and continuation terminal events", async () => {
+    let calls = 0;
+    const error = { code: "VALIDATION" as const, messageKey: "errors.generationOutputLimit", recoverable: true, details: { limitTokens: 4096 } };
+    const svc = new ChatService(baseDeps({ retrieval: async () => [], providerFactory: () => ({ ...fakeProvider(), async *generate() {
+      calls++;
+      if (calls !== 1) throw new ProviderRequestError({ error, fallbackEligible: false });
+      yield { type: "text-delta", text: "Partial" };
+      yield { type: "done", finishReason: "length" };
+    } }) }));
+    const first = expectOk(await svc.send({ requestId: REQUEST_ID, projectId: PROJECT_ID, conversationId: world.conversationId, question: "Q" }, () => {}));
+    const message = world.repository.getMessage(PROJECT_ID, first.assistantMessageId)!;
+    const events: any[] = [];
+    await svc.continue({ requestId: crypto.randomUUID(), projectId: PROJECT_ID, conversationId: world.conversationId, messageId: message.id, expectedRevision: message.generation!.revision }, (event) => events.push(event));
+    expect(events.at(-1)).toMatchObject({ type: "failed", operation: "continue", error, message: { state: "completed", content: "Partial" } });
+    await svc.send({ requestId: crypto.randomUUID(), projectId: PROJECT_ID, conversationId: world.conversationId, question: "next" }, (event) => events.push(event));
+    expect(events.at(-1)).toMatchObject({ type: "failed", error });
+  });
+
+  it("records the updated continuation allowance before streaming and rejects a changed question", async () => {
+    const profile = makeProfile();
+    const svc = new ChatService(baseDeps({ generationProfile: profile, retrieval: async () => [], providerFactory: () => ({ ...fakeProvider(), async *generate() { yield { type: "text-delta", text: "Partial" }; yield { type: "done", finishReason: "length" }; } }) }));
+    const first = expectOk(await svc.send({ requestId: REQUEST_ID, projectId: PROJECT_ID, conversationId: world.conversationId, question: "Q" }, () => {}));
+    const message = world.repository.getMessage(PROJECT_ID, first.assistantMessageId)!;
+    profile.maxOutputTokensOverride = 4096;
+    const events: any[] = [];
+    expectOk(await svc.continue({ requestId: crypto.randomUUID(), projectId: PROJECT_ID, conversationId: world.conversationId, messageId: message.id, expectedRevision: message.generation!.revision }, (event) => events.push(event)));
+    expect(events[0]).toMatchObject({ type: "started", message: { generation: { outputTokenLimit: 4096 } } });
+    world.repository.updateUserMessage({ projectId: PROJECT_ID, id: message.replyToMessageId!, content: "changed", updatedAt: AT });
+    expect(await svc.continue({ requestId: crypto.randomUUID(), projectId: PROJECT_ID, conversationId: world.conversationId, messageId: message.id, expectedRevision: world.repository.getMessage(PROJECT_ID, message.id)!.generation!.revision }, () => {})).toMatchObject({ ok: false, error: { code: "CONFLICT" } });
+  });
+
   it("passes the context output reserve to the provider", async () => {
     let request: GenerateRequest | undefined;
     const deps = baseDeps({
@@ -156,7 +360,74 @@ function expectOk(result: Result<{ requestId: string; assistantMessageId: string
 
     await collectEvents(deps, { requestId: REQUEST_ID, projectId: PROJECT_ID, conversationId: world.conversationId, question: "What?" });
 
-    expect(request?.maxTokens).toBe(3_200);
+    expect(request?.maxTokens).toBe(8_192);
+  });
+
+  it("keeps a length-limited answer resumable and appends a manual continuation", async () => {
+    let calls = 0;
+    const provider = {
+      ...fakeProvider(),
+      async *generate(_request: GenerateRequest, _signal: AbortSignal) {
+        calls += 1;
+        yield { type: "text-delta" as const, text: calls === 1 ? "first half" : "second half" };
+        yield { type: "done" as const, finishReason: calls === 1 ? "length" : "stop" };
+      }
+    };
+    const svc = new ChatService(baseDeps({ providerFactory: () => provider }));
+    const first = await svc.send({ requestId: REQUEST_ID, projectId: PROJECT_ID, conversationId: world.conversationId, question: "long answer" }, () => undefined);
+    expect(first.ok).toBe(true);
+    const assistantId = first.ok ? first.value.assistantMessageId : "";
+    const limited = world.repository.getMessage(PROJECT_ID, assistantId)!;
+    expect(limited.generation).toMatchObject({ finishKind: "length", canContinue: true, status: "idle" });
+
+    const continued = await svc.continue({ requestId: "55555555-5555-4555-8555-555555555555", projectId: PROJECT_ID, conversationId: world.conversationId, messageId: assistantId, expectedRevision: limited.generation!.revision }, () => undefined);
+    expect(continued.ok).toBe(true);
+    expect(world.repository.getMessage(PROJECT_ID, assistantId)).toMatchObject({ content: "first halfsecond half", state: "completed", generation: { finishKind: "stop", canContinue: false } });
+  });
+
+  it("pins continuation to the original model, reparses the merged answer, and accumulates usage", async () => {
+    const primary = makeProfile();
+    const fallback = { ...makeProfile(), id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", name: "Fallback", modelId: "fallback" };
+    const routes = new RouteRepository(new SettingsRepository(world.database.connection));
+    for (const item of [primary, fallback]) routes.saveProfile({ id: item.id, name: item.name, provider: item.provider, capability: item.capability, baseUrl: item.baseUrl, modelId: item.modelId, enabled: item.enabled });
+    routes.replaceRoute("chat", [primary.id, fallback.id]);
+    let primaryCalls = 0;
+    const calls: string[] = [];
+    const deps = baseDeps({
+      generationProfile: undefined,
+      router: new ModelRouter(routes),
+      providerFactory: (item) => item.id === primary.id
+        ? {
+          ...fakeProvider(),
+          async *generate() {
+            primaryCalls += 1;
+            calls.push(`primary-${primaryCalls}`);
+            yield { type: "text-delta" as const, text: primaryCalls === 1 ? "Claim [S1]" : " continued" };
+            yield { type: "usage" as const, inputTokens: primaryCalls === 1 ? 10 : 11, outputTokens: primaryCalls === 1 ? 5 : 7 };
+            yield { type: "done" as const, finishReason: primaryCalls === 1 ? "length" : "stop" };
+          }
+        }
+        : {
+          ...fakeProvider(["wrong fallback"]),
+          async *generate() {
+            calls.push("fallback");
+            yield { type: "text-delta" as const, text: "wrong fallback" };
+            yield { type: "done" as const, finishReason: "stop" };
+          }
+        }
+    });
+    const service = new ChatService(deps);
+    const first = await service.send({ requestId: REQUEST_ID, projectId: PROJECT_ID, conversationId: world.conversationId, question: "continue" }, () => undefined);
+    expect(first.ok).toBe(true);
+    const assistantId = first.ok ? first.value.assistantMessageId : "";
+    const limited = world.repository.getMessage(PROJECT_ID, assistantId)!;
+    const continued = await service.continue({ requestId: "55555555-5555-4555-8555-555555555555", projectId: PROJECT_ID, conversationId: world.conversationId, messageId: assistantId, expectedRevision: limited.generation!.revision }, () => undefined);
+    const message = world.repository.getMessage(PROJECT_ID, assistantId)!;
+    expect(continued.ok).toBe(true);
+    expect(calls).toEqual(["primary-1", "primary-2"]);
+    expect(message.content).toBe("Claim [S1] continued");
+    expect(message.citations).toHaveLength(1);
+    expect(message.usage).toEqual({ inputTokens: 21, outputTokens: 12, totalTokens: 33 });
   });
 
   it("fails a completed provider response that contains no visible answer", async () => {
@@ -174,6 +445,125 @@ function expectOk(result: Result<{ requestId: string; assistantMessageId: string
     });
   });
 
+  it("settles citations, usage and runtime when a continuation is interrupted", async () => {
+    let calls = 0;
+    // The second citation needs a real chunk row: message_citations keeps a
+    // foreign key to source_chunks.
+    world.database.connection.prepare("INSERT INTO source_chunks(id, revision_id, ordinal, text, locator_json, content_hash) VALUES (?, ?, ?, ?, ?, ?)")
+      .run("99999999-9999-4999-8999-999999999998", "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", 1, "Second evidence", JSON.stringify({ kind: "page", page: 3 }), "sha256:chunk2");
+    const secondChunk: RetrievableChunk = {
+      label: "S2",
+      chunkId: "99999999-9999-4999-8999-999999999998",
+      sourceId: "88888888-8888-4888-8888-888888888888",
+      sourceKind: "pdf",
+      text: "Second evidence",
+      sourceDisplayName: "Research PDF",
+      locator: { kind: "page", page: 3 },
+      locatorSummary: "page 3"
+    };
+    const provider = {
+      ...fakeProvider(),
+      async *generate(_request: GenerateRequest, _signal: AbortSignal) {
+        calls += 1;
+        yield { type: "text-delta" as const, text: calls === 1 ? "Original [S1]" : " New [S2]" };
+        yield { type: "usage" as const, inputTokens: calls === 1 ? 10 : 11, outputTokens: calls === 1 ? 5 : 7 };
+        if (calls === 2) throw new Error("offline disconnect");
+        yield { type: "done" as const, finishReason: "length" };
+      }
+    };
+    const svc = new ChatService(baseDeps({
+      providerFactory: () => provider,
+      retrieval: async () => [
+        {
+          label: "S1",
+          chunkId: world.chunkId,
+          sourceId: "88888888-8888-4888-8888-888888888888",
+          sourceKind: "pdf",
+          text: "Authoritative evidence",
+          sourceDisplayName: "Research PDF",
+          locator: { kind: "page", page: 2 },
+          locatorSummary: "page 2"
+        },
+        secondChunk
+      ]
+    }));
+    const first = await svc.send({ requestId: REQUEST_ID, projectId: PROJECT_ID, conversationId: world.conversationId, question: "long" }, () => undefined);
+    const assistantId = first.ok ? first.value.assistantMessageId : "";
+    const limited = world.repository.getMessage(PROJECT_ID, assistantId)!;
+    const continued = await svc.continue({ requestId: "55555555-5555-4555-8555-555555555555", projectId: PROJECT_ID, conversationId: world.conversationId, messageId: assistantId, expectedRevision: limited.generation!.revision }, () => undefined);
+    const message = world.repository.getMessage(PROJECT_ID, assistantId)!;
+
+    expect(continued.ok).toBe(false);
+    // Appended text, its new citation, the accumulated usage and the
+    // interrupted runtime must all be settled together.
+    expect(message.content).toBe("Original [S1] New [S2]");
+    expect(message.citations.map((citation) => citation.label)).toEqual(["S1", "S2"]);
+    expect(message.usage).toEqual({ inputTokens: 21, outputTokens: 12, totalTokens: 33 });
+    expect(message.generation).toMatchObject({ status: "interrupted", canContinue: true });
+  });
+
+  it("keeps a continuation recoverable when the terminal write fails", async () => {
+    let calls = 0;
+    const svc = new ChatService(baseDeps({
+      providerFactory: () => ({
+        ...fakeProvider(),
+        async *generate() {
+          calls += 1;
+          yield { type: "text-delta" as const, text: calls === 1 ? "first half" : " second half" };
+          yield { type: "done" as const, finishReason: calls === 1 ? "length" : "stop" };
+        }
+      })
+    }));
+    const first = await svc.send({ requestId: REQUEST_ID, projectId: PROJECT_ID, conversationId: world.conversationId, question: "long" }, () => undefined);
+    const assistantId = first.ok ? first.value.assistantMessageId : "";
+    const limited = world.repository.getMessage(PROJECT_ID, assistantId)!;
+    const requestId = "55555555-5555-4555-8555-555555555555";
+    world.database.connection.exec("CREATE TRIGGER fail_terminal BEFORE UPDATE OF runtime_json ON chat_generation_contexts WHEN NEW.active_request_id IS NULL BEGIN SELECT RAISE(ABORT,'terminal write failed'); END");
+    const failed = await svc.continue({ requestId, projectId: PROJECT_ID, conversationId: world.conversationId, messageId: assistantId, expectedRevision: limited.generation!.revision }, () => undefined);
+    world.database.connection.exec("DROP TRIGGER fail_terminal");
+
+    expect(failed).toMatchObject({ ok: false, error: { code: "INTERNAL" } });
+    expect(recoverInterruptedStreams(world.database.connection, new Date(AT))).toBe(1);
+    const message = world.repository.getMessage(PROJECT_ID, assistantId)!;
+    const context = world.repository.getGenerationContext(PROJECT_ID, assistantId)!;
+    expect(context.activeRequestId).toBeNull();
+    expect(message.generation).toMatchObject({ status: "interrupted", canContinue: true });
+  });
+
+  it("rolls back the continuation claim if saving the prepared snapshot fails", async () => {
+    const svc = new ChatService(baseDeps({ retrieval: async () => [], providerFactory: () => ({ ...fakeProvider(), async *generate() { yield { type: "text-delta", text: "partial" }; yield { type: "done", finishReason: "length" }; } }) }));
+    const first = expectOk(await svc.send({ requestId: REQUEST_ID, projectId: PROJECT_ID, conversationId: world.conversationId, question: "Q" }, () => {}));
+    const original = world.repository.getMessage(PROJECT_ID, first.assistantMessageId)!;
+    world.database.connection.exec("CREATE TRIGGER fail_snapshot BEFORE UPDATE OF snapshot_json ON chat_generation_contexts BEGIN SELECT RAISE(ABORT,'snapshot failed'); END");
+    const result = await svc.continue({ requestId: crypto.randomUUID(), projectId: PROJECT_ID, conversationId: world.conversationId, messageId: original.id, expectedRevision: original.generation!.revision }, () => {});
+    expect(result).toMatchObject({ ok:false, error:{code:"INTERNAL"} });
+    expect(world.repository.getMessage(PROJECT_ID, original.id)).toEqual(original);
+    expect(world.repository.getGenerationContext(PROJECT_ID, original.id)?.activeRequestId).toBeNull();
+  });
+
+  it("replays a finished continuation request instead of generating twice", async () => {
+    let calls = 0;
+    const provider = {
+      ...fakeProvider(),
+      async *generate(_request: GenerateRequest, _signal: AbortSignal) {
+        calls += 1;
+        yield { type: "text-delta" as const, text: calls === 1 ? "first" : " second" };
+        yield { type: "done" as const, finishReason: calls === 1 ? "length" : "stop" };
+      }
+    };
+    const svc = new ChatService(baseDeps({ providerFactory: () => provider }));
+    const first = await svc.send({ requestId: REQUEST_ID, projectId: PROJECT_ID, conversationId: world.conversationId, question: "long" }, () => undefined);
+    const assistantId = first.ok ? first.value.assistantMessageId : "";
+    const limited = world.repository.getMessage(PROJECT_ID, assistantId)!;
+    const input = { requestId: "55555555-5555-4555-8555-555555555555", projectId: PROJECT_ID, conversationId: world.conversationId, messageId: assistantId, expectedRevision: limited.generation!.revision };
+    const firstContinue = await svc.continue(input, () => undefined);
+    const replay = await svc.continue(input, () => undefined);
+
+    expect(firstContinue.ok).toBe(true);
+    expect(replay.ok).toBe(true);
+    expect(calls).toBe(2);
+    expect(world.repository.getMessage(PROJECT_ID, assistantId)!.content).toBe("first second");
+  });
   it("uses the real multi-profile route and writes the completing profile", async () => {
     const primary = makeProfile();
     const fallback = { ...makeProfile(), id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", name: "Fallback", modelId: "fallback" };
@@ -407,6 +797,184 @@ function expectOk(result: Result<{ requestId: string; assistantMessageId: string
     expect(last.content).toBe("");
   });
 
+  it("rejects invalid configuration without changing an edited question or appending another turn", async () => {
+    const profile: ModelProfileDto = makeProfile();
+    const service = new ChatService(baseDeps({ generationProfile: profile }));
+    const first = expectOk(await service.send({ requestId: REQUEST_ID, projectId: PROJECT_ID, conversationId: world.conversationId, question: "Original question" }, () => {}));
+    const before = world.repository.listMessages(PROJECT_ID, world.conversationId);
+    profile.maxOutputTokensOverride = 65536;
+    expect(await service.regenerate({ requestId: crypto.randomUUID(), projectId: PROJECT_ID, conversationId: world.conversationId, messageId: first.assistantMessageId, question: "Replacement question" }, () => {})).toMatchObject({ ok: false, error: { messageKey: "errors.generationLimitsConflict" } });
+    expect(await service.send({ requestId: crypto.randomUUID(), projectId: PROJECT_ID, conversationId: world.conversationId, question: "New question" }, () => {})).toMatchObject({ ok: false });
+    expect(world.repository.listMessages(PROJECT_ID, world.conversationId)).toEqual(before);
+  });
+
+  it("retrieves evidence using the adjusted default output reserve in a small window", async () => {
+    const deps = baseDeps();
+    const evidence = await deps.retrieval({ projectId: PROJECT_ID, question: "What?" });
+    let budget = -1;
+    let request: GenerateRequest | undefined;
+    const service = new ChatService({ ...deps, generationProfile: { ...makeProfile(), contextTokensOverride: 8192 },
+      retrieval: async (input) => { budget = input.evidenceTokenBudget!; return budget >= 96 ? evidence : []; },
+      providerFactory: () => ({ ...fakeProvider(), async *generate(input): AsyncGenerator<GenerationEvent> { request = input; yield { type: "text-delta", text: "Answer [S1]" }; yield { type: "done", finishReason: "stop" }; } }) });
+    const result = expectOk(await service.send({ requestId: REQUEST_ID, projectId: PROJECT_ID, conversationId: world.conversationId, question: "What?" }, () => {}));
+    expect(budget).toBeGreaterThanOrEqual(96);
+    expect(request!.maxTokens).toBeLessThan(8192);
+    expect(request!.messages.some((message) => message.content.includes("Authoritative evidence"))).toBe(true);
+    expect(world.repository.getMessage(PROJECT_ID, result.assistantMessageId)!.citations).toHaveLength(1);
+  });
+
+  it("rejects impossible default-window settings before saving", async () => {
+    const settings = new SettingsRepository(world.database.connection);
+    const { createdAt: _created, updatedAt: _updated, ...profile } = makeProfile();
+    settings.saveProfile(profile);
+    const service = new ModelService(settings, {} as CredentialStore);
+    const rejected = await service.updateGenerationSettings({ profileId: profile.id, contextTokensOverride: null, maxOutputTokensOverride: 65536 });
+    expect(rejected).toMatchObject({ ok: false, error: { messageKey: "errors.generationLimitsConflict" } });
+    expect(settings.getProfile(profile.id)!.maxOutputTokensOverride).toBeNull();
+    expect((await service.updateGenerationSettings({ profileId: profile.id, contextTokensOverride: 131072, maxOutputTokensOverride: 65536 })).ok).toBe(true);
+  });
+
+  it("blocks stale capacity overrides on send and continuation before calling a provider", async () => {
+    const profile: ModelProfileDto = { ...makeProfile(), contextTokensOverride: 65536, maxOutputTokensOverride: 8192 };
+    const factory = vi.fn(() => ({ ...fakeProvider(), async *generate(): AsyncGenerator<GenerationEvent> { yield { type: "text-delta", text: "Answer" }; yield { type: "done", finishReason: "length" }; } }));
+    const service = new ChatService(baseDeps({ generationProfile: profile, providerFactory: factory }));
+    const first = expectOk(await service.send({ requestId: REQUEST_ID, projectId: PROJECT_ID, conversationId: world.conversationId, question: "Hi" }, () => {}));
+    profile.generationLimits = { windowKind: "shared", contextWindowTokens: 4096, maxOutputTokens: 2048, source: "provider", observedAt: AT, identity: { provider: profile.provider, baseUrl: profile.baseUrl, modelId: profile.modelId } };
+    const revision = world.repository.getGenerationContext(PROJECT_ID, first.assistantMessageId)!.revision;
+    expect(await service.continue({ requestId: crypto.randomUUID(), projectId: PROJECT_ID, conversationId: world.conversationId, messageId: first.assistantMessageId, expectedRevision: revision }, () => {})).toMatchObject({ ok: false, error: { messageKey: "errors.generationContextLimit" } });
+    expect(await service.send({ requestId: crypto.randomUUID(), projectId: PROJECT_ID, conversationId: world.conversationId, question: "Hi again" }, () => {})).toMatchObject({ ok: false, error: { messageKey: "errors.generationContextLimit" } });
+    expect(factory).toHaveBeenCalledTimes(1);
+    expect(world.repository.listMessages(PROJECT_ID, world.conversationId).some((message) => message.state === "streaming")).toBe(false);
+  });
+
+  it("rejects an invalid fallback configuration before the fallback provider is called", async () => {
+    const primary = makeProfile();
+    const fallback = { ...primary, id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", maxOutputTokensOverride: 65536 };
+    const factory = vi.fn(() => ({ ...fakeProvider(), async *generate(): AsyncGenerator<GenerationEvent> { throw new ProviderRequestError({ error: { code: "PROVIDER", messageKey: "errors.providerFailure", recoverable: true }, fallbackEligible: true }); } }));
+    const service = new ChatService(baseDeps({ router: { resolve: () => [primary, fallback] }, providerFactory: factory }));
+    expect(await service.send({ requestId: REQUEST_ID, projectId: PROJECT_ID, conversationId: world.conversationId, question: "Hi" }, () => {})).toMatchObject({ ok: false, error: { messageKey: "errors.generationLimitsConflict" } });
+    expect(factory).toHaveBeenCalledTimes(1);
+    expect(world.repository.listMessages(PROJECT_ID, world.conversationId).at(-1)!.state).toBe("failed");
+  });
+
+  it("sends the persisted empty-limit explanation and model in the failed terminal event", async () => {
+    const service = new ChatService(baseDeps({ providerFactory: () => ({ ...fakeProvider(), async *generate(): AsyncGenerator<GenerationEvent> {
+      yield { type: "usage", inputTokens: 10, outputTokens: 8192 };
+      yield { type: "done", finishReason: "length" };
+    } }) }));
+    const events: Array<Record<string, unknown>> = [];
+    await service.send({ requestId: REQUEST_ID, projectId: PROJECT_ID, conversationId: world.conversationId, question: "Hi" }, (event) => events.push(event));
+    expect(events.at(-1)).toMatchObject({ type: "failed", message: { state: "failed", profileId: makeProfile().id, generation: { finishKind: "length", lastError: "errors.outputLimitEmpty", canContinue: false } } });
+  });
+
+  it.each([false, true])("isolates fallback usage and identity when fallback fails=%s", async (fails) => {
+    const primary = makeProfile();
+    const fallback = { ...primary, id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", modelId: "fallback" };
+    const service = new ChatService(baseDeps({ router: { resolve: () => [primary, fallback] }, providerFactory: (profile) => ({ ...fakeProvider(), async *generate(): AsyncGenerator<GenerationEvent> {
+      if (profile.id === primary.id) {
+        yield { type: "usage", inputTokens: 123, outputTokens: 456 };
+        throw new ProviderRequestError({ error: { code: "PROVIDER", messageKey: "errors.providerFailure", recoverable: true }, fallbackEligible: true });
+      }
+      yield { type: "text-delta", text: "Fallback answer" };
+      if (fails) throw new ProviderRequestError({ error: { code: "PROVIDER", messageKey: "errors.providerIncomplete", recoverable: true }, fallbackEligible: false });
+      yield { type: "done", finishReason: "stop" };
+    } }) }));
+    const events: Array<Record<string, unknown>> = [];
+    await service.send({ requestId: REQUEST_ID, projectId: PROJECT_ID, conversationId: world.conversationId, question: "Hi" }, (event) => events.push(event));
+    const message = world.repository.listMessages(PROJECT_ID, world.conversationId).at(-1)!;
+    expect(message).toMatchObject({ model: "fallback", profileId: fallback.id, state: fails ? "failed" : "completed", generation: { usageComplete: false } });
+    expect(message.usage?.totalTokens ?? 0).toBe(0);
+    if (fails) expect(events.at(-1)).toMatchObject({ type: "failed", message: { model: "fallback" } });
+  });
+
+  it("saves the evidence actually sent to a smaller fallback model", async () => {
+    const primary = { ...makeProfile(), contextTokensOverride: 32768, maxOutputTokensOverride: 2048 };
+    const fallback = { ...primary, id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", modelId: "fallback", contextTokensOverride: 8192 };
+    let sent: GenerateRequest | undefined;
+    const deps = baseDeps();
+    const evidence = await deps.retrieval({ projectId: PROJECT_ID, question: "What?" });
+    const service = new ChatService({ ...deps,
+      router: { resolve: () => [primary, fallback] },
+      retrieval: async () => evidence.map((item) => ({ ...item, text: "Evidence ".repeat(4500) })),
+      providerFactory: (profile) => ({ ...fakeProvider(), async *generate(request): AsyncGenerator<GenerationEvent> {
+        if (profile.id === primary.id) throw new ProviderRequestError({ error: { code: "PROVIDER", messageKey: "errors.providerFailure", recoverable: true }, fallbackEligible: true });
+        sent = request;
+        yield { type: "text-delta", text: "Answer [S1]" };
+        yield { type: "done", finishReason: "length" };
+      } })
+    });
+    const result = expectOk(await service.send({ requestId: REQUEST_ID, projectId: PROJECT_ID, conversationId: world.conversationId, question: "What?" }, () => {}));
+    const snapshot = world.repository.getGenerationContext(PROJECT_ID, result.assistantMessageId)!.snapshot as { evidence: Array<{ sentText: string }>; contextMessages: GenerateRequest["messages"] };
+    expect(snapshot.contextMessages).toEqual(sent!.messages);
+    expect(sent!.messages.some((message) => message.content.includes(snapshot.evidence[0]!.sentText))).toBe(true);
+    expect(snapshot.evidence[0]!.sentText.length).toBeLessThan(10000);
+  });
+
+  it("continues a long answer by dropping uncited evidence", async () => {
+    const deps = baseDeps();
+    const evidence = await deps.retrieval({ projectId: PROJECT_ID, question: "What?" });
+    let calls = 0;
+    const service = new ChatService({ ...deps,
+      generationProfile: { ...makeProfile(), contextTokensOverride: 8192, maxOutputTokensOverride: 2048 },
+      retrieval: async () => evidence.map((item) => ({ ...item, text: "Evidence ".repeat(4500) })),
+      providerFactory: () => ({ ...fakeProvider(), async *generate(): AsyncGenerator<GenerationEvent> {
+        calls++;
+        yield { type: "text-delta", text: calls === 1 ? "Answer ".repeat(350) : "continued" };
+        yield { type: "done", finishReason: calls === 1 ? "length" : "stop" };
+      } })
+    });
+    const { assistantMessageId } = expectOk(await service.send({ requestId: REQUEST_ID, projectId: PROJECT_ID, conversationId: world.conversationId, question: "What?" }, () => {}));
+    const revision = world.repository.getGenerationContext(PROJECT_ID, assistantMessageId)!.revision;
+    expectOk(await service.continue({ requestId: crypto.randomUUID(), projectId: PROJECT_ID, conversationId: world.conversationId, messageId: assistantMessageId, expectedRevision: revision }, () => {}));
+    expect(calls).toBe(2);
+    expect(world.repository.getMessage(PROJECT_ID, assistantMessageId)!.content).toBe("Answer ".repeat(350) + "continued");
+  });
+
+  it("rebuilds checkpoint citations and incomplete usage on restart exactly once", async () => {
+    const result = expectOk(await new ChatService(baseDeps({ providerFactory: () => fakeProvider(["Original"]) })).send({ requestId: REQUEST_ID, projectId: PROJECT_ID, conversationId: world.conversationId, question: "What?" }, () => {}));
+    const messageId = result.assistantMessageId;
+    const saved = world.repository.getGenerationContext(PROJECT_ID, messageId)!;
+    const claim = world.repository.claimContinuation({ projectId: PROJECT_ID, messageId, requestId: crypto.randomUUID(), expectedRevision: saved.revision, updatedAt: AT });
+    expect(claim.kind).toBe("claimed");
+    world.repository.checkpointAssistantContent({ projectId: PROJECT_ID, messageId, content: "Original. New citation [S1]", updatedAt: AT });
+    const running = world.repository.getGenerationContext(PROJECT_ID, messageId)!;
+    world.repository.updateGenerationRuntime({ projectId: PROJECT_ID, messageId, runtime: { ...running.runtime, attemptUsage: { inputTokens: 2, outputTokens: 3, totalTokens: 5 } } });
+    expect(recoverInterruptedStreams(world.database.connection)).toBe(1);
+    const recovered = world.repository.getMessage(PROJECT_ID, messageId)!;
+    expect(recovered.citations.map((item) => item.label)).toEqual(["S1"]);
+    expect(recovered.usage).toEqual({ inputTokens: 12, outputTokens: 8, totalTokens: 20 });
+    expect(recovered.generation).toMatchObject({ status: "interrupted", canContinue: true, usageComplete: false });
+    expect(recoverInterruptedStreams(world.database.connection)).toBe(0);
+    expect(world.repository.getMessage(PROJECT_ID, messageId)!.usage).toEqual(recovered.usage);
+    expectOk(await new ChatService(baseDeps()).continue({ requestId: crypto.randomUUID(), projectId: PROJECT_ID, conversationId: world.conversationId, messageId, expectedRevision: recovered.generation!.revision }, () => {}));
+    const continued = world.repository.getMessage(PROJECT_ID, messageId)!;
+    expect(continued.usage).toEqual({ inputTokens: 22, outputTokens: 13, totalTokens: 35 });
+    expect(continued.generation?.usageComplete).toBe(false);
+  });
+
+  it("checkpoints the latest usage together with streaming content", async () => {
+    let checkpointSeen = false;
+    const service = new ChatService(baseDeps({ providerFactory: () => ({ ...fakeProvider(), async *generate(): AsyncGenerator<GenerationEvent> {
+      yield { type: "usage", inputTokens: 7, outputTokens: 8 };
+      yield { type: "text-delta", text: "x".repeat(2100) };
+      const message = world.repository.listMessages(PROJECT_ID, world.conversationId).at(-1)!;
+      expect(message.content).toHaveLength(2100);
+      expect(world.repository.getGenerationContext(PROJECT_ID, message.id)!.runtime.attemptUsage).toEqual({ inputTokens: 7, outputTokens: 8, totalTokens: 15 });
+      checkpointSeen = true;
+      yield { type: "done", finishReason: "stop" };
+    } }) }));
+    expectOk(await service.send({ requestId: REQUEST_ID, projectId: PROJECT_ID, conversationId: world.conversationId, question: "What?" }, () => {}));
+    expect(checkpointSeen).toBe(true);
+  });
+
+  it("restores a boolean continuation flag for a stranded completed answer", async () => {
+    const result = expectOk(await new ChatService(baseDeps()).send({ requestId: REQUEST_ID, projectId: PROJECT_ID, conversationId: world.conversationId, question: "What?" }, () => {}));
+    const saved = world.repository.getGenerationContext(PROJECT_ID, result.assistantMessageId)!;
+    world.repository.updateGenerationRuntime({ projectId: PROJECT_ID, messageId: result.assistantMessageId, activeRequestId: crypto.randomUUID(), runtime: { ...saved.runtime, operation: "continue", status: "running", canContinue: false } });
+    expect(recoverInterruptedStreams(world.database.connection)).toBe(1);
+    expect(world.repository.getMessage(PROJECT_ID, result.assistantMessageId)!.generation?.canContinue).toBe(true);
+  });
+
   it("checkpoint recovery resumes nothing but persists clean interrupted state on startup", () => {
     prepareOrphanStreamingRow(world.database.connection);
     recoverInterruptedStreams(world.database.connection, new Date(AT));
@@ -612,6 +1180,8 @@ function setupWorld(): World {
     .run("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "88888888-8888-4888-8888-888888888888", "original.pdf", "stored.pdf", "sha256:test", "page", "v1");
   database.connection.prepare("INSERT INTO source_chunks(id, revision_id, ordinal, text, locator_json, content_hash) VALUES (?, ?, ?, ?, ?, ?)")
     .run("99999999-9999-4999-8999-999999999999", "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", 0, "Evidence", JSON.stringify({ kind: "page", page: 2 }), "sha256:chunk");
+  database.connection.prepare("UPDATE sources SET current_revision_id=? WHERE id=?").run("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "88888888-8888-4888-8888-888888888888");
+  database.connection.prepare("UPDATE source_revisions SET state='ready'").run();
   const repository = new ConversationRepository(database.connection);
   const conversationId = "33333333-3333-4333-8333-333333333333";
   repository.createConversation({ id: conversationId, projectId: PROJECT_ID, title: "Research", createdAt: AT });

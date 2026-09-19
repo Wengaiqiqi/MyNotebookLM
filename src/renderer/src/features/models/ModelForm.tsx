@@ -260,7 +260,7 @@ export default function ModelForm({ capability, existing, existingProfiles, init
       <div className="model-card-head">
         <span className="model-card-glyph" aria-hidden="true"><Icon name={capability === "generation" ? "brain" : "database"} /></span>
         <div>
-          <h3>{isEdit ? t("model.editProfile") : capability === "generation" ? t("model.generation.title") : t("model.embedding.title")}</h3>
+          <h3>{isEdit ? t("model.editProvider") : capability === "generation" ? t("model.generation.title") : t("model.embedding.title")}</h3>
           <p>{capability === "generation" ? t("model.generation.description") : t("model.embedding.description")}</p>
         </div>
       </div>
@@ -382,7 +382,7 @@ export default function ModelForm({ capability, existing, existingProfiles, init
                   value={modelId}
                   selectedIds={selectedModelIds}
                   descriptors={discovered}
-                  multiple={provider !== "local"}
+                  multiple
                   placeholder={t("model.modelName")}
                   ariaLabel={t("model.modelName")}
                   selectedLabel={(count) => t("model.selectedModels", { count })}

@@ -1,4 +1,4 @@
-import { ProviderHttpClient, ProviderRequestError } from "./http-client";
+import { ProviderHttpClient, ProviderRequestError, responseByteBudget } from "./http-client";
 import { classifyProviderError } from "./provider-errors";
 import { isRecord, malformedResponse, optionalFiniteNumber } from "./provider-guards";
 import type {
@@ -77,7 +77,8 @@ export class AnthropicProvider implements ModelProvider {
       method: "POST",
       headers: this.headers(true),
       body: JSON.stringify(body),
-      signal
+      signal,
+      maxResponseBytes: responseByteBudget(request.maxTokens)
     })) {
       if (!isRecord(event) || typeof event.type !== "string") throw malformedResponse();
       if (messageStopped || (stopReason !== undefined && [

@@ -32,19 +32,23 @@ async function validateExistingTable(table: lancedb.Table, space: LanceSpace): P
 }
 type SearchRow = StoredRow & { _distance?: number; _score?: number };
 type SearchQuery = { limit(value: number): SearchQuery; toArray(): Promise<unknown[]> };
-async function stableSearch(query: SearchQuery, limit: number, scoreColumn: "_distance" | "_score", ascending: boolean): Promise<StoredRow[]> {
+async function stableSearch(query: SearchQuery, limit: number, scoreColumn: "_distance" | "_score", ascending: boolean, signal?: AbortSignal): Promise<StoredRow[]> {
   if (limit === 0) return [];
   let candidateLimit = Math.max(limit + 1, 1);
+  const maxScan = Math.max(limit, 4_096);
   while (true) {
-    const rows = await query.limit(candidateLimit).toArray() as SearchRow[];
+    if (signal?.aborted) throw Object.assign(new Error("Search cancelled"), { code: "CANCELLED" });
+    const queryLimit = Math.min(candidateLimit, maxScan);
+    const rows = await query.limit(queryLimit).toArray() as SearchRow[];
+    if (signal?.aborted) throw Object.assign(new Error("Search cancelled"), { code: "CANCELLED" });
     rows.sort((left, right) => {
       const leftScore = typeof left[scoreColumn] === "number" ? left[scoreColumn]! : ascending ? Number.POSITIVE_INFINITY : Number.NEGATIVE_INFINITY;
       const rightScore = typeof right[scoreColumn] === "number" ? right[scoreColumn]! : ascending ? Number.POSITIVE_INFINITY : Number.NEGATIVE_INFINITY;
       if (leftScore !== rightScore) return ascending ? leftScore - rightScore : rightScore - leftScore;
       return left.chunkId < right.chunkId ? -1 : left.chunkId > right.chunkId ? 1 : 0;
     });
-    if (rows.length < candidateLimit || rows.length <= limit || rows[limit - 1]![scoreColumn] !== rows[rows.length - 1]![scoreColumn]) return rows.slice(0, limit) as StoredRow[];
-    candidateLimit *= 2;
+    if (rows.length < queryLimit || rows.length <= limit || queryLimit >= maxScan || rows[limit - 1]![scoreColumn] !== rows[rows.length - 1]![scoreColumn]) return rows.slice(0, limit) as StoredRow[];
+    candidateLimit = Math.min(maxScan, candidateLimit * 2);
   }
 }
 async function locked<T>(key: string, fn: () => Promise<T>): Promise<T> { const prior = locks.get(key) ?? Promise.resolve(); let release!: () => void; const current = new Promise<void>(r => { release = r; }); const queued = prior.then(() => current); locks.set(key, queued); await prior; try { return await fn(); } finally { release(); if (locks.get(key) === queued) locks.delete(key); } }
@@ -80,8 +84,8 @@ export class LanceStore {
   async count(space: LanceSpace, filter?: Record<string, string>): Promise<number> { validateSpace(space); const leave=this.enter(); try { return await locked(tableName(space), async () => { const table = await this.table(space); const where = filterSql(filter); if (!where) return table.countRows(); return (await table.query().where(where).toArray()).length; }); } finally { leave(); } }
   async health(space: LanceSpace, projectId?: string): Promise<{ indexedCount: number }> { validateSpace(space); const leave=this.enter(); try { return await locked(tableName(space), async () => { const table = await this.table(space); await validateExistingTable(table, space); const rows = await table.query().toArray() as Array<{ spaceId?: unknown; projectId?: unknown; vector?: ArrayLike<number> }>; if (rows.some(row => row.spaceId !== space.id || (projectId !== undefined && row.projectId !== projectId) || !row.vector || row.vector.length !== space.dimension || Array.from(row.vector).some(value => !Number.isFinite(Number(value))))) throw new Error("Lance row validation failed"); return { indexedCount: rows.length }; }); } finally { leave(); } }
   async rows(space: LanceSpace): Promise<StoredRow[]> { validateSpace(space); const leave=this.enter(); try { return await locked(tableName(space), async () => await (await this.table(space)).query().toArray() as unknown as StoredRow[]); } finally { leave(); } }
-  async vectorSearch(space: LanceSpace, vector: number[], limit: number, filter?: Record<string, string>): Promise<StoredRow[]> { validateSpace(space); if (vector.length !== space.dimension || vector.some(value => !Number.isFinite(value))) throw new Error("vector must have the space dimension and finite values"); const leave=this.enter(); try { return await locked(tableName(space), async () => { let q = (await this.table(space)).vectorSearch(vector); const where=filterSql(filter); if (where) q = q.where(where); return await stableSearch(q, limit, "_distance", true); }); } finally { leave(); } }
-  async textSearch(space: LanceSpace, query: string, limit: number, filter?: Record<string, string>): Promise<StoredRow[]> { validateSpace(space); const leave=this.enter(); try { return await locked(tableName(space), async () => { const t = await this.table(space); await this.ensureTextIndex(t, space); let search = t.query().fullTextSearch(query); const where = filterSql(filter); if (where) search = search.where(where); return await stableSearch(search, limit, "_score", false); }); } finally { leave(); } }
+  async vectorSearch(space: LanceSpace, vector: number[], limit: number, filter?: Record<string, string>, signal?: AbortSignal): Promise<StoredRow[]> { validateSpace(space); if (vector.length !== space.dimension || vector.some(value => !Number.isFinite(value))) throw new Error("vector must have the space dimension and finite values"); const leave=this.enter(); try { return await locked(tableName(space), async () => { let q = (await this.table(space)).vectorSearch(vector); const where=filterSql(filter); if (where) q = q.where(where); return await stableSearch(q, limit, "_distance", true, signal); }); } finally { leave(); } }
+  async textSearch(space: LanceSpace, query: string, limit: number, filter?: Record<string, string>, signal?: AbortSignal): Promise<StoredRow[]> { validateSpace(space); const leave=this.enter(); try { return await locked(tableName(space), async () => { const t = await this.table(space); await this.ensureTextIndex(t, space); let search = t.query().fullTextSearch(query); const where = filterSql(filter); if (where) search = search.where(where); return await stableSearch(search, limit, "_score", false, signal); }); } finally { leave(); } }
   async deleteRevision(space: LanceSpace, revisionId: string): Promise<void> { validateSpace(space); const leave=this.enter(); try { await locked(tableName(space), async () => { await (await this.table(space)).delete("revisionId = '" + revisionId.replaceAll("'", "''") + "'"); }); } finally { leave(); } }
   async deleteProject(space: LanceSpace, projectId: string): Promise<void> { validateSpace(space); const leave=this.enter(); try { await locked(tableName(space), async () => { await (await this.table(space)).delete("projectId = '" + projectId.replaceAll("'", "''") + "'"); }); } finally { leave(); } }
   async deleteSpace(space: LanceSpace): Promise<void> { validateSpace(space); const leave=this.enter(); try { await locked(tableName(space), async () => { if ((await this.db.tableNames()).includes(tableName(space))) await this.db.dropTable(tableName(space)); this.readyTextIndexes.delete(tableName(space)); }); } finally { leave(); } }

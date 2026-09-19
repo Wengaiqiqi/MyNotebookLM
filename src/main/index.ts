@@ -12,8 +12,7 @@ import { registerVectorHandlers } from "./ipc/register-vector-handlers";
 import { registerChatHandlers } from "./ipc/register-chat-handlers";
 import { registerNoteHandlers } from "./ipc/register-note-handlers";
 import { registerTransformationHandlers } from "./ipc/register-transformation-handlers";
-import { ChatService, recoverInterruptedStreams, type RetrievableChunk } from "./chat/chat-service";
-import { MAX_CITED_CHUNKS } from "./chat/context-builder";
+import { ChatService, recoverInterruptedStreams, type RetrievableChunk, type RetrievalResult } from "./chat/chat-service";
 import { CitationOpener } from "./chat/citation-opener";
 import { ModelService } from "./models/model-service";
 import { getAppPaths } from "./platform/paths";
@@ -361,26 +360,25 @@ app.whenReady().then(async () => {
     // Resolve the immutable route snapshot per turn so route changes apply live.
     router: modelRouter,
     providerFactory,
-    retrieval: async ({ projectId, question }) => {
-      const result = await retrieval.search({ projectId, query: question, limit: MAX_CITED_CHUNKS });
+    retrieval: async ({ projectId, question, evidenceTokenBudget, signal }) => {
+      const result = await retrieval.searchForChat({ projectId, query: question, evidenceTokenBudget: evidenceTokenBudget ?? 8_192, ...(signal ? { signal } : {}) });
       if (!result.ok) throw new Error(result.error.code);
-      const rows = result.value as Array<{ chunkId: string; text: string; locator: Record<string, unknown> }>;
-      const lookups = rows.map((hit) => {
-        const row = appDatabase?.connection.prepare(
-          "SELECT s.id AS source_id, s.display_name, s.kind FROM source_chunks sc JOIN source_revisions sr ON sr.id = sc.revision_id JOIN sources s ON s.id = sr.source_id WHERE sc.id = ?"
-        ).get(hit.chunkId) as { source_id?: string; display_name?: string; kind?: string } | undefined;
-        return { hit, row };
-      });
-      return lookups.map(({ hit, row }, index): RetrievableChunk => ({
+      const rows = result.value as Array<{ chunkId: string; text: string; locator: Record<string, unknown>; sourceId?: string; sourceDisplayName?: string; sourceKind?: string; revisionId?: string; contentHash?: string }>;
+      const chunks = rows.map((hit, index): RetrievableChunk => ({
         label: "S" + (index + 1),
         chunkId: hit.chunkId,
-        sourceId: row?.source_id ?? "",
-        sourceDisplayName: row?.display_name ?? "",
-        sourceKind: row?.kind ?? "",
+        sourceId: hit.sourceId ?? "",
+        ...(hit.revisionId ? { revisionId: hit.revisionId } : {}),
+        ...(hit.contentHash ? { contentHash: hit.contentHash } : {}),
+        sourceDisplayName: hit.sourceDisplayName ?? "",
+        sourceKind: hit.sourceKind ?? "",
         locator: hit.locator,
         locatorSummary: JSON.stringify(hit.locator),
         text: hit.text
       }));
+      const retrievalResult = chunks as RetrievalResult;
+      if (result.diagnostics) retrievalResult.diagnostics = result.diagnostics;
+      return retrievalResult;
     }
   });
   cleanupChatHandlers = registerChatHandlers({

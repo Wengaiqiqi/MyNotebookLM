@@ -7,6 +7,8 @@ export type RetrievedCitation = {
   label: string;
   chunkId: string;
   sourceId: string;
+  revisionId?: string;
+  contentHash?: string;
   sourceDisplayName: string;
   sourceKind: string;
   locator: Record<string, unknown>;
@@ -22,61 +24,38 @@ export type ParsedCitations = {
   content: string;
 };
 
-const MARKER_RE = /\[S(\d{1,2})\]/g;
+const MARKER_RE = /\[S(\d{1,16})\]/g;
 type Region = CitationRegion & { start: number };
 
 /** Split answer into code / non-code regions; [S#] markers only count in "text". */
 function splitCodeRegions(text: string): Region[] {
   const regions: Region[] = [];
-  let buf = "";
-  let mode: "text" | "inline" | "fence" = "text";
-  const flush = () => {
-    if (!buf) return;
-    regions.push({ type: mode === "text" ? "text" : "code", text: buf, start: bufStart });
-    buf = "";
-  };
-  let bufStart = 0;
+  let plainStart = 0;
   let i = 0;
   while (i < text.length) {
-    const ch = text[i];
-    if (ch === "`") {
-      if (mode === "text" && text.startsWith("```", i) && (i === 0 || text[i - 1] === "\n")) {
-        flush();
-        mode = "fence";
-        const closeIdx = text.indexOf("\n```", i + 3);
-        if (closeIdx === -1) {
-          buf = text.slice(i);
-          bufStart = i;
-          flush();
-          return regions;
-        }
-        buf = text.slice(i, closeIdx + 4);
-        bufStart = i;
-        flush();
-        i = closeIdx + 4;
-        mode = "text";
-        continue;
-      }
-      if (mode === "text") {
-        flush();
-        mode = "inline";
-        i++;
-        bufStart = i;
-        continue;
-      }
-      if (mode === "inline") {
-        flush();
-        mode = "text";
-        i++;
-        bufStart = i;
-        continue;
-      }
-      // Backtick inside a fenced block is literal content.
+    const lineStart = i === 0 || text[i - 1] === "\n";
+    const fence = lineStart ? /^ {0,3}(`{3,}|~{3,})[^\n]*(?:\n|$)/.exec(text.slice(i)) : null;
+    const inline = !fence && text[i] === "`" ? /^`+/.exec(text.slice(i)) : null;
+    if (!fence && !inline) { i++; continue; }
+    let end = text.length;
+    if (fence) {
+      const delimiter = fence[1]!;
+      const closing = new RegExp("^ {0,3}" + delimiter[0] + "{" + delimiter.length + ",}[ \t]*\r?$", "gm");
+      closing.lastIndex = i + fence[0].length;
+      const match = closing.exec(text);
+      if (match) end = match.index + match[0].length;
+    } else {
+      const delimiter = inline![0];
+      const runs = /`+/g;
+      runs.lastIndex = i + delimiter.length;
+      let match: RegExpExecArray | null;
+      while ((match = runs.exec(text))) { if (match[0].length === delimiter.length) { end = match.index + match[0].length; break; } }
     }
-    buf += ch;
-    i++;
+    if (plainStart < i) regions.push({ type: "text", text: text.slice(plainStart, i), start: plainStart });
+    regions.push({ type: "code", text: text.slice(i, end), start: i });
+    plainStart = i = end;
   }
-  flush();
+  if (plainStart < text.length) regions.push({ type: "text", text: text.slice(plainStart), start: plainStart });
   return regions;
 }
 
@@ -84,8 +63,12 @@ function findMarkers(text: string): { valid: ParsedCitation[]; invalid: boolean 
   const valid: ParsedCitation[] = [];
   let invalid = false;
   const regions = splitCodeRegions(text);
+  const tail = regions.at(-1);
+  // A truncated prose marker may be completed by the next request. Treat it
+  // as uncertain evidence, not as proof that the answer has no citations.
+  if (tail?.type === "text" && /\[(?:S[0-9]{0,16})?$/.test(tail.text)) invalid = true;
   // Loose shape used only for diagnostics: bracketed S+digits or bare digits.
-  const LOOSE_RE = /\[[Ss]?[ \t]*-?[ \t]*\d{1,3}(?:[ \t]*-[ \t]*\d{1,3})?[ \t]*\]/g;
+  const LOOSE_RE = /\[[Ss]?[ \t]*-?[ \t]*\d{1,16}(?:[ \t]*-[ \t]*\d{1,16})?[ \t]*\]/g;
   for (let idx = 0; idx < regions.length; idx++) {
     const region = regions[idx]!;
     if (region.type !== "text") continue;
@@ -94,10 +77,10 @@ function findMarkers(text: string): { valid: ParsedCitation[]; invalid: boolean 
     while ((m = MARKER_RE.exec(region.text)) !== null) {
       const n = Number(m[1]);
       const start = region.start + m.index;
-      if (n >= 1 && n <= 99) {
+      if (Number.isSafeInteger(n) && n >= 1 && m[1] === String(n)) {
         valid.push({ label: `S${n}`, start, end: start + m[0].length });
       } else {
-        // Well-formed but outside the supported two-digit label range.
+        // Well-formed but outside the safe positive integer label range.
         invalid = true;
       }
     }
@@ -123,8 +106,17 @@ export function finalizeCitations(text: string, retrievals: Record<string, Retri
   return { citations, hasInvalidCitations: hasInvalid, content: text };
 }
 
+/** Only prose citation markers are rewritten; offsets preserve code verbatim. */
+export function neutralizeHistoricalCitations(text: string): string {
+  const markers = findMarkers(text).valid;
+  for (const marker of markers.reverse()) {
+    text = text.slice(0, marker.start) + "[previous citation]" + text.slice(marker.end);
+  }
+  return text;
+}
+
 function trailingHoldLength(text: string): number {
-  const m = /\[[Ss]?[0-9]{0,2}\]?$/.exec(text);
+  const m = /\[[Ss]?[0-9]{0,16}\]?$/.exec(text);
   return m ? m[0].length : 0;
 }
 

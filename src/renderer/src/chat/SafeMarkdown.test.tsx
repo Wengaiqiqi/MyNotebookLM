@@ -195,7 +195,7 @@ describe("SafeMarkdown sanitization", () => {
     expect(container.querySelector("pre .katex")).toBeNull();
   });
 
-  it("shows one canonical citation target for fragments from the same DOCX table", async () => {
+  it("keeps separate citation targets for distinct fragments of the same DOCX table", async () => {
     const table = (label: string, sheet: string, quote: string): CitationDto => citationSchema.parse({
       ...baseCitation,
       id: `citation-${label}`,
@@ -217,10 +217,10 @@ describe("SafeMarkdown sanitization", () => {
       <SafeMarkdown text="表1 [S5] 补充 [S1]；表2 [S6] 补充 [S4]" citations={citations} onCitationOpen={(citation) => opened.push(citation.id)} />
     );
     const buttons = [...container.querySelectorAll<HTMLButtonElement>("button.citation-chip")];
-    expect(buttons.map((button) => button.textContent)).toEqual(["[S1]", "[S1]", "[S4]", "[S4]"]);
+    expect(buttons.map((button) => button.textContent)).toEqual(["[S5]", "[S1]", "[S6]", "[S4]"]);
     buttons[0]!.click();
     buttons[1]!.click();
-    expect(opened).toEqual(["citation-S5", "citation-S5"]);
+    expect(opened).toEqual(["citation-S5", "citation-S1"]);
   });
 });
 

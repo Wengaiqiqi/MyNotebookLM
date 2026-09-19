@@ -1,3 +1,4 @@
+import { Buffer } from "node:buffer";
 import { classifyProviderError, type ProviderFailure } from "./provider-errors";
 
 const DEFAULT_TIMEOUT_MS = 30_000;
@@ -5,6 +6,19 @@ const DEFAULT_TIMEOUT_MS = 30_000;
  *  only fires when no bytes arrive at all (idle), not on total duration. */
 const DEFAULT_IDLE_TIMEOUT_MS = 120_000;
 const DEFAULT_MAX_RESPONSE_BYTES = 1_048_576;
+const MAX_STREAM_RESPONSE_BYTES = 64 * 1024 * 1024;
+/** Single SSE/NDJSON record ceiling; an unterminated record must not grow without bound. */
+const MAX_EVENT_BYTES = 1_048_576;
+const ERROR_BODY_LIMIT_BYTES = 16 * 1024;
+const ERROR_BODY_TOTAL_TIMEOUT_MS = 2_000;
+// Long enough for a body that arrives just after the headers on a slow link
+// (25ms dropped real context-limit messages), short enough that a hanging
+// body never delays the HTTP classification for long.
+const ERROR_BODY_READ_TIMEOUT_MS = 250;
+
+export function responseByteBudget(outputTokens?: number): number {
+  return Math.min(MAX_STREAM_RESPONSE_BYTES, Math.max(8 * 1024 * 1024, 2 * 1024 * 1024 + Math.max(0, outputTokens ?? 1_024) * 1_024));
+}
 
 export type FetchLike = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
 
@@ -14,11 +28,12 @@ export type HttpClientOptions = Readonly<{
   maxResponseBytes?: number;
 }>;
 
-export type HttpRequestOptions = RequestInit & Readonly<{ signal: AbortSignal }>;
+export type HttpRequestOptions = RequestInit & Readonly<{ signal: AbortSignal; maxResponseBytes?: number }>;
 
 type RequestedResponse = Readonly<{
   response: Response;
   originalSignal: AbortSignal;
+  maxResponseBytes?: number;
 }>;
 
 export class ProviderRequestError extends Error {
@@ -29,6 +44,47 @@ export class ProviderRequestError extends Error {
 }
 
 class ResponseTooLargeError extends Error {}
+
+async function readErrorBody(response: Response, signal: AbortSignal): Promise<string> {
+  if (!response.body) return "";
+  const reader = response.body.getReader();
+  const cancel = (): void => { void reader.cancel().catch(() => undefined); };
+  signal.addEventListener("abort", cancel, { once: true });
+  const decoder = new TextDecoder();
+  let total = 0;
+  let text = "";
+  const deadline = Date.now() + ERROR_BODY_TOTAL_TIMEOUT_MS;
+  try {
+    while (!signal.aborted && total < ERROR_BODY_LIMIT_BYTES) {
+      const remaining = deadline - Date.now();
+      if (remaining <= 0) break;
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      let next: ReadableStreamReadResult<Uint8Array>;
+      try {
+        next = await Promise.race([
+          reader.read(),
+          new Promise<ReadableStreamReadResult<Uint8Array>>((resolve) => {
+            timer = setTimeout(() => resolve({ done: true, value: undefined }), Math.min(ERROR_BODY_READ_TIMEOUT_MS, remaining));
+          })
+        ]);
+      } finally {
+        clearTimeout(timer);
+      }
+      if (next.done) break;
+      const slice = next.value.subarray(0, Math.max(0, ERROR_BODY_LIMIT_BYTES - total));
+      total += slice.byteLength;
+      text += decoder.decode(slice, { stream: total < ERROR_BODY_LIMIT_BYTES });
+      if (slice.byteLength < next.value.byteLength) break;
+    }
+  } catch {
+    return text;
+  } finally {
+    signal.removeEventListener("abort", cancel);
+    void reader.cancel().catch(() => undefined);
+    reader.releaseLock();
+  }
+  return text;
+}
 
 export function joinUrl(baseUrl: string, endpoint: string): string {
   return `${baseUrl.replace(/\/+$/, "")}/${endpoint.replace(/^\/+/, "")}`;
@@ -65,13 +121,16 @@ export class ProviderHttpClient {
       pending += chunk;
       const records = pending.split(/\r?\n\r?\n/);
       pending = records.pop() ?? "";
+      if (Buffer.byteLength(pending, "utf8") > MAX_EVENT_BYTES) throw new ProviderRequestError(classifyProviderError({ responseTooLarge: true }));
       for (const record of records) {
+        if (Buffer.byteLength(record, "utf8") > MAX_EVENT_BYTES) throw new ProviderRequestError(classifyProviderError({ responseTooLarge: true }));
         const data = record.split(/\r?\n/).filter((line) => line.startsWith("data:")).map((line) => line.slice(5).trim()).join("\n");
         if (!data || data === "[DONE]") continue;
         yield this.parseRecord<T>(data);
       }
     }
     if (pending.trim()) {
+      if (Buffer.byteLength(pending, "utf8") > MAX_EVENT_BYTES) throw new ProviderRequestError(classifyProviderError({ responseTooLarge: true }));
       const data = pending.split(/\r?\n/).filter((line) => line.startsWith("data:")).map((line) => line.slice(5).trim()).join("\n");
       if (data && data !== "[DONE]") yield this.parseRecord<T>(data);
     }
@@ -84,9 +143,16 @@ export class ProviderHttpClient {
       pending += chunk;
       const lines = pending.split(/\r?\n/);
       pending = lines.pop() ?? "";
-      for (const line of lines) if (line.trim()) yield this.parseRecord<T>(line);
+      if (Buffer.byteLength(pending, "utf8") > MAX_EVENT_BYTES) throw new ProviderRequestError(classifyProviderError({ responseTooLarge: true }));
+      for (const line of lines) {
+        if (Buffer.byteLength(line, "utf8") > MAX_EVENT_BYTES) throw new ProviderRequestError(classifyProviderError({ responseTooLarge: true }));
+        if (line.trim()) yield this.parseRecord<T>(line);
+      }
     }
-    if (pending.trim()) yield this.parseRecord<T>(pending);
+    if (pending.trim()) {
+      if (Buffer.byteLength(pending, "utf8") > MAX_EVENT_BYTES) throw new ProviderRequestError(classifyProviderError({ responseTooLarge: true }));
+      yield this.parseRecord<T>(pending);
+    }
   }
 
   private async request(baseUrl: string, endpoint: string, options: HttpRequestOptions): Promise<RequestedResponse> {
@@ -100,14 +166,18 @@ export class ProviderHttpClient {
     const propagateCancel = () => controller.abort();
     if (options.signal.aborted) propagateCancel();
     else options.signal.addEventListener("abort", propagateCancel);
-    const { signal: _callerSignal, ...init } = options;
+    const { signal: _callerSignal, maxResponseBytes, ...init } = options;
     try {
       const response = await this.fetchImpl(joinUrl(baseUrl, endpoint), { ...init, signal: controller.signal });
       if (!response.ok) {
-        void response.body?.cancel().catch(() => undefined);
-        throw new ProviderRequestError(classifyProviderError({ status: response.status, headers: response.headers }));
+        // Chunked/error responses commonly omit Content-Length. The reader is
+        // already bounded to 16 KiB, so always inspect the body before classifying.
+        const body = await readErrorBody(response, options.signal);
+        if (options.signal.aborted) throw new ProviderRequestError(classifyProviderError({ cancelled: true }));
+        if (!body) void response.body?.cancel().catch(() => undefined);
+        throw new ProviderRequestError(classifyProviderError({ status: response.status, headers: response.headers, body }));
       }
-      return { response, originalSignal: options.signal };
+      return { response, originalSignal: options.signal, ...(maxResponseBytes === undefined ? {} : { maxResponseBytes }) };
     } catch (reason) {
       if (reason instanceof ProviderRequestError) throw reason;
       if (options.signal.aborted) throw new ProviderRequestError(classifyProviderError({ cancelled: true }));
@@ -157,7 +227,7 @@ export class ProviderHttpClient {
         const { done, value } = await readIdle();
         if (done) break;
         total += value.byteLength;
-        if (total > this.maxResponseBytes) throw new ResponseTooLargeError();
+        if (total > (requested.maxResponseBytes ?? this.maxResponseBytes)) throw new ResponseTooLargeError();
         const text = decoder.decode(value, { stream: true });
         if (text) yield text;
       }

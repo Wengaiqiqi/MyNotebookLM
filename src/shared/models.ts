@@ -9,8 +9,24 @@ export const providerKindSchema = z.enum([
   "local"
 ]);
 
+const positiveTokenOverrideSchema = z.number().int().positive().max(2_147_483_647);
+
 export const modelCapabilitySchema = z.enum(["generation", "embedding"]);
 export const capabilityEvidenceSchema = z.enum(["authoritative", "probe-required"]);
+
+export const generationLimitsSchema = z.object({
+  contextWindowTokens: positiveTokenOverrideSchema.optional(),
+  inputTokenLimit: positiveTokenOverrideSchema.optional(),
+  maxOutputTokens: positiveTokenOverrideSchema.optional(),
+  windowKind: z.enum(["shared", "input-only", "unknown"]),
+  source: z.enum(["provider", "verified"]),
+  observedAt: z.iso.datetime(),
+  identity: z.object({
+    provider: providerKindSchema,
+    baseUrl: z.string().trim().max(2_048),
+    modelId: z.string().trim().min(1).max(200)
+  }).strict()
+}).strict();
 
 export const modelTaskKindSchema = z.enum([
   "chat",
@@ -69,7 +85,10 @@ export const modelProfileInputSchema = modelProfileFieldsSchema.superRefine(
 
 export const modelProfileDtoSchema = modelProfileFieldsSchema.extend({
   createdAt: z.iso.datetime(),
-  updatedAt: z.iso.datetime()
+  updatedAt: z.iso.datetime(),
+  contextTokensOverride: positiveTokenOverrideSchema.nullable().optional(),
+  maxOutputTokensOverride: positiveTokenOverrideSchema.nullable().optional(),
+  generationLimits: generationLimitsSchema.nullable().optional()
 }).superRefine(validateProviderCapability);
 
 export const modelRouteDtoSchema = z.object({
@@ -111,7 +130,8 @@ export const modelDescriptorSchema = z.object({
   id: z.string().trim().min(1).max(200),
   displayName: z.string().trim().min(1).max(200),
   capabilities: modelCapabilitySchema.array(),
-  capabilityEvidence: capabilityEvidenceSchema
+  capabilityEvidence: capabilityEvidenceSchema,
+  generationLimits: generationLimitsSchema.optional()
 }).strict();
 
 const apiKeySchema = z.string().max(16_384).refine(
@@ -197,6 +217,15 @@ export const testModelInputSchema = z.object({
 
 export const saveModelProfileInputSchema = testModelInputSchema;
 
+export const updateGenerationSettingsInputSchema = z.object({
+  profileId: z.uuid(),
+  contextTokensOverride: positiveTokenOverrideSchema.nullable().optional(),
+  maxOutputTokensOverride: positiveTokenOverrideSchema.nullable().optional()
+}).strict().refine(
+  (input) => input.contextTokensOverride !== undefined || input.maxOutputTokensOverride !== undefined,
+  "At least one generation setting must be provided"
+);
+
 export const deleteModelProfileInputSchema = z.object({ id: z.uuid() }).strict();
 
 export const credentialInputSchema = z.object({
@@ -221,12 +250,14 @@ export const modelProfileListDtoSchema = z.object({
 export const modelTestResultDtoSchema = z.object({
   modelId: z.string().trim().min(1).max(200),
   capability: modelCapabilitySchema,
-  verifiedBy: z.enum(["discovery", "probe"])
+  verifiedBy: z.enum(["discovery", "probe"]),
+  generationLimits: generationLimitsSchema.optional()
 }).strict();
 
 export type ProviderKind = z.infer<typeof providerKindSchema>;
 export type ModelCapability = z.infer<typeof modelCapabilitySchema>;
 export type CapabilityEvidence = z.infer<typeof capabilityEvidenceSchema>;
+export type GenerationLimits = z.infer<typeof generationLimitsSchema>;
 export type ModelTaskKind = z.infer<typeof modelTaskKindSchema>;
 export type EmbeddingMetadata = Readonly<z.infer<typeof embeddingMetadataSchema>>;
 export type ModelProfileInput = z.infer<typeof modelProfileInputSchema>;
@@ -240,6 +271,7 @@ export type ModelDescriptorDto = z.infer<typeof modelDescriptorSchema>;
 export type DiscoverModelsInput = z.infer<typeof discoverModelsInputSchema>;
 export type TestModelInput = z.infer<typeof testModelInputSchema>;
 export type SaveModelProfileInput = z.infer<typeof saveModelProfileInputSchema>;
+export type UpdateGenerationSettingsInput = z.infer<typeof updateGenerationSettingsInputSchema>;
 export type DeleteModelProfileInput = z.infer<typeof deleteModelProfileInputSchema>;
 export type CredentialInput = z.infer<typeof credentialInputSchema>;
 export type CredentialProfileInput = z.infer<typeof credentialProfileInputSchema>;

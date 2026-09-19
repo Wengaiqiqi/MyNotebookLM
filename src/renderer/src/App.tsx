@@ -25,6 +25,8 @@ export default function App() {
   const [busy, setBusy] = useState(false);
   const [dialog, setDialog] = useState<ProjectDialogState>();
   const [section, setSection] = useState<Section>("research");
+  // Model whose advanced configuration Settings should open on request.
+  const [settingsModelId, setSettingsModelId] = useState<string | null>(null);
   const projects = useProjects(t);
 
   const refreshRoutes = useCallback(async () => {
@@ -119,10 +121,10 @@ export default function App() {
               onboarding={view === "onboarding"}
               language={language}
               theme={theme}
-              onSelect={(id) => { projects.select(id); setSettingsOpen(false); }}
+              onSelect={(id) => { projects.select(id); setSettingsOpen(false); setSettingsModelId(null); }}
               onCreate={() => setDialog({ kind: "create" })}
               onMenuAction={(action, project) => void handleMenuAction(action, project)}
-              onOpenSettings={() => setSettingsOpen(true)}
+              onOpenSettings={() => { setSettingsModelId(null); setSettingsOpen(true); }}
               settingsActive={settingsOpen}
               onLanguage={selectLanguage}
               onTheme={selectTheme}
@@ -160,10 +162,11 @@ export default function App() {
                   projectId={selectedProject?.id}
                   language={language}
                   theme={theme}
+                  {...(settingsModelId ? { initialModelProfileId: settingsModelId } : {})}
                   onLanguage={selectLanguage}
                   onTheme={selectTheme}
                   onRoutesChanged={() => void refreshRoutes()}
-                  onClose={() => setSettingsOpen(false)}
+                   onClose={() => { setSettingsOpen(false); setSettingsModelId(null); }}
                 />
               ) : selectedProject && !selectedProject.archived && selectedProject.status === "active" ? (
                 <Workspace
@@ -172,7 +175,8 @@ export default function App() {
                   section={section}
                   onSectionChange={setSection}
                   routes={routes}
-                  onOpenSettings={() => setSettingsOpen(true)}
+                  onOpenSettings={() => { setSettingsModelId(null); setSettingsOpen(true); }}
+                  onOpenModelSettings={(profileId) => { setSettingsModelId(profileId); setSettingsOpen(true); }}
                 />
               ) : (
                 <div className="workspace">

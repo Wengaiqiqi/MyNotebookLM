@@ -68,6 +68,14 @@ describe("transparent generation fallback", () => {
     expect(events.find((event) => event.type === "routed-complete")).toMatchObject({ profile: { profileId: FALLBACK_ID, model: "fallback" } });
   });
 
+  it("does not start the provider if cancelled during request preparation", async () => {
+    let called = false;
+    const provider = providerWith(async function* () { called = true; yield { type: "text-delta", text: "unexpected" }; });
+    const controller = new AbortController();
+    await expect(collect(generateRouted(deps({ [PRIMARY_ID]: provider, [FALLBACK_ID]: provider }), "chat", { projectId: PROJECT_ID, operationId: OPERATION_ID, model: "ignored", messages: [], prepareRequest: async () => { controller.abort(); return { messages: [] }; } }, undefined, controller.signal))).rejects.toMatchObject({ error: { code: "CANCELLED" } });
+    expect(called).toBe(false);
+  });
+
   it("falls back when a provider closes cleanly without visible text", async () => {
     const primary = providerWith(async function* () {
       yield { type: "usage", outputTokens: 12 };

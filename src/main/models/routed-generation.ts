@@ -5,11 +5,16 @@ import type { GenerateRequest, GenerationEvent, ModelProvider } from "./provider
 import { ModelRouter, type ModelProfileSnapshot } from "./model-router";
 import { ProviderRequestError } from "./http-client";
 import { classifyProviderError } from "./provider-errors";
+import { normalizeFinishReason } from "./finish-reason";
 
 export type RoutedGenerateRequest = GenerateRequest & Readonly<{
   /** Main-process-only routing context; never forwarded to a provider. */
   projectId: string;
   operationId: string;
+  /** Rebuild the model-dependent request before each actual provider attempt. */
+  prepareRequest?: (profile: ModelProfileDto) => Promise<Pick<GenerateRequest, "messages" | "maxTokens">> | Pick<GenerateRequest, "messages" | "maxTokens">;
+  /** Continuation requests must stay on the model that produced the existing answer. */
+  allowFallback?: boolean;
 }>;
 
 export type RoutedProfile = Readonly<{
@@ -95,7 +100,8 @@ export async function* generateRouted(
 
   const clock = deps.clock ?? (() => new Date());
   const createId = deps.id ?? (() => crypto.randomUUID());
-  const profiles = deps.router.resolve(taskKind, overrideProfileId);
+  const resolvedProfiles = deps.router.resolve(taskKind, overrideProfileId);
+  const profiles = request.allowFallback === false ? resolvedProfiles.slice(0, 1) : resolvedProfiles;
   if (profiles.length === 0) throw new RoutedGenerationError({ code: "VALIDATION", messageKey: "errors.generationProfileMissing", recoverable: false });
 
   const insert = deps.db.prepare(`
@@ -138,9 +144,13 @@ export async function* generateRouted(
         throw new RoutedGenerationError({ code: "CANCELLED", messageKey: "errors.cancelled", recoverable: false });
       }
       // Deliberately destructure away main-only routing context at this boundary.
-      const { projectId: _projectId, operationId: _operationId, ...providerInput } = request;
+      const prepared = request.prepareRequest ? await request.prepareRequest(profile) : request;
+      if (signal.aborted) throw new RoutedGenerationError({ code: "CANCELLED", messageKey: "errors.cancelled", recoverable: false });
+      const { projectId: _projectId, operationId: _operationId, prepareRequest: _prepareRequest, allowFallback: _allowFallback, ...providerInput } = { ...request, ...prepared };
       void _projectId;
       void _operationId;
+      void _prepareRequest;
+      void _allowFallback;
       const providerRequest = { ...providerInput, model: profile.modelId };
       for await (const event of deps.providerFactory(profile).generate(providerRequest, signal)) {
         if (signal.aborted) {
@@ -161,9 +171,20 @@ export async function* generateRouted(
         throw new RoutedGenerationError({ code: "CANCELLED", messageKey: "errors.cancelled", recoverable: false });
       }
       if (!sawDone || !emittedText) {
-        const incomplete = { code: "PROVIDER", messageKey: "errors.providerIncomplete", recoverable: true } satisfies AppErrorDto;
+        // A provider that reports an explicit output-limit stop with no visible
+        // text (for example all budget spent on reasoning) is an output-limit
+        // outcome, not an incomplete stream, and must not silently retry on a
+        // bigger allowance or fall back to another model.
+        const limitKind = sawDone ? normalizeFinishReason(pendingDone?.finishReason) : "other";
+        const emptyLimit = sawDone && limitKind === "length" && !emittedText;
+        const incomplete = emptyLimit
+          ? { code: "VALIDATION", messageKey: "errors.outputLimitEmpty", recoverable: true } satisfies AppErrorDto
+          : { code: "PROVIDER", messageKey: "errors.providerIncomplete", recoverable: true } satisfies AppErrorDto;
+        // Surface the terminal reason so the caller records finishKind=length
+        // instead of a generic "other" failure.
+        if (emptyLimit && pendingDone) yield pendingDone;
         completeAttempt("failed", incomplete.code);
-        throw new ProviderRequestError({ error: incomplete, fallbackEligible: true });
+        throw new ProviderRequestError({ error: incomplete, fallbackEligible: !emptyLimit });
       }
       completeAttempt("completed", null);
       yield pendingDone!;

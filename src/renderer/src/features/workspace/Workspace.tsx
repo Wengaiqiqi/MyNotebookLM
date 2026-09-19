@@ -11,12 +11,13 @@ import { useTaskFeed } from "../../hooks/useTaskFeed";
 
 export type Section = "research" | "notes" | "studio";
 
-export default function Workspace({ projectId, section, onSectionChange, routes, onOpenSettings, onSourcesChanged }: {
+export default function Workspace({ projectId, section, onSectionChange, routes, onOpenSettings, onOpenModelSettings, onSourcesChanged }: {
   projectId: string;
   section: Section;
   onSectionChange: (section: Section) => void;
   routes: DefaultModelRoutesDto;
   onOpenSettings: () => void;
+  onOpenModelSettings: (profileId: string | null) => void;
   onSourcesChanged?: () => void;
 }) {
   const { t } = useTranslation();
@@ -57,6 +58,7 @@ export default function Workspace({ projectId, section, onSectionChange, routes,
             generationProfileId={routes.generationProfileId}
             sources={sources}
             onOpenSettings={onOpenSettings}
+            onOpenModelSettings={onOpenModelSettings}
             onImport={() => setSourcesVersion((value) => value + 1)}
           />
         </div>

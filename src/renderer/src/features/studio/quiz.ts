@@ -133,7 +133,6 @@ export function parseQuiz(content: string): QuizQuestion[] {
         current = {
           question: qText,
           options: [],
-          correctAnswer: undefined,
           explanation: "",
           rawAnswer: ""
         };
@@ -220,7 +219,7 @@ export function parseQuiz(content: string): QuizQuestion[] {
         id: String(index),
         question: q,
         options: item.options,
-        correctAnswer: corr,
+        ...(corr ? { correctAnswer: corr } : {}),
         explanation: exp,
         answer: unifiedAnswer
       };

@@ -1,4 +1,4 @@
-import { ProviderHttpClient, ProviderRequestError } from "./http-client";
+import { ProviderHttpClient, ProviderRequestError, responseByteBudget } from "./http-client";
 import { classifyProviderError } from "./provider-errors";
 import { isRecord, malformedResponse, optionalFiniteNumber } from "./provider-guards";
 import type { ModelCapability } from "../../shared/models";
@@ -50,6 +50,18 @@ export class GeminiProvider implements ModelProvider {
       }
       if (!model.supportedGenerationMethods.every((method) => typeof method === "string")) throw malformedResponse();
       if (model.displayName !== undefined && typeof model.displayName !== "string") throw malformedResponse();
+      const inputTokenLimit = model.inputTokenLimit === undefined
+        ? undefined
+        : optionalFiniteNumber(model.inputTokenLimit);
+      const maxOutputTokens = model.outputTokenLimit === undefined
+        ? undefined
+        : optionalFiniteNumber(model.outputTokenLimit);
+      if ((model.inputTokenLimit !== undefined && inputTokenLimit === undefined)
+        || (model.outputTokenLimit !== undefined && maxOutputTokens === undefined)
+        || (inputTokenLimit !== undefined && (!Number.isInteger(inputTokenLimit) || inputTokenLimit <= 0))
+        || (maxOutputTokens !== undefined && (!Number.isInteger(maxOutputTokens) || maxOutputTokens <= 0))) {
+        throw malformedResponse();
+      }
       const capabilities: ModelCapability[] = [];
       if (model.supportedGenerationMethods.includes("generateContent")) capabilities.push("generation");
       if (model.supportedGenerationMethods.includes("embedContent")) capabilities.push("embedding");
@@ -57,7 +69,17 @@ export class GeminiProvider implements ModelProvider {
         id: model.name,
         displayName: model.displayName || model.name,
         capabilities,
-        capabilityEvidence: "authoritative"
+        capabilityEvidence: "authoritative",
+        ...((inputTokenLimit !== undefined || maxOutputTokens !== undefined) ? {
+          generationLimits: {
+            ...(inputTokenLimit === undefined ? {} : { inputTokenLimit }),
+            ...(maxOutputTokens === undefined ? {} : { maxOutputTokens }),
+            windowKind: "input-only" as const,
+            source: "provider" as const,
+            observedAt: new Date().toISOString(),
+            identity: { provider: "gemini" as const, baseUrl: this.baseUrl, modelId: model.name }
+          }
+        } : {})
       });
     }
     return descriptors;
@@ -81,7 +103,7 @@ export class GeminiProvider implements ModelProvider {
     for await (const chunk of this.client.sse<unknown>(
       this.baseUrl,
       `/v1beta/${modelName(request.model)}:streamGenerateContent?alt=sse`,
-      { method: "POST", headers: this.headers(true), body: JSON.stringify(body), signal }
+      { method: "POST", headers: this.headers(true), body: JSON.stringify(body), signal, maxResponseBytes: responseByteBudget(request.maxTokens) }
     )) {
       if (!isRecord(chunk)) throw malformedResponse();
       if (finishReason !== undefined && chunk.candidates !== undefined) {

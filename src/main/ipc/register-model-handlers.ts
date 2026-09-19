@@ -29,7 +29,8 @@ import {
   modelTestResultDtoSchema,
   saveModelProfileInputSchema,
   setDefaultModelRoutesInputSchema,
-  testModelInputSchema
+  testModelInputSchema,
+  updateGenerationSettingsInputSchema
 } from "../../shared/models";
 import {
   appSettingsDtoSchema,
@@ -125,6 +126,11 @@ export function registerModelHandlers(
   ipc.handle(MODEL_CHANNELS.test, (_event, input) =>
     validatedCall(testModelInputSchema, testResultSchema, input, (parsed) =>
       service.test(parsed)
+    )
+  );
+  ipc.handle(MODEL_CHANNELS.updateGenerationSettings, (_event, input) =>
+    validatedCall(updateGenerationSettingsInputSchema, profileResultSchema, input, (parsed) =>
+      service.updateGenerationSettings(parsed)
     )
   );
   ipc.handle(MODEL_CHANNELS.getRoutes, (_event, input) =>

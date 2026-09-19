@@ -83,6 +83,7 @@ describe("createDesktopApi", () => {
       "deleteProfile",
       "discover",
       "test",
+      "updateGenerationSettings",
       "getRoutes",
       "saveRoutes",
       "listRouteAttempts"
@@ -383,6 +384,14 @@ describe("createDesktopApi", () => {
     expect(invoke).toHaveBeenNthCalledWith(8, CHAT_CHANNELS.stop, { projectId: chatProjectId, requestId: chatRequestId });
     expect(invoke).toHaveBeenNthCalledWith(9, CHAT_CHANNELS.regenerate, { requestId: chatRequestId, projectId: chatProjectId, conversationId: chatConversationId, messageId: "assistant-1" });
     expect(invoke).toHaveBeenNthCalledWith(10, CITATION_CHANNELS.open, { projectId: chatProjectId, citationId: "assistant-1:S1:0" });
+  });
+
+  it("routes manual continuation through its request-scoped subscription", async () => {
+    const invoke = vi.fn().mockResolvedValue(ok({ requestId: chatRequestId, assistantMessageId: "assistant-1" }));
+    const api = createDesktopApi({ invoke });
+    api.chat.subscribe(chatRequestId, vi.fn());
+    await api.chat.continue({ requestId: chatRequestId, projectId: chatProjectId, conversationId: chatConversationId, messageId: "assistant-1", expectedRevision: 2 });
+    expect(invoke).toHaveBeenCalledWith(CHAT_CHANNELS.continue, { requestId: chatRequestId, projectId: chatProjectId, conversationId: chatConversationId, messageId: "assistant-1", expectedRevision: 2 });
   });
 
   it.each([

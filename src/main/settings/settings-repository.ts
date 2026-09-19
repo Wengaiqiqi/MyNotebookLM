@@ -2,11 +2,13 @@ import type Database from "better-sqlite3";
 import {
   modelProfileDtoSchema,
   modelProfileInputSchema,
+  generationLimitsSchema,
   modelRouteDtoSchema,
   modelTaskKindSchema,
   type ModelCapability,
   type ModelProfileDto,
   type ModelProfileInput,
+  type GenerationLimits,
   type ModelRouteDto,
   type ModelRouteAttemptDto,
   type ModelTaskKind
@@ -38,6 +40,9 @@ type ProfileRow = {
   enabled: 0 | 1;
   created_at: string;
   updated_at: string;
+  context_tokens_override?: number | null;
+  max_output_tokens_override?: number | null;
+  generation_limits_json?: string | null;
 };
 
 type RouteRow = {
@@ -63,7 +68,22 @@ function toSettings(row: SettingsRow): AppSettingsDto {
   });
 }
 
+function parseGenerationLimits(value: string | null | undefined): GenerationLimits | undefined {
+  if (!value) return undefined;
+  try {
+    const parsed: unknown = JSON.parse(value);
+    const result = generationLimitsSchema.safeParse(parsed);
+    return result.success ? result.data : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 function toProfile(row: ProfileRow): ModelProfileDto {
+  const cachedLimits = parseGenerationLimits(row.generation_limits_json);
+  const generationLimits = cachedLimits?.identity.provider === row.provider
+    && cachedLimits.identity.modelId === row.model_id
+    && cachedLimits.identity.baseUrl.replace(/\/+$/, "") === row.base_url.replace(/\/+$/, "") ? cachedLimits : undefined;
   return modelProfileDtoSchema.parse({
     id: row.id,
     name: row.name,
@@ -73,7 +93,10 @@ function toProfile(row: ProfileRow): ModelProfileDto {
     modelId: row.model_id,
     enabled: row.enabled === 1,
     createdAt: row.created_at,
-    updatedAt: row.updated_at
+    updatedAt: row.updated_at,
+    contextTokensOverride: row.context_tokens_override,
+    maxOutputTokensOverride: row.max_output_tokens_override,
+    ...(generationLimits ? { generationLimits } : {})
   });
 }
 
@@ -86,7 +109,12 @@ function toRoute(row: RouteRow): ModelRouteDto {
 }
 
 export class SettingsRepository {
-  constructor(private readonly db: Database.Database) {}
+  private readonly supportsGenerationColumns: boolean;
+
+  constructor(private readonly db: Database.Database) {
+    const columns = db.pragma("table_info(model_profiles)") as Array<{ name: string }>;
+    this.supportsGenerationColumns = ["context_tokens_override", "max_output_tokens_override", "generation_limits_json"].every((name) => columns.some((column) => column.name === name));
+  }
 
   transaction<T>(work: () => T): T {
     return this.db.transaction(work)();
@@ -141,7 +169,25 @@ export class SettingsRepository {
         throw new Error("Profile capability cannot change while the profile is used by a route");
       }
     }
-    this.db.prepare(`
+    const sql = this.supportsGenerationColumns ? `
+      INSERT INTO model_profiles(id, name, provider, capability, base_url, model_id, enabled)
+      VALUES (@id, @name, @provider, @capability, @baseUrl, @modelId, @enabled)
+      ON CONFLICT(id) DO UPDATE SET
+        name = excluded.name,
+        provider = excluded.provider,
+        capability = excluded.capability,
+        base_url = excluded.base_url,
+        model_id = excluded.model_id,
+        enabled = excluded.enabled,
+        generation_limits_json = CASE
+          WHEN model_profiles.provider <> excluded.provider
+            OR model_profiles.base_url <> excluded.base_url
+            OR model_profiles.model_id <> excluded.model_id
+          THEN NULL
+          ELSE model_profiles.generation_limits_json
+        END,
+        updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+    ` : `
       INSERT INTO model_profiles(id, name, provider, capability, base_url, model_id, enabled)
       VALUES (@id, @name, @provider, @capability, @baseUrl, @modelId, @enabled)
       ON CONFLICT(id) DO UPDATE SET
@@ -152,8 +198,46 @@ export class SettingsRepository {
         model_id = excluded.model_id,
         enabled = excluded.enabled,
         updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
-    `).run({ ...profile, enabled: profile.enabled ? 1 : 0 });
+    `;
+    this.db.prepare(sql).run({ ...profile, enabled: profile.enabled ? 1 : 0 });
     return this.getProfile(profile.id)!;
+  }
+
+  updateGenerationSettings(input: {
+    profileId: string;
+    contextTokensOverride?: number | null;
+    maxOutputTokensOverride?: number | null;
+  }): ModelProfileDto {
+    if (!this.supportsGenerationColumns) throw new Error("Generation settings are unavailable in this database schema");
+    const current = this.getProfile(input.profileId);
+    if (!current) throw new Error("Profile not found");
+    const contextTokensOverride = input.contextTokensOverride === undefined
+      ? current.contextTokensOverride ?? null
+      : input.contextTokensOverride;
+    const maxOutputTokensOverride = input.maxOutputTokensOverride === undefined
+      ? current.maxOutputTokensOverride ?? null
+      : input.maxOutputTokensOverride;
+    this.db.prepare(`
+      UPDATE model_profiles
+      SET context_tokens_override = ?,
+          max_output_tokens_override = ?,
+          updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+      WHERE id = ?
+    `).run(contextTokensOverride, maxOutputTokensOverride, input.profileId);
+    return this.getProfile(input.profileId)!;
+  }
+
+  updateGenerationLimits(profileId: string, limits: GenerationLimits | null): ModelProfileDto {
+    if (!this.supportsGenerationColumns) throw new Error("Generation settings are unavailable in this database schema");
+    if (!this.getProfile(profileId)) throw new Error("Profile not found");
+    const parsed = limits === null ? null : generationLimitsSchema.parse(limits);
+    this.db.prepare(`
+      UPDATE model_profiles
+      SET generation_limits_json = ?,
+          updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+      WHERE id = ?
+    `).run(parsed === null ? null : JSON.stringify(parsed), profileId);
+    return this.getProfile(profileId)!;
   }
 
   deleteProfile(id: string): void {

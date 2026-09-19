@@ -31,6 +31,16 @@ async function requestError(action: () => Promise<unknown>): Promise<ProviderReq
 }
 
 describe("ProviderHttpClient", () => {
+  it("cancels a hanging HTTP error body without waiting for its timeout", async () => {
+    const controller = new AbortController();
+    let waiting!: () => void;
+    const started = new Promise<void>((resolve) => { waiting = resolve; });
+    const client = new ProviderHttpClient(async () => new Response(new ReadableStream({ pull() { waiting(); } }), { status: 400 }));
+    const pending = requestError(() => client.json("https://example.test", "/models", { signal: controller.signal }));
+    await started;
+    controller.abort();
+    expect((await pending).failure.error.code).toBe("CANCELLED");
+  });
   it("joins a normalized base URL with a relative endpoint", () => {
     expect(joinUrl("https://models.example/v1/", "/chat/completions")).toBe(
       "https://models.example/v1/chat/completions"
@@ -170,7 +180,7 @@ describe("ProviderHttpClient", () => {
     }), { status, headers: { "retry-after": "1" } }));
     const result = await Promise.race([
       client.json("https://models.example", "/models", { signal: new AbortController().signal }).catch((error: unknown) => error),
-      new Promise<symbol>((resolve) => setTimeout(() => resolve(Symbol("timed out")), 50))
+      new Promise<symbol>((resolve) => setTimeout(() => resolve(Symbol("timed out")), 1_500))
     ]);
 
     expect(result).toBeInstanceOf(ProviderRequestError);
@@ -209,6 +219,25 @@ describe("ProviderHttpClient", () => {
 
     expect(cancel).toHaveBeenCalledOnce();
     expect(error.failure.error.code).toBe("PROVIDER");
+  });
+
+  it("rejects an oversized terminated SSE or NDJSON record", async () => {
+    const payload = "x".repeat(1_048_576);
+    const ndjsonClient = new ProviderHttpClient(async () => response(JSON.stringify({ payload }) + "\n", {
+      headers: { "content-type": "application/x-ndjson" }
+    }));
+    const ndjsonError = await requestError(async () => {
+      for await (const _record of ndjsonClient.ndjson("https://models.example", "/stream", { signal: new AbortController().signal })) { /* consume */ }
+    });
+    expect(ndjsonError.failure.error.messageKey).toBe("errors.responseTooLarge");
+
+    const sseClient = new ProviderHttpClient(async () => response(`data: ${JSON.stringify({ payload })}\n\n`, {
+      headers: { "content-type": "text/event-stream" }
+    }));
+    const sseError = await requestError(async () => {
+      for await (const _event of sseClient.sse("https://models.example", "/stream", { signal: new AbortController().signal })) { /* consume */ }
+    });
+    expect(sseError.failure.error.messageKey).toBe("errors.responseTooLarge");
   });
 
   it("cancels a response when parsing stops consumption early", async () => {

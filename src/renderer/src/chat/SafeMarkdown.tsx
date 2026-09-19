@@ -118,9 +118,8 @@ type Piece = string | CitationDto;
 export function canonicalizeCitationTargets(citations: CitationDto[]): { byLabel: Map<string, CitationDto>; unique: CitationDto[] } {
   const groups = new Map<string, { labels: Set<string>; representative: CitationDto; order: number }>();
   for (const citation of citations) {
-    const table = citation.sourceKind.toLowerCase() === "docx" && citation.locator.kind === "cell"
-      ? `${citation.sourceId}:${String(citation.locator.sheet).trim().toLowerCase()}`
-      : `label:${citation.label}`;
+    // Different parts of one table remain different evidence targets.
+    const table = `label:${citation.label}`;
     const group = groups.get(table);
     if (!group) {
       groups.set(table, { labels: new Set([citation.label]), representative: citation, order: Number(citation.label.slice(1)) });
@@ -141,7 +140,7 @@ export function canonicalizeCitationTargets(citations: CitationDto[]): { byLabel
 
 function citationPieces(value: string, citations: Map<string, CitationDto>): Piece[] {
   const pieces: Piece[] = [];
-  const re = /\[S(\d{1,2})\]/g;
+  const re = /\[S(\d{1,16})\]/g;
   let cursor = 0;
   let match: RegExpExecArray | null;
   while ((match = re.exec(value)) !== null) {

@@ -2,6 +2,11 @@ import { describe, expect, it } from "vitest";
 import { classifyProviderError } from "./provider-errors";
 
 describe("classifyProviderError", () => {
+  it("recognizes output parameter dialects and drops arbitrary error details", () => {
+    const result = classifyProviderError({ status: 400, body: "max_completion_tokens exceeds maximum", details: { limitTokens: 4096, requestedTokens: -1, secret: "private", providerCode: "arbitrary secret" } });
+    expect(result).toMatchObject({ fallbackEligible: false, error: { messageKey: "errors.generationOutputRejected", details: { limitTokens: 4096, status: 400 } } });
+    expect(Object.keys(result.error.details!)).toEqual(["limitTokens", "status"]);
+  });
   it.each([
     [401, "AUTH", false],
     [403, "AUTH", false],
@@ -67,7 +72,7 @@ describe("classifyProviderError", () => {
 
     expect(oversized).toMatchObject({
       fallbackEligible: false,
-      error: { code: "PROVIDER", messageKey: "errors.provider" }
+      error: { code: "PROVIDER", messageKey: "errors.responseTooLarge" }
     });
   });
 });

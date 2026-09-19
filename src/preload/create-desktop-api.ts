@@ -36,6 +36,7 @@ import {
   chatCreateConversationInputSchema,
   chatListConversationsInputSchema,
   chatListMessagesInputSchema,
+  chatContinueInputSchema,
   chatRegenerateInputSchema,
   chatRequestIdInputSchema,
   chatRequestEventSchemas,
@@ -66,7 +67,8 @@ import {
   modelTestResultDtoSchema,
   saveModelProfileInputSchema,
   setDefaultModelRoutesInputSchema,
-  testModelInputSchema
+  testModelInputSchema,
+  updateGenerationSettingsInputSchema
 } from "../shared/models";
 import {
   createProjectInputSchema,
@@ -263,6 +265,13 @@ export function createDesktopApi(ipc: IpcInvoker): DesktopApi {
         modelTestResultSchema,
         input
       ),
+      updateGenerationSettings: (input) => invokeResult(
+        ipc,
+        MODEL_CHANNELS.updateGenerationSettings,
+        updateGenerationSettingsInputSchema,
+        profileResultSchema,
+        input
+      ),
       getRoutes: (input) => invokeResult(ipc, MODEL_CHANNELS.getRoutes, modelRoutesInputSchema, modelRoutesResultSchema, input),
       saveRoutes: (input) => invokeResult(ipc, MODEL_CHANNELS.saveRoutes, saveModelRoutesInputSchema, modelRoutesResultSchema, input),
       listRouteAttempts: (input) => invokeResult(ipc, MODEL_CHANNELS.listRouteAttempts, modelRouteAttemptsInputSchema, modelAttemptsResultSchema, input)
@@ -320,6 +329,12 @@ export function createDesktopApi(ipc: IpcInvoker): DesktopApi {
         if (!parsed.success) return validationFailure();
         await awaitSubscription(parsed.data.requestId);
         return invokeResult(ipc, CHAT_CHANNELS.regenerate, chatRegenerateInputSchema, resultSchema(chatSendResultValueSchema), parsed.data);
+      },
+      continue: async (input) => {
+        const parsed = chatContinueInputSchema.safeParse(input);
+        if (!parsed.success) return validationFailure();
+        await awaitSubscription(parsed.data.requestId);
+        return invokeResult(ipc, CHAT_CHANNELS.continue, chatContinueInputSchema, resultSchema(chatSendResultValueSchema), parsed.data);
       },
       subscribe: (requestId, listener) => {
         const parsed = z.uuid().safeParse(requestId);

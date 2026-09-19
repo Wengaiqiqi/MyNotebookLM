@@ -205,6 +205,38 @@ describe("RAG integration with real LanceDB and streaming chat", () => {
     });
   });
 
+  it("reopens the database between two length stops and a final continuation", async () => {
+    let connection = await setupWorld();
+    let calls = 0;
+    const selected = profile();
+    const model: ModelProvider = { discover: async () => [], embed: async () => [[]], async *generate() {
+      calls++;
+      yield { type: "text-delta", text: calls === 1 ? "alpha [S1]" : " continued" };
+      yield { type: "usage", inputTokens: 10, outputTokens: 5 };
+      yield { type: "done", finishReason: calls < 3 ? "length" : "stop" };
+    } };
+    const create = () => new ChatService({ ...chatDeps(connection, new RetrievalService({ db: connection, lance, provider: fakeEmbeddingProvider() }), model), generationProfile: selected });
+    let service = create();
+    const conversation = service.createConversation({ projectId: PROJECT_ID, title: "Continue" });
+    const sent = await service.send({ requestId: REQUEST_ID, projectId: PROJECT_ID, conversationId: conversation.id, question: "alpha" }, () => {});
+    if (!sent.ok) throw new Error(JSON.stringify(sent.error));
+    for (let i=0;i<2;i++) {
+      database!.close();
+      database = openAppDatabase(path.join(root!, "app.db"), path.resolve("src/main/db/migrations"));
+      connection = database.connection;
+      service = create();
+      const message = service.listMessages({ projectId: PROJECT_ID, conversationId: conversation.id }).at(-1)!;
+      expect(message.generation?.canContinue).toBe(true);
+      if(i===1) selected.maxOutputTokensOverride = 12000;
+      expect((await service.continue({ requestId:crypto.randomUUID(),projectId:PROJECT_ID,conversationId:conversation.id,messageId:message.id,expectedRevision:message.generation!.revision },()=>{})).ok).toBe(true);
+    }
+    const message = service.listMessages({ projectId:PROJECT_ID,conversationId:conversation.id }).at(-1)!;
+    expect(message.content).toBe("alpha [S1] continued continued");
+    expect(message.citations[0]?.sourceChunkId).toBe(CHUNK_A);
+    expect(message.generation).toMatchObject({canContinue:false,finishKind:"stop",outputTokenLimit:12000});
+    expect(message.usage?.totalTokens).toBe(45);
+  });
+
   it("stops a streaming turn mid-flight and keeps partial text as cancelled", async () => {
     const connection = await setupWorld();
     const retrieval = new RetrievalService({ db: connection, lance, provider: fakeEmbeddingProvider() });

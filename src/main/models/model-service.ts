@@ -9,6 +9,7 @@ import {
   modelDescriptorSchema,
   modelTaskKindSchema,
   builtInModelProfileDtoSchema,
+  updateGenerationSettingsInputSchema,
   modelProfileInputSchema,
   saveModelProfileInputSchema,
   setDefaultModelRoutesInputSchema,
@@ -32,6 +33,7 @@ import {
   type SetDefaultModelRoutesInput,
   type TestModelInput
 } from "../../shared/models";
+import { generationSettingsError } from "./generation-limits";
 import {
   updateAppSettingsInputSchema,
   type AppSettingsDto,
@@ -275,8 +277,24 @@ export class ModelService {
       || (parsed.profileId && isBuiltInLocalEmbeddingProfile(parsed.profileId))) {
       return builtInError();
     }
+    if (parsed.profileId) {
+      const profile = this.settings.getProfile(parsed.profileId);
+      if (!profile) return notFound();
+      if (profile.capability !== parsed.capability) return capabilityError();
+      if (profile.provider !== parsed.provider
+        || canonicalCredentialBaseUrl(profile.baseUrl) !== canonicalCredentialBaseUrl(parsed.baseUrl)) {
+        return credentialBindingError();
+      }
+    }
     return this.withProvider(parsed, async (provider) => {
       const discovered = parseDiscoveredModels(await provider.discover(new AbortController().signal));
+      if (parsed.profileId) {
+        const profile = this.settings.getProfile(parsed.profileId);
+        const matching = profile && discovered.find((model) => model.id === profile.modelId);
+        if (profile && matching && profile.provider === parsed.provider && canonicalCredentialBaseUrl(profile.baseUrl) === canonicalCredentialBaseUrl(parsed.baseUrl) && this.settings.updateGenerationLimits) {
+          this.settings.updateGenerationLimits(profile.id, matching.generationLimits ?? null);
+        }
+      }
       return discovered.filter((model) =>
         model.capabilityEvidence === "probe-required"
         || model.capabilities.includes(parsed.capability)
@@ -315,9 +333,15 @@ export class ModelService {
           baseUrl: profile.baseUrl
         }, parsed.apiKey);
         const saved = this.settings.transaction(() => {
-          const persisted = this.settings.saveProfile(profile);
+          this.settings.saveProfile(profile);
           this.credentials.storePrepared(profile.id, prepared);
-          return persisted;
+          if (this.settings.updateGenerationLimits) {
+            this.settings.updateGenerationLimits(
+              profile.id,
+              tested.value.generationLimits ?? null
+            );
+          }
+          return this.settings.getProfile(profile.id)!;
         });
         return { ok: true, value: saved };
       }
@@ -326,7 +350,10 @@ export class ModelService {
         baseUrl: profile.baseUrl
       });
       const saved = this.settings.transaction(() => {
-        const persisted = this.settings.saveProfile(profile);
+        this.settings.saveProfile(profile);
+        if (this.settings.updateGenerationLimits) {
+          this.settings.updateGenerationLimits(profile.id, tested.value.generationLimits ?? null);
+        }
         if (this.credentials.status(profile.id).hasCredential) {
           this.credentials.updateConnection?.(profile.id, {
             provider: profile.provider,
@@ -335,9 +362,42 @@ export class ModelService {
         } else if (existingPrepared) {
           this.credentials.storePrepared(profile.id, existingPrepared);
         }
-        return persisted;
+        return this.settings.getProfile(profile.id)!;
       });
       return { ok: true, value: saved };
+    } catch (reason) {
+      return resultFromError(reason);
+    }
+  }
+
+  async updateGenerationSettings(
+    input: import("../../shared/models").UpdateGenerationSettingsInput
+  ): Promise<Result<ModelProfileDto>> {
+    let parsed: import("../../shared/models").UpdateGenerationSettingsInput;
+    try {
+      parsed = updateGenerationSettingsInputSchema.parse(input);
+    } catch (reason) {
+      return resultFromError(reason);
+    }
+    if (isBuiltInLocalEmbeddingProfile(parsed.profileId)) return builtInError();
+    const profile = this.settings.getProfile(parsed.profileId);
+    if (!profile) return notFound();
+    if (profile.capability !== "generation") return capabilityError();
+    const error = generationSettingsError({
+      ...profile,
+      ...(parsed.contextTokensOverride === undefined ? {} : { contextTokensOverride: parsed.contextTokensOverride }),
+      ...(parsed.maxOutputTokensOverride === undefined ? {} : { maxOutputTokensOverride: parsed.maxOutputTokensOverride })
+    });
+    if (error) return errorResult({ ...error, details: { ...error.details, profileId: profile.id } });
+    try {
+      return {
+        ok: true,
+        value: this.settings.updateGenerationSettings({
+          profileId: profile.id,
+          ...(parsed.contextTokensOverride === undefined ? {} : { contextTokensOverride: parsed.contextTokensOverride }),
+          ...(parsed.maxOutputTokensOverride === undefined ? {} : { maxOutputTokensOverride: parsed.maxOutputTokensOverride })
+        })
+      };
     } catch (reason) {
       return resultFromError(reason);
     }
@@ -438,7 +498,10 @@ export class ModelService {
         return {
           modelId: profile.modelId,
           capability: profile.capability,
-          verifiedBy: "discovery" as const
+          verifiedBy: "discovery" as const,
+          ...(authoritativeMatch.generationLimits
+            ? { generationLimits: authoritativeMatch.generationLimits }
+            : {})
         };
       }
 

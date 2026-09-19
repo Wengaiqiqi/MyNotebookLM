@@ -276,7 +276,7 @@ describe("registerChatHandlers", () => {
       for (let i = 0; i < 90; i++) {
         const chunk = `chunk ${i} `;
         expectedChunks.push(chunk);
-        emit?.({ type: "text-delta", requestId: rid, messageId: MESSAGE_ID, text: chunk });
+        emit?.({ type: "text-delta", requestId: rid, messageId: MESSAGE_ID, text: chunk, ...(i === 0 ? { offset: 0 } : {}) });
       }
       emit?.({
         type: "completed",
@@ -295,6 +295,7 @@ describe("registerChatHandlers", () => {
     const deltas = window.delivered().filter((value) => value.type === "text-delta") as Array<{ text: string }>;
     expect(deltas.map((delta) => delta.text).join("")).toBe(expectedChunks.join(""));
     expect(deltas.length).toBeLessThanOrEqual(30);
+    expect((deltas[0] as { offset?: number } | undefined)?.offset).toBe(0);
     // The completed message content is byte-exact against what was streamed.
     const completed = window.delivered().find((value) => value.type === "completed") as { message?: { content?: string } };
     expect(completed.message?.content).toBe(expectedChunks.join(""));

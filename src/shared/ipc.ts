@@ -2,7 +2,7 @@ import { z } from "zod";
 import { conversationSchema, messageSchema } from "./chat";
 import type { ConversationDto, MessageDto } from "./chat";
 import type { CreateProjectInput, ProjectDto, ProjectIdInput, RenameProjectInput } from "./projects";
-import type { Result } from "./app-errors";
+import { appErrorDtoSchema, type Result } from "./app-errors";
 import type {
   CredentialInput,
   CredentialProfileInput,
@@ -16,7 +16,8 @@ import type {
   ModelTestResultDto,
   SaveModelProfileInput,
   SetDefaultModelRoutesInput,
-  TestModelInput
+  TestModelInput,
+  UpdateGenerationSettingsInput
 } from "./models";
 import type { AppSettingsDto, UpdateAppSettingsInput } from "./settings";
 import type { AppTheme } from "./settings";
@@ -56,6 +57,7 @@ export const MODEL_CHANNELS = {
   deleteProfile: "models:v1:delete-profile",
   discover: "models:v1:discover",
   test: "models:v1:test",
+  updateGenerationSettings: "models:v1:update-generation-settings",
   getRoutes: "models:v1:get-routes",
   saveRoutes: "models:v1:save-routes",
   listRouteAttempts: "models:v1:list-route-attempts"
@@ -105,6 +107,7 @@ export const CHAT_CHANNELS = {
   send: "chat:v1:send",
   stop: "chat:v1:stop",
   regenerate: "chat:v1:regenerate",
+  continue: "chat:v1:continue",
   subscribeRequest: "chat:v1:subscribe-request",
   unsubscribeRequest: "chat:v1:unsubscribe-request",
   update: "chat:v1:update"
@@ -130,6 +133,7 @@ export const chatListMessagesInputSchema = z.object({ projectId: z.uuid(), conve
   export const chatSendInputSchema = z.object({ requestId: z.uuid(), projectId: z.uuid(), conversationId: z.uuid(), question: z.string().trim().min(1).max(20_000), generationProfileId: z.uuid().optional(), thinking: z.enum(["off", "low", "medium", "high"]).optional() }).strict();
 export const chatStopInputSchema = z.object({ projectId: z.uuid(), requestId: z.uuid() }).strict();
 export const chatRegenerateInputSchema = z.object({ requestId: z.uuid(), projectId: z.uuid(), conversationId: z.uuid(), messageId: z.string().min(1).max(128), question: z.string().trim().min(1).max(20_000).optional(), thinking: z.enum(["off", "low", "medium", "high"]).optional() }).strict();
+export const chatContinueInputSchema = z.object({ requestId: z.uuid(), projectId: z.uuid(), conversationId: z.uuid(), messageId: z.string().min(1).max(128), expectedRevision: z.number().int().nonnegative() }).strict();
 export const chatRequestIdInputSchema = z.object({ requestId: z.uuid() }).strict();
 export const citationOpenInputSchema = z.object({ projectId: z.uuid(), citationId: z.string().trim().min(1).max(256) }).strict();
 
@@ -188,9 +192,18 @@ export type CitationDetailResultValue = z.infer<typeof citationDetailResultValue
  * not emit them yet.
  */
 export const chatRequestEventSchemas = {
-  started: z.object({ type: z.literal("started"), requestId: z.uuid(), messageId: z.string().min(1) }),
+  started: z.object({
+    type: z.literal("started"),
+    requestId: z.uuid(),
+    messageId: z.string().min(1),
+    /** Continuations report their operation plus the authoritative old message. */
+    operation: z.enum(["initial", "continue"]).optional(),
+    message: messageSchema.optional(),
+    /** JS string length the next delta continues from (continuations). */
+    offset: z.number().int().nonnegative().optional()
+  }),
   retrieval: z.object({ type: z.literal("retrieval"), requestId: z.uuid() }),
-  "text-delta": z.object({ type: z.literal("text-delta"), requestId: z.uuid(), messageId: z.string().min(1), text: z.string() }),
+  "text-delta": z.object({ type: z.literal("text-delta"), requestId: z.uuid(), messageId: z.string().min(1), text: z.string(), offset: z.number().int().nonnegative().optional() }),
   usage: z.object({ type: z.literal("usage"), requestId: z.uuid(), usage: chatUsageDtoSchema }),
   fallback: z.object({
     type: z.literal("fallback"),
@@ -200,26 +213,28 @@ export const chatRequestEventSchemas = {
     errorCode: z.string()
   }),
   completed: z.object({ type: z.literal("completed"), requestId: z.uuid(), messageId: z.string().min(1), message: messageSchema }),
-  cancelled: z.object({ type: z.literal("cancelled"), requestId: z.uuid(), messageId: z.string().min(1), message: messageSchema }),
+  cancelled: z.object({ type: z.literal("cancelled"), requestId: z.uuid(), messageId: z.string().min(1), message: messageSchema, operation: z.enum(["initial", "continue"]).optional() }),
   failed: z.object({
     type: z.literal("failed"),
     requestId: z.uuid(),
     messageId: z.string().min(1),
-    error: z.object({ code: z.string(), messageKey: z.string(), recoverable: z.boolean() })
+    error: appErrorDtoSchema,
+    operation: z.enum(["initial", "continue"]).optional(),
+    message: messageSchema.optional()
   })
 } as const;
 
 export const chatRequestEventTypeSchema = z.enum(Object.keys(chatRequestEventSchemas) as [(keyof typeof chatRequestEventSchemas), ...(keyof typeof chatRequestEventSchemas)[]]);
 export type ChatRequestEventType = keyof typeof chatRequestEventSchemas;
 export type ChatRequestEvent =
-  | { type: "started"; requestId: string; messageId: string }
+  | { type: "started"; requestId: string; messageId: string; operation?: "initial" | "continue"; message?: MessageDto; offset?: number }
   | { type: "retrieval"; requestId: string }
-  | { type: "text-delta"; requestId: string; messageId: string; text: string }
+  | { type: "text-delta"; requestId: string; messageId: string; text: string; offset?: number }
   | { type: "usage"; requestId: string; usage: z.infer<typeof chatUsageDtoSchema> }
   | { type: "fallback"; requestId: string; attempted: { provider: string; model: string; profileId: string | null }; next: { provider: string; model: string; profileId: string | null }; errorCode: string }
   | { type: "completed"; requestId: string; messageId: string; message: MessageDto }
-  | { type: "cancelled"; requestId: string; messageId: string; message: MessageDto }
-  | { type: "failed"; requestId: string; messageId: string; error: { code: string; messageKey: string; recoverable: boolean } };
+  | { type: "cancelled"; requestId: string; messageId: string; message: MessageDto; operation?: "initial" | "continue" }
+  | { type: "failed"; requestId: string; messageId: string; error: import("./app-errors").AppErrorDto; operation?: "initial" | "continue"; message?: MessageDto };
 
 export interface DesktopApi {
   vector: { getHealth(input: VectorTaskInput): Promise<Result<VectorHealthDto>>; startMigration(input: VectorProfileInput): Promise<Result<TaskDto>>; rebuild(input: VectorSpaceInput): Promise<Result<TaskDto>>; optimize(input: VectorSpaceInput): Promise<Result<TaskDto>>; cancelTask(input: VectorTaskIdInput): Promise<Result<TaskDto>>; subscribe(projectId: string, listener: (task: TaskDto) => void): () => void; };
@@ -251,6 +266,7 @@ export interface DesktopApi {
     deleteProfile(input: DeleteModelProfileInput): Promise<Result<void>>;
     discover(input: DiscoverModelsInput): Promise<Result<ModelDescriptorDto[]>>;
     test(input: TestModelInput): Promise<Result<ModelTestResultDto>>;
+    updateGenerationSettings(input: UpdateGenerationSettingsInput): Promise<Result<ModelProfileDto>>;
     getRoutes?(input: { taskKind: ModelTaskKind }): Promise<Result<ModelRouteDto[]>>;
     saveRoutes?(input: { taskKind: ModelTaskKind; profileIds: string[] }): Promise<Result<ModelRouteDto[]>>;
     listRouteAttempts?(input: { projectId: string; taskKind?: ModelTaskKind; limit?: number; offset?: number }): Promise<Result<ModelRouteAttemptDto[]>>;
@@ -281,9 +297,10 @@ export interface DesktopApi {
     listMessages(input: { projectId: string; conversationId: string }): Promise<Result<MessageDto[]>>;
   };
   chat: {
-    send(input: { requestId: string; projectId: string; conversationId: string; question: string; generationProfileId?: string }): Promise<Result<ChatSendResultValue>>;
+    send(input: { requestId: string; projectId: string; conversationId: string; question: string; generationProfileId?: string; thinking?: "off" | "low" | "medium" | "high" }): Promise<Result<ChatSendResultValue>>;
     stop(input: { projectId: string; requestId: string }): Promise<Result<boolean>>;
-    regenerate(input: { requestId: string; projectId: string; conversationId: string; messageId: string }): Promise<Result<ChatSendResultValue>>;
+    regenerate(input: { requestId: string; projectId: string; conversationId: string; messageId: string; question?: string; thinking?: "off" | "low" | "medium" | "high" }): Promise<Result<ChatSendResultValue>>;
+    continue(input: { requestId: string; projectId: string; conversationId: string; messageId: string; expectedRevision: number; }): Promise<Result<ChatSendResultValue>>;
     subscribe(requestId: string, listener: (event: ChatRequestEvent) => void): () => void;
     unsubscribe(requestId: string): void;
   };

@@ -91,4 +91,43 @@ describe("RetrievalService", () => {
     await expect(service.search({ projectId: "p1", query: "hello", limit: 1 })).resolves.toMatchObject({ ok: false, error: { code: "INDEX_UNAVAILABLE" } });
     expect(embedBatch).not.toHaveBeenCalled();
   });
+
+  it("reuses one query embedding while expanding chat candidates and reports the stop reason", async () => {
+    const embedBatch = vi.fn(async () => [[1, 0]]);
+    const candidates = (limit: number) => Array.from({ length: limit }, (_, index) => ({
+      chunkId: `c${index}`,
+      contentHash: `h${index}`,
+      sourceId: "s1",
+      revisionId: "r1",
+      ordinal: index,
+      text: "candidate"
+    }));
+    const vectorSearch = vi.fn(async (_space: unknown, _vector: number[], limit: number) => candidates(limit));
+    const textSearch = vi.fn(async (_space: unknown, _query: string, limit: number) => candidates(limit));
+    const db = {
+      prepare: vi.fn((sql: string) => {
+        if (sql.includes("project_embedding_spaces")) return { get: () => ({ space_id: "sp1", provider: "local", model_id: "m", model_revision: "r", dimension: 2, distance: "cosine", pooling: "mean", preprocess_version: "v1", chunking_version: "v1", fingerprint: "fp" }) };
+        if (sql.includes("sc.id IN")) return {
+          all: (...args: unknown[]) => (args.slice(0, -1) as string[]).map((id) => ({ chunk_id: id, ordinal: Number(String(id).slice(1)), text: "candidate", locator_json: "{}", content_hash: `h${String(id).slice(1)}`, revision_id: "r1", source_id: "s1", source_display_name: "Source", source_kind: "text" }))
+        };
+        if (sql.includes("WHERE sr.id = ?")) return { all: () => [] };
+        return { get: () => undefined };
+      })
+    } as any;
+    const service = new RetrievalService({ db, lance: { vectorSearch, textSearch }, provider: { embedBatch } as any });
+    const signal = new AbortController().signal;
+    const result = await service.searchForChat({ projectId: "p1", query: "hello", evidenceTokenBudget: 9_000, signal });
+
+    expect(result).toMatchObject({ ok: true, diagnostics: { stopReason: "budget", rounds: 2, queryEmbeddingCount: 1 } });
+    expect(embedBatch).toHaveBeenCalledTimes(1);
+    expect(vectorSearch.mock.calls.map((call) => call[2])).toEqual([96, 192]);
+    expect(textSearch.mock.calls.map((call) => call[2])).toEqual([96, 192]);
+    expect(textSearch.mock.calls.every((call) => call[1] === "hello")).toBe(true);
+    const expanded = await service.searchForChat({ projectId: "p1", query: "hello", evidenceTokenBudget: 30_000, signal });
+    expect(expanded.ok).toBe(true);
+    expect(expanded.value.length).toBeGreaterThan(200);
+    expect(embedBatch).toHaveBeenCalledTimes(1);
+    await service.searchForChat({ projectId: "p1", query: "hello", evidenceTokenBudget: 9_000, signal: new AbortController().signal });
+    expect(embedBatch).toHaveBeenCalledTimes(2);
+  });
 });

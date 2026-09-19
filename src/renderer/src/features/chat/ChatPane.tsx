@@ -38,11 +38,13 @@ const assistantErrorMessageKeys: Record<string, string> = {
   INTERRUPTED: "errors.interrupted"
 };
 
-export default function ChatPane({ projectId, generationProfileId, sources, onOpenSettings, onImport }: {
+export default function ChatPane({ projectId, generationProfileId, sources, onOpenSettings, onOpenModelSettings, onImport }: {
   projectId: string;
   generationProfileId?: string | undefined;
   sources: SourceDto[];
   onOpenSettings: () => void;
+  /** Opens the advanced editor for the profile that produced an answer. */
+  onOpenModelSettings: (profileId: string | null) => void;
   onImport: () => void;
 }) {
   const { t, i18n } = useTranslation();
@@ -141,11 +143,11 @@ export default function ChatPane({ projectId, generationProfileId, sources, onOp
   const messages = stream.messages;
   const activeGenerationProfile = profiles.find((profile) => profile.id === selectedProfileId);
 
-  function assistantErrorInfo(message: Pick<MessageDto, "errorCode" | "provider" | "model" | "profileId"> | null, liveError: AppErrorDto | null): { text: string; details: string | null } {
+  function assistantErrorInfo(message: Pick<MessageDto, "errorCode" | "provider" | "model" | "profileId" | "generation"> | null, liveError: AppErrorDto | null): { text: string; details: string | null } {
     const code = liveError?.code ?? message?.errorCode ?? null;
-    const key = liveError?.messageKey ?? (code ? assistantErrorMessageKeys[code] : undefined) ?? "errors.providerFailure";
+    const key = liveError?.messageKey ?? message?.generation?.lastError ?? (code ? assistantErrorMessageKeys[code] : undefined) ?? "errors.providerFailure";
     const fallback = t("errors.providerFailure");
-    const text = t(key, { defaultValue: fallback });
+    const text = t(key, { defaultValue: fallback, limitTokens: liveError?.details?.limitTokens ?? "?", ...liveError?.details });
     const profile = message?.profileId
       ? profiles.find((candidate) => candidate.id === message.profileId) ?? activeGenerationProfile
       : activeGenerationProfile;
@@ -449,8 +451,39 @@ export default function ChatPane({ projectId, generationProfileId, sources, onOp
                   <div className="meta">
                     {message.model ? <span>{message.model}</span> : null}
                     <span className="spacer" />
+                    {message.state === "failed" && (message.generation?.finishKind === "length" || message.errorCode === "VALIDATION") && (
+                      <button type="button" className="btn ghost sm" onClick={() => onOpenModelSettings(message.profileId)}>
+                        <Icon name="settings" />{t("chat.ui.openModelSettings", { defaultValue: "模型设置" })}
+                      </button>
+                    )}
                     {message.state === "completed" && (
                       <>
+                        {message.generation?.finishKind === "length" && (
+                          <span className="chat-note" role="status">
+                            {message.generation.outputTokenLimit === null
+                              ? t("chat.ui.outputLimitUnknown")
+                              : t("chat.ui.outputLimitReached", { limitTokens: message.generation.outputTokenLimit })}
+                          </span>
+                        )}
+                        {message.generation?.status === "interrupted" && (
+                          <span className="chat-note" role="status">{t("chat.ui.continuationInterrupted")}</span>
+                        )}
+                        {message.generation?.status === "interrupted" && message.generation.lastError && (
+                          <span className="chat-note" role="status">{t(message.generation.lastError, { limitTokens: stream.error?.details?.limitTokens ?? "?" })}</span>
+                        )}
+                        {message.generation?.canContinue && latestAssistant?.id === message.id && (
+                          <button type="button" disabled={!stream.canSend} title={t("chat.retryBusyHint")} onClick={() => void stream.continueGeneration(message.id, message.generation!.revision)}>
+                            <Icon name="send" />{t("chat.ui.continueGeneration")}
+                          </button>
+                        )}
+                        {(message.generation?.finishKind === "length" || message.generation?.finishKind === "context-limit" || message.generation?.status === "interrupted") && (
+                          <button type="button" className="btn ghost sm" onClick={() => onOpenModelSettings(message.profileId)}>
+                            <Icon name="settings" />{t("chat.ui.openModelSettings", { defaultValue: "模型设置" })}
+                          </button>
+                        )}
+                        {message.generation?.finishKind === "context-limit" && (
+                          <span className="chat-note" role="status">{t("errors.contextBudgetExceeded")}</span>
+                        )}
                         <button type="button" onClick={() => { void navigator.clipboard?.writeText(message.content); toast.success(t("chat.copied")); }}>
                           <Icon name="copy" />{t("chat.ui.copy")}
                         </button>

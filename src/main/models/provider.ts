@@ -1,4 +1,4 @@
-import type { CapabilityEvidence, ModelCapability } from "../../shared/models";
+import type { CapabilityEvidence, GenerationLimits, ModelCapability } from "../../shared/models";
 
 export type ChatTurn = Readonly<{
   role: "system" | "user" | "assistant";
@@ -10,6 +10,7 @@ export interface ModelDescriptor {
   displayName: string;
   capabilities: ModelCapability[];
   capabilityEvidence?: CapabilityEvidence;
+  generationLimits?: GenerationLimits;
 }
 
 export interface GenerateRequest {

@@ -104,6 +104,22 @@ describe("openAppDatabase", () => {
     reopened.close();
   });
 
+  it("upgrades 014 to generation limits and contexts without changing existing profiles or routes", () => {
+    const bundled = path.resolve("src/main/db/migrations");
+    for (const name of readdirSync(bundled).filter((name) => Number(name.slice(0,3)) <= 14)) cpSync(path.join(bundled,name),path.join(migrationsDir,name));
+    const old = openAppDatabase(databaseFile,migrationsDir);
+    old.connection.prepare("INSERT INTO model_profiles(id,name,provider,capability,base_url,model_id,enabled) VALUES (?,?,?,?,?,?,?)").run("model","Existing","openai","generation","https://example.test","m",1);
+    const before = old.connection.prepare("SELECT * FROM model_profiles").all();
+    old.close();
+    const upgraded = openAppDatabase(databaseFile,bundled);
+    const row = upgraded.connection.prepare("SELECT * FROM model_profiles").get() as Record<string,unknown>;
+    expect(row).toMatchObject(before[0] as object);
+    expect(row).toMatchObject({ context_tokens_override:null,max_output_tokens_override:null,generation_limits_json:null });
+    expect(upgraded.connection.prepare("SELECT COUNT(*) n FROM chat_generation_contexts").get()).toEqual({n:0});
+    expect(upgraded.connection.pragma("foreign_key_check")).toEqual([]);
+    upgraded.close();
+  });
+
   it("migrates a real 005 database while preserving task data, foreign keys, indexes, and constraints", () => {
     writeFileSync(path.join(migrationsDir, "002_settings_models.sql"), settingsModelsMigration);
     writeFileSync(path.join(migrationsDir, "003_credential_binding.sql"), credentialBindingMigration);

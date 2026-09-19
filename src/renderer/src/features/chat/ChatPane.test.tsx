@@ -82,7 +82,7 @@ describe("ChatPane conversation creation", () => {
         projectId={projectId}
         generationProfileId="9a9a9999-9999-4999-8999-999999999999"
         sources={readySources}
-        onOpenSettings={() => undefined}
+        onOpenSettings={() => undefined} onOpenModelSettings={() => undefined}
         onImport={() => undefined}
       />
     );
@@ -109,7 +109,7 @@ describe("ChatPane conversation creation", () => {
         projectId={projectId}
         generationProfileId="9a9a9999-9999-4999-8999-999999999999"
         sources={readySources}
-        onOpenSettings={() => undefined}
+        onOpenSettings={() => undefined} onOpenModelSettings={() => undefined}
         onImport={() => undefined}
       />
     );
@@ -154,7 +154,7 @@ describe("ChatPane conversation creation", () => {
         projectId={projectId}
         generationProfileId="profile-1"
         sources={readySources}
-        onOpenSettings={() => undefined}
+        onOpenSettings={() => undefined} onOpenModelSettings={() => undefined}
         onImport={() => undefined}
       />
     );
@@ -191,7 +191,7 @@ describe("ChatPane conversation creation", () => {
         projectId={projectId}
         generationProfileId="profile-1"
         sources={readySources}
-        onOpenSettings={() => undefined}
+        onOpenSettings={() => undefined} onOpenModelSettings={() => undefined}
         onImport={() => undefined}
       />
     );
@@ -206,11 +206,22 @@ describe("ChatPane conversation creation", () => {
         projectId={projectId}
         generationProfileId="profile-3"
         sources={readySources}
-        onOpenSettings={() => undefined}
+        onOpenSettings={() => undefined} onOpenModelSettings={() => undefined}
         onImport={() => undefined}
       />
     );
     await waitFor(() => expect(screen.getByRole("button", { name: "模型" }).textContent).toContain("deepseek-v4-pro"));
+  });
+
+  it("restores the empty-output-limit explanation and actual model settings action", async () => {
+    mockApi([{ id: "empty-answer", conversationId: existingId, sequence: 2, role: "assistant", content: "", state: "failed", replyToMessageId: "question", supersedesMessageId: null, superseded: false, provider: "openai", profileId: "actual-model", model: "reasoning-model", usage: null, errorCode: "VALIDATION", completionReason: null, createdAt: "", updatedAt: "", citations: [], generation: { revision: 1, status: "idle", finishKind: "length", outputTokenLimit: 8192, canContinue: false, blockedReason: null, lastError: "errors.outputLimitEmpty", usageComplete: false } }]);
+    const onOpenModelSettings = vi.fn();
+    render(<ChatPane projectId={projectId} generationProfileId="other-model" sources={readySources} onOpenSettings={() => {}} onOpenModelSettings={onOpenModelSettings} onImport={() => {}} />);
+    expect((await screen.findByRole("alert")).textContent).toContain("没有产生可见正文");
+    fireEvent.click(await screen.findByRole("button", { name: "模型设置" }));
+    expect(onOpenModelSettings).toHaveBeenCalledWith("actual-model");
+    expect(screen.queryByRole("button", { name: "继续生成" })).toBeNull();
+    expect(screen.getByRole("button", { name: /重试/ })).toBeTruthy();
   });
 
   it("explains restored failures with the error code and target model", async () => {
@@ -244,7 +255,7 @@ describe("ChatPane conversation creation", () => {
         projectId={projectId}
         generationProfileId="profile-1"
         sources={readySources}
-        onOpenSettings={() => undefined}
+        onOpenSettings={() => undefined} onOpenModelSettings={() => undefined}
         onImport={() => undefined}
       />
     );
@@ -270,7 +281,7 @@ describe("ChatPane conversation creation", () => {
         projectId={projectId}
         generationProfileId="9a9a9999-9999-4999-8999-999999999999"
         sources={readySources}
-        onOpenSettings={() => undefined}
+        onOpenSettings={() => undefined} onOpenModelSettings={() => undefined}
         onImport={() => undefined}
       />
     );
@@ -313,7 +324,7 @@ describe("ChatPane conversation creation", () => {
         projectId={projectId}
         generationProfileId="9a9a9999-9999-4999-8999-999999999999"
         sources={readySources}
-        onOpenSettings={() => undefined}
+        onOpenSettings={() => undefined} onOpenModelSettings={() => undefined}
         onImport={() => undefined}
       />
     );
@@ -390,7 +401,7 @@ describe("ChatPane conversation creation", () => {
         projectId={projectId}
         generationProfileId="9a9a9999-9999-4999-8999-999999999999"
         sources={readySources}
-        onOpenSettings={() => undefined}
+        onOpenSettings={() => undefined} onOpenModelSettings={() => undefined}
         onImport={() => undefined}
       />
     );
@@ -453,7 +464,7 @@ describe("ChatPane citation source dialog", () => {
         projectId={projectId}
         generationProfileId="9a9a9999-9999-4999-8999-999999999999"
         sources={readySources}
-        onOpenSettings={() => undefined}
+        onOpenSettings={() => undefined} onOpenModelSettings={() => undefined}
         onImport={() => undefined}
       />
     );

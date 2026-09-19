@@ -2,6 +2,32 @@ import type Database from "better-sqlite3";
 import type { CitationDto, ConversationDto, MessageDto } from "../../shared/chat";
 type Base={projectId:string;conversationId:string;id:string;content?:string;createdAt:string};
 type Assistant=Base&{replyToMessageId:string;provider:string;profileId:string;model:string};
+export type TerminalContinuationInput = Readonly<{
+  projectId: string;
+  messageId: string;
+  conversationId: string;
+  content: string;
+  usage: { inputTokens: number; outputTokens: number; totalTokens: number };
+  completionReason: string;
+  provider: string;
+  profileId: string;
+  model: string;
+  runtime: Record<string, unknown>;
+  citations: ReadonlyArray<{
+    id: string;
+    label: string;
+    sourceId: string;
+    sourceChunkId: string;
+    sourceDisplayName: string;
+    sourceKind: string;
+    locator: unknown;
+    quote?: string;
+    start: number;
+  }>;
+  updatedAt: string;
+}>;
+export type HistoryPair = { user: { id: string; sequence: number; content: string }; assistant: { id: string; sequence: number; content: string } };
+export type GenerationContextRecord = { snapshot: unknown; runtime: Record<string, unknown>; revision: number; activeRequestId: string | null };
 type ConvRow=Record<string,unknown>;
 export class ConversationRepository {
  constructor(private readonly db:Database.Database){}
@@ -22,7 +48,86 @@ export class ConversationRepository {
  removeConversation(p:string,id:string,d:string){this.own(p,id);this.db.prepare("UPDATE conversations SET deleted_at=?,updated_at=? WHERE id=?").run(d,d,id);}
  renameConversation(p:string,c:string,title:string,now:string){this.own(p,c);this.db.prepare("UPDATE conversations SET title=?,updated_at=? WHERE id=? AND project_id=? AND deleted_at IS NULL").run(title,now,c,p);return this.getConversation(p,c)!;}
  archiveConversation(p:string,c:string,now:string){this.own(p,c);this.db.prepare("UPDATE conversations SET archived_at=?,updated_at=? WHERE id=? AND project_id=? AND deleted_at IS NULL").run(now,now,c,p);return this.getConversation(p,c)!;}
- getMessage(p:string,id:string):MessageDto|undefined{const r=this.db.prepare("SELECT m.* FROM messages m JOIN conversations c ON c.id=m.conversation_id WHERE m.id=? AND c.project_id=?").get(id,p) as any;if(!r)return;const cs=(this.db.prepare("SELECT * FROM message_citations WHERE message_id=?").all(id) as any[]).map(c=>({id:c.id,label:c.label,sourceId:c.source_id,sourceChunkId:c.source_chunk_id,sourceDisplayName:c.source_display_name,sourceKind:c.source_kind,locator:JSON.parse(c.locator_json),quote:c.quote??undefined}));return {id:r.id,conversationId:r.conversation_id,sequence:r.sequence,role:r.role,content:r.content,state:r.state,replyToMessageId:r.reply_to_message_id,supersedesMessageId:r.supersedes_message_id??null,superseded:Boolean(r.superseded),provider:r.provider??null,profileId:r.profile_id??null,model:r.model??null,usage:r.usage_json?JSON.parse(r.usage_json):null,errorCode:r.error_code??null,completionReason:r.completion_reason??null,createdAt:r.created_at,updatedAt:r.updated_at,citations:cs};}
- listMessages(p:string,c:string){this.own(p,c);return (this.db.prepare("SELECT id FROM messages WHERE conversation_id=? ORDER BY sequence").pluck().all(c) as string[]).map(id=>this.getMessage(p,id)!);}
+ getMessage(p:string,id:string):MessageDto|undefined{const r=this.db.prepare("SELECT m.* FROM messages m JOIN conversations c ON c.id=m.conversation_id WHERE m.id=? AND c.project_id=?").get(id,p) as any;if(!r)return;const cs=(this.db.prepare("SELECT * FROM message_citations WHERE message_id=?").all(id) as any[]).map(c=>({id:c.id,label:c.label,sourceId:c.source_id,sourceChunkId:c.source_chunk_id,sourceDisplayName:c.source_display_name,sourceKind:c.source_kind,locator:JSON.parse(c.locator_json),quote:c.quote??undefined}));const g=this.db.prepare("SELECT revision,runtime_json FROM chat_generation_contexts WHERE message_id=?").get(id) as {revision:number;runtime_json:string}|undefined;let generation:MessageDto["generation"];if(g){try{const runtime=JSON.parse(g.runtime_json) as Record<string,unknown>;const finishKind=runtime.finishKind===null||runtime.finishKind===undefined?null:String(runtime.finishKind) as "stop"|"length"|"context-limit"|"other";generation={revision:g.revision,status:runtime.status==="running"?"running":runtime.status==="interrupted"?"interrupted":"idle",finishKind,outputTokenLimit:typeof runtime.outputTokenLimit==="number"?runtime.outputTokenLimit:null,canContinue:runtime.canContinue===true,blockedReason:typeof runtime.blockedReason==="string"?runtime.blockedReason:null,lastError:typeof runtime.lastError==="string"?runtime.lastError:null,usageComplete:runtime.usageComplete===true};}catch{generation=undefined;}}return {id:r.id,conversationId:r.conversation_id,sequence:r.sequence,role:r.role,content:r.content,state:r.state,replyToMessageId:r.reply_to_message_id,supersedesMessageId:r.supersedes_message_id??null,superseded:Boolean(r.superseded),provider:r.provider??null,profileId:r.profile_id??null,model:r.model??null,usage:r.usage_json?JSON.parse(r.usage_json):null,errorCode:r.error_code??null,completionReason:r.completion_reason??null,createdAt:r.created_at,updatedAt:r.updated_at,citations:cs,...(generation?{generation}:{})};}
+ createGenerationContext(i:{projectId:string;messageId:string;snapshot:unknown;runtime:Record<string,unknown>;requestId:string}){const m=this.getMessage(i.projectId,i.messageId);if(!m)throw new Error("message not found");this.db.prepare("INSERT INTO chat_generation_contexts(message_id,snapshot_json,runtime_json,revision,active_request_id) VALUES(?,?,?,?,?) ON CONFLICT(message_id) DO UPDATE SET snapshot_json=excluded.snapshot_json,runtime_json=excluded.runtime_json,revision=excluded.revision,active_request_id=excluded.active_request_id").run(i.messageId,JSON.stringify(i.snapshot),JSON.stringify(i.runtime),0,i.requestId);}
+ updateGenerationSnapshot(i:{projectId:string;messageId:string;snapshot:unknown}){const m=this.getMessage(i.projectId,i.messageId);if(!m)throw new Error("message not found");this.db.prepare("UPDATE chat_generation_contexts SET snapshot_json=? WHERE message_id=?").run(JSON.stringify(i.snapshot),i.messageId);}
+ getGenerationContext(p:string,id:string):GenerationContextRecord|undefined{const m=this.getMessage(p,id);if(!m)return;const r=this.db.prepare("SELECT snapshot_json,runtime_json,revision,active_request_id FROM chat_generation_contexts WHERE message_id=?").get(id) as {snapshot_json:string;runtime_json:string;revision:number;active_request_id:string|null}|undefined;if(!r)return;try{return {snapshot:JSON.parse(r.snapshot_json),runtime:JSON.parse(r.runtime_json) as Record<string,unknown>,revision:r.revision,activeRequestId:r.active_request_id};}catch{return undefined;}}
+ updateGenerationRuntime(i:{projectId:string;messageId:string;runtime:Record<string,unknown>;activeRequestId?:string|null;expectedRevision?:number}){const current=this.getGenerationContext(i.projectId,i.messageId);if(!current)throw new Error("generation context not found");const result=this.db.prepare("UPDATE chat_generation_contexts SET runtime_json=?,revision=revision+1,active_request_id=? WHERE message_id=? AND revision=?").run(JSON.stringify(i.runtime),i.activeRequestId===undefined?current.activeRequestId:i.activeRequestId,i.messageId,i.expectedRevision??current.revision);if(result.changes!==1)throw new Error("generation context revision conflict");}
+claimGenerationContinuation(i:{projectId:string;messageId:string;requestId:string;expectedRevision:number;updatedAt:string}):GenerationContextRecord|undefined{const current=this.getGenerationContext(i.projectId,i.messageId);if(!current||current.activeRequestId!==null||current.revision!==i.expectedRevision)return;const runtime={...current.runtime,version:1,operation:"continue",baseUsage:this.getMessage(i.projectId,i.messageId)?.usage??null,baseUsageComplete:current.runtime.usageComplete===true,attemptUsage:null,usageComplete:false,status:"running",lastRequestId:i.requestId,finishKind:null,lastError:null,blockedReason:null,canContinue:false};const result=this.db.transaction(()=>{const message=this.db.prepare("UPDATE messages SET state='streaming',error_code=NULL,updated_at=? WHERE id=? AND state='completed' AND superseded=0").run(i.updatedAt,i.messageId);if(message.changes!==1)return 0;return this.db.prepare("UPDATE chat_generation_contexts SET runtime_json=?,revision=revision+1,active_request_id=? WHERE message_id=? AND revision=? AND active_request_id IS NULL").run(JSON.stringify(runtime),i.requestId,i.messageId,i.expectedRevision).changes;})();if(result!==1)return;return this.getGenerationContext(i.projectId,i.messageId);}
+ /**
+  * Outcome of a continuation claim. `replay` means this exact requestId already
+  * finished, so the caller must re-emit the stored terminal state instead of
+  * generating the same continuation twice.
+  */
+ claimContinuation(i:{projectId:string;messageId:string;requestId:string;expectedRevision:number;updatedAt:string}):{kind:"claimed";context:GenerationContextRecord}|{kind:"replay";context:GenerationContextRecord;message:MessageDto}|{kind:"conflict"}{
+  const current=this.getGenerationContext(i.projectId,i.messageId);
+  const message=this.getMessage(i.projectId,i.messageId);
+  if(!current||!message)return {kind:"conflict"};
+  if(current.activeRequestId===i.requestId)return {kind:"conflict"};
+  if(current.activeRequestId===null&&current.runtime.lastRequestId===i.requestId&&current.runtime.status!=="running")return {kind:"replay",context:current,message};
+  if(current.activeRequestId!==null||current.revision!==i.expectedRevision)return {kind:"conflict"};
+  const runtime={...current.runtime,version:1,operation:"continue",baseUsage:message.usage,baseUsageComplete:current.runtime.usageComplete===true,attemptUsage:null,usageComplete:false,status:"running",lastRequestId:i.requestId,finishKind:null,lastError:null,blockedReason:null,canContinue:false};
+  const result=this.db.transaction(()=>{const updated=this.db.prepare("UPDATE messages SET state='streaming',error_code=NULL,updated_at=? WHERE id=? AND state='completed' AND superseded=0").run(i.updatedAt,i.messageId);if(updated.changes!==1)return 0;return this.db.prepare("UPDATE chat_generation_contexts SET runtime_json=?,revision=revision+1,active_request_id=? WHERE message_id=? AND revision=? AND active_request_id IS NULL").run(JSON.stringify(runtime),i.requestId,i.messageId,i.expectedRevision).changes;})();
+  if(result!==1)return {kind:"conflict"};
+  return {kind:"claimed",context:this.getGenerationContext(i.projectId,i.messageId)!};
+ }
+restoreContinuationMessage(i:{projectId:string;messageId:string;updatedAt:string}){this.db.prepare("UPDATE messages SET state='completed',error_code=NULL,completion_reason='interrupted',updated_at=? WHERE id=? AND state='streaming'").run(i.updatedAt,i.messageId);}
+ /** Initial generation: text, citations, usage and runtime in one transaction. */
+ completeAssistantWithCitations(i:{projectId:string;conversationId:string;id:string;content:string;usage:{inputTokens:number;outputTokens:number;totalTokens:number};completionReason:string;provider:string;profileId:string;model:string;runtime:Record<string,unknown>;citations:ReadonlyArray<{id:string;label:string;sourceId:string;sourceChunkId:string;sourceDisplayName:string;sourceKind:string;locator:unknown;quote?:string;start:number}>;updatedAt:string}):MessageDto{
+  return this.db.transaction(()=>{
+   const m=this.getMessage(i.projectId,i.id);
+   if(m?.role!=="assistant"||m.state!=="streaming")throw new Error("message not completable");
+   this.db.prepare("UPDATE messages SET content=?,state='completed',usage_json=?,completion_reason=?,provider=?,profile_id=?,model=?,updated_at=? WHERE id=?").run(i.content,JSON.stringify(i.usage),i.completionReason,i.provider,i.profileId,i.model,i.updatedAt,i.id);
+   this.db.prepare("DELETE FROM message_citations WHERE message_id=?").run(i.id);
+   const insert=this.db.prepare("INSERT INTO message_citations(id,message_id,label,source_id,source_chunk_id,source_display_name,source_kind,locator_json,quote,created_at,start) VALUES(?,?,?,?,?,?,?,?,?,?,?)");
+   for(const citation of i.citations)insert.run(citation.id,i.id,citation.label,citation.sourceId,citation.sourceChunkId,citation.sourceDisplayName,citation.sourceKind,JSON.stringify(citation.locator),citation.quote??null,i.updatedAt,citation.start);
+   this.db.prepare("UPDATE chat_generation_contexts SET runtime_json=?,revision=revision+1,active_request_id=NULL WHERE message_id=?").run(JSON.stringify(i.runtime),i.id);
+   return this.getMessage(i.projectId,i.id)!;
+  })();
+ }
+ /**
+  * One transaction for every terminal continuation outcome: merged text,
+  * recomputed citations, usage, and the runtime summary. A partial commit here
+  * would leave a completed message with a running context that restart
+  * recovery cannot see.
+  */
+ finalizeContinuation(i:TerminalContinuationInput):MessageDto{
+  return this.db.transaction(()=>{
+   const m=this.getMessage(i.projectId,i.messageId);
+   if(m?.role!=="assistant")throw new Error("message not found");
+   const result=this.db.prepare("UPDATE messages SET content=?,state='completed',error_code=NULL,usage_json=?,completion_reason=?,provider=?,profile_id=?,model=?,updated_at=? WHERE id=? AND superseded=0").run(i.content,JSON.stringify(i.usage),i.completionReason,i.provider,i.profileId,i.model,i.updatedAt,i.messageId);
+   if(result.changes!==1)throw new Error("message not finalizable");
+   this.db.prepare("DELETE FROM message_citations WHERE message_id=?").run(i.messageId);
+   const insert=this.db.prepare("INSERT INTO message_citations(id,message_id,label,source_id,source_chunk_id,source_display_name,source_kind,locator_json,quote,created_at,start) VALUES(?,?,?,?,?,?,?,?,?,?,?)");
+   for(const citation of i.citations){
+    insert.run(citation.id,i.messageId,citation.label,citation.sourceId,citation.sourceChunkId,citation.sourceDisplayName,citation.sourceKind,JSON.stringify(citation.locator),citation.quote??null,i.updatedAt,citation.start);
+   }
+   const context=this.db.prepare("UPDATE chat_generation_contexts SET runtime_json=?,revision=revision+1,active_request_id=NULL WHERE message_id=? AND active_request_id IS NOT NULL").run(JSON.stringify(i.runtime),i.messageId);
+   if(context.changes!==1)throw new Error("generation context not active");
+   return this.getMessage(i.projectId,i.messageId)!;
+  })();
+ }
+  listMessages(p:string,c:string){this.own(p,c);return (this.db.prepare("SELECT id FROM messages WHERE conversation_id=? ORDER BY sequence").pluck().all(c) as string[]).map(id=>this.getMessage(p,id)!);}
+  listHistoryPairs(input:{projectId:string;conversationId:string;beforeSequence:number;cursor?:number;limit?:number}):HistoryPair[]{
+   this.own(input.projectId,input.conversationId);
+   const limit=Math.min(32,Math.max(1,input.limit??32));
+   const cursor=input.cursor??input.beforeSequence;
+   const rows=this.db.prepare(`
+    SELECT u.id AS user_id,u.sequence AS user_sequence,u.content AS user_content,
+           a.id AS assistant_id,a.sequence AS assistant_sequence,a.content AS assistant_content
+    FROM messages u
+    JOIN messages a ON a.reply_to_message_id=u.id
+      AND a.role='assistant' AND a.state='completed' AND a.superseded=0
+      AND a.content<>'' AND a.conversation_id=u.conversation_id AND a.sequence<?
+    WHERE u.conversation_id=? AND u.role='user' AND u.state='completed'
+      AND u.sequence<? AND u.content<>''
+    ORDER BY u.sequence DESC
+    LIMIT ?
+   `).all(input.beforeSequence,input.conversationId,Math.min(cursor,input.beforeSequence),limit) as Array<Record<string,unknown>>;
+   return rows.reverse().map((row)=>({
+    user:{id:String(row.user_id),sequence:Number(row.user_sequence),content:String(row.user_content??"")},
+    assistant:{id:String(row.assistant_id),sequence:Number(row.assistant_sequence),content:String(row.assistant_content??"")}
+   }));
+  }
  private mapConversation(r:any):ConversationDto{return {id:r.id,projectId:r.project_id,title:r.title,createdAt:r.created_at,updatedAt:r.updated_at,deletedAt:r.deleted_at,archivedAt:r.archived_at??null};}
 }

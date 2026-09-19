@@ -11,6 +11,17 @@ const retrievals: Record<string, RetrievedCitation> = {
 };
 
 describe("finalizeCitations", () => {
+  it.each(["[", "[S", "[S1", "[S100"])("marks a trailing incomplete prose citation uncertain: %s", (suffix) => {
+    expect(finalizeCitations("claim " + suffix, retrievals).hasInvalidCitations).toBe(true);
+    expect(finalizeCitations("`" + suffix, retrievals).hasInvalidCitations).toBe(false);
+  });
+  it("rejects leading zeros and preserves offsets across multi-backtick and tilde code", () => {
+    const text = ['[S01] ``[S1]``', '~~~ts', '[S2]', '~~~', 'real [S2]'].join('\n');
+    const result = finalizeCitations(text, retrievals);
+    expect(result.citations.map((item) => text.slice(item.start, item.end))).toEqual(["[S2]"]);
+    expect(result.citations[0]!.start).toBe(text.lastIndexOf("[S2]"));
+    expect(result.hasInvalidCitations).toBe(true);
+  });
   it("resolves single and multiple citations with exact character ranges", () => {
     const text = "Alpha [S1] then Beta [S1][S2].";
     const result = finalizeCitations(text, retrievals);

@@ -13,6 +13,8 @@ export interface UseChatStreamResult {
   streamingMessageId: string | null;
   /** Id of a failed/cancelled assistant draft that can be repaired via regenerate. */
   repairableMessageId: string | null;
+  /** Id of an answer whose continuation was interrupted and can be continued again. */
+  continuableMessageId: string | null;
   state: ChatStreamState;
   error: AppErrorDto | null;
   fallback: Extract<ChatRequestEvent, { type: "fallback" }> | null;
@@ -20,6 +22,7 @@ export interface UseChatStreamResult {
   send(question: string, options?: { thinking?: "off" | "low" | "medium" | "high"; conversationId?: string }): Promise<boolean>;
   stop(): Promise<boolean>;
   regenerate(messageId: string, options?: { thinking?: "off" | "low" | "medium" | "high"; question?: string }): Promise<boolean>;
+  continueGeneration(messageId: string, expectedRevision: number): Promise<boolean>;
   repair(options?: { thinking?: "off" | "low" | "medium" | "high" }): Promise<boolean>;
 }
 
@@ -45,11 +48,12 @@ export function useChatStream(
   const [error, setError] = useState<AppErrorDto | null>(null);
   const [fallback, setFallback] = useState<Extract<ChatRequestEvent, { type: "fallback" }> | null>(null);
   const [repairableMessageId, setRepairableMessageId] = useState<string | null>(null);
+  const [continuableMessageId, setContinuableMessageId] = useState<string | null>(null);
   // Optimistic user rows are keyed by request id so the completed reconciliation
   // can drop them once the persisted transcript arrives, preventing duplicates.
   const optimisticUserRef = useRef<Map<string, string>>(new Map());
   // Live turn info in a ref so the event sink never goes stale mid-stream.
-  const turnRef = useRef<{ requestId: string; conversationId: string; messageId?: string } | null>(null);
+  const turnRef = useRef<{ requestId: string; conversationId: string; messageId?: string; continuation?: boolean } | null>(null);
   const unsubscribeRef = useRef<(() => void) | null>(null);
   const prevConversationRef = useRef(conversationId);
   const restoredRef = useRef(new Map([[conversationId, restoredMessages]]));
@@ -105,22 +109,69 @@ export function useChatStream(
         });
       });
     };
+    const upsertStartedMessage = (message: MessageDto): void => {
+      updateMessages(targetConversationId, (prev) => {
+        const index = prev.findIndex((item) => item.id === message.id);
+        if (index < 0) return [...prev, message];
+        const next = [...prev];
+        next[index] = message;
+        return next;
+      });
+    };
     switch (event.type) {
+      case "started":
+        if (event.message) upsertStartedMessage(event.message);
+        break;
       case "text-delta":
-        updateMessages(targetConversationId, (prev) => prev.map((m) => (m.id === event.messageId ? { ...m, content: m.content + event.text } : m)));
+        updateMessages(targetConversationId, (prev) => prev.map((m) => {
+          if (m.id !== event.messageId) return m;
+          // offset guards against a replayed or out-of-order fragment being
+          // appended twice; a gap is resolved by the terminal message instead.
+          if (event.offset !== undefined) {
+            if (event.offset === m.content.length) return { ...m, content: m.content + event.text };
+            if (event.offset < m.content.length) return m;
+            return m;
+          }
+          return { ...m, content: m.content + event.text };
+        }));
         break;
       case "completed":
         reconcileTerminal(event.requestId, event.message);
         setState("idle");
         setError(null);
         setRepairableMessageId(null);
+        setContinuableMessageId(null);
         break;
       case "cancelled":
         reconcileTerminal(event.requestId, event.message);
         setState("idle");
-        setRepairableMessageId(event.message.id);
+        // A continuation terminal event carries the completed answer, not a
+        // broken draft: retrying it must continue, never regenerate.
+        if (event.operation === "continue") {
+          setRepairableMessageId(null);
+          setContinuableMessageId(event.message.generation?.canContinue ? event.message.id : null);
+        } else {
+          setRepairableMessageId(event.message.id);
+          setContinuableMessageId(null);
+        }
         break;
       case "failed":
+        if (event.operation === "continue" && event.message) {
+          reconcileTerminal(event.requestId, event.message);
+          setState("idle");
+          setError({
+            ...event.error,
+            code: appErrorCodeSchema.safeParse(event.error.code).success
+              ? appErrorCodeSchema.parse(event.error.code)
+              : "INTERNAL",
+            messageKey: event.error.messageKey,
+            recoverable: event.error.recoverable
+          });
+          setRepairableMessageId(null);
+          setContinuableMessageId(event.message.generation?.canContinue ? event.message.id : null);
+          break;
+        }
+        if (event.message) reconcileTerminal(event.requestId, event.message);
         updateMessages(targetConversationId, (prev) => prev.map((message) => message.id === event.messageId
           ? { ...message, state: "failed", errorCode: event.error.code, completionReason: null }
           : message));
@@ -130,12 +181,14 @@ export function useChatStream(
           // the renderer AppErrorDto vocabulary without inventing codes.
           const code = appErrorCodeSchema.safeParse(event.error.code);
           setError({
+            ...event.error,
             code: code.success ? code.data : "INTERNAL",
             messageKey: event.error.messageKey,
             recoverable: event.error.recoverable
           });
         }
         setRepairableMessageId(event.messageId);
+        setContinuableMessageId(null);
         break;
       case "fallback":
         setFallback(event);
@@ -152,16 +205,19 @@ export function useChatStream(
   }, [updateMessages]);
 
   /** Run one IPC call, then subscribe to its requestId-scoped stream. */
-  const runTurn = useCallback(async (targetConversationId: string, invoke: (requestId: string) => Promise<SendResult>): Promise<boolean> => {
+  const runTurn = useCallback(async (targetConversationId: string, invoke: (requestId: string) => Promise<SendResult>, options?: { continuation?: boolean; onAccepted?: () => void }): Promise<boolean> => {
     if (turnRef.current) return false; // one live turn at a time
     try {
       const requestId = crypto.randomUUID();
-      turnRef.current = { requestId, conversationId: targetConversationId };
+      let accepted = false;
+      const accept = (): void => { if (!accepted) { accepted = true; options?.onAccepted?.(); } };
+      turnRef.current = { requestId, conversationId: targetConversationId, ...(options?.continuation ? { continuation: true } : {}) };
       setStatusConversationId(targetConversationId);
       const sink = (event: ChatRequestEvent): void => {
         if (!turnRef.current || event.requestId !== turnRef.current.requestId) return;
         if ("messageId" in event) turnRef.current.messageId = event.messageId;
         if (event.type === "text-delta" || event.type === "started") {
+          accept();
           setStreamingMessageId(event.messageId);
           addAssistantDraft(targetConversationId, event.messageId);
         }
@@ -171,8 +227,21 @@ export function useChatStream(
       unsubscribeRef.current = chat.subscribe(requestId, sink);
       setState("streaming");
       const result = await invoke(requestId);
-      if (!result.ok) { teardown(); setState("failed"); setError(result.error); return false; }
+      if (!result.ok) {
+        // A terminal event may have been delivered before the IPC call
+        // returned (notably continuation interruption). Preserve that
+        // authoritative state instead of overwriting it with a generic error.
+        if (turnRef.current?.requestId === requestId) {
+          const optimisticId = optimisticUserRef.current.get(requestId);
+          if (!accepted && optimisticId) updateMessages(targetConversationId, (items) => items.filter((item) => item.id !== optimisticId));
+          teardown();
+          setState("failed");
+          setError(result.error);
+        }
+        return false;
+      }
       if (result.value.requestId !== requestId) { teardown(); return false; }
+      accept();
       if (!turnRef.current) return true;
       const draftId = result.value.assistantMessageId;
       turnRef.current.messageId = draftId;
@@ -189,7 +258,7 @@ export function useChatStream(
       });
       return false;
     }
-  }, [chat, addAssistantDraft, applyEvent, teardown]);
+  }, [chat, addAssistantDraft, applyEvent, teardown, updateMessages]);
 
   const send = useCallback((question: string, options?: { thinking?: "off" | "low" | "medium" | "high"; conversationId?: string }): Promise<boolean> => {
     if (turnRef.current) return Promise.resolve(false);
@@ -227,21 +296,22 @@ export function useChatStream(
   const regenerate = useCallback((messageId: string, options?: { thinking?: "off" | "low" | "medium" | "high"; question?: string }): Promise<boolean> => {
     if (turnRef.current) return Promise.resolve(false);
     setError(null);
-    if (options?.question) {
+    const onAccepted = (): void => {
+      if (!options?.question) return;
       updateMessages(conversationId, (current) => {
         const userId = current.find((message) => message.id === messageId)?.replyToMessageId;
         return current.map((message) => message.id === userId ? { ...message, content: options.question! } : message);
       });
-    }
-    return runTurn(conversationId, (requestId) => chat.regenerate({ requestId, projectId, conversationId, messageId, ...(options?.question ? { question: options.question } : {}), ...(options?.thinking ? { thinking: options.thinking } : {}) }));
+    };
+    return runTurn(conversationId, (requestId) => chat.regenerate({ requestId, projectId, conversationId, messageId, ...(options?.question ? { question: options.question } : {}), ...(options?.thinking ? { thinking: options.thinking } : {}) }), { onAccepted });
   }, [runTurn, chat, projectId, conversationId, updateMessages]);
 
   const stop = useCallback(async (): Promise<boolean> => {
     const current = turnRef.current;
     if (!current) return false;
-    setState("cancelled");
+    setState(current.continuation ? "streaming" : "cancelled");
     setStreamingMessageId(null);
-    if (current.messageId) {
+    if (!current.continuation && current.messageId) {
       updateMessages(current.conversationId, (prev) => prev.map((message) => message.id === current.messageId
         ? { ...message, state: "cancelled", completionReason: "user_abort" }
         : message));
@@ -260,10 +330,23 @@ export function useChatStream(
     return stopped;
   }, [chat, projectId, updateMessages]);
 
+  const continueGeneration = useCallback((messageId: string, expectedRevision: number): Promise<boolean> => {
+    if (turnRef.current) return Promise.resolve(false);
+    setError(null);
+    return runTurn(conversationId, (requestId) => chat.continue({ requestId, projectId, conversationId, messageId, expectedRevision }), { continuation: true });
+  }, [runTurn, chat, projectId, conversationId]);
+
   const repair = useCallback((options?: { thinking?: "off" | "low" | "medium" | "high" }): Promise<boolean> => {
     const target = repairableMessageId;
-    return target ? regenerate(target, options) : Promise.resolve(false);
-  }, [regenerate, repairableMessageId]);
+    if (target) return regenerate(target, options);
+    // Interrupted continuations retry through the continue endpoint so the
+    // existing answer is appended to instead of being superseded.
+    const continuationTarget = continuableMessageId;
+    if (!continuationTarget) return Promise.resolve(false);
+    const message = (messagesByConversation[conversationId] ?? []).find((item) => item.id === continuationTarget);
+    if (!message?.generation) return Promise.resolve(false);
+    return continueGeneration(continuationTarget, message.generation.revision);
+  }, [regenerate, repairableMessageId, continuableMessageId, messagesByConversation, conversationId, continueGeneration]);
 
   // Unmount cleanup: drop subscription so late provider events are ignored.
   useEffect(() => () => {
@@ -280,6 +363,7 @@ export function useChatStream(
     messages,
     streamingMessageId: ownsStatus ? streamingMessageId : null,
     repairableMessageId: ownsStatus ? repairableMessageId : null,
+    continuableMessageId: ownsStatus ? continuableMessageId : null,
     state: visibleState,
     error: ownsStatus ? error : null,
     fallback: ownsStatus ? fallback : null,
@@ -287,6 +371,7 @@ export function useChatStream(
     send,
     stop,
     regenerate,
-    repair
-  }), [messages, ownsStatus, streamingMessageId, repairableMessageId, visibleState, error, fallback, canSend, send, stop, regenerate, repair]);
+    repair,
+    continueGeneration
+  }), [messages, ownsStatus, streamingMessageId, repairableMessageId, continuableMessageId, visibleState, error, fallback, canSend, send, stop, regenerate, repair, continueGeneration]);
 }

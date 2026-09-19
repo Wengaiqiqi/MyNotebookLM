@@ -1,4 +1,4 @@
-import { ProviderHttpClient, ProviderRequestError } from "./http-client";
+import { ProviderHttpClient, ProviderRequestError, responseByteBudget } from "./http-client";
 import { classifyProviderError } from "./provider-errors";
 import { isRecord, malformedResponse, optionalFiniteNumber } from "./provider-guards";
 import type {
@@ -59,7 +59,8 @@ export class OllamaProvider implements ModelProvider {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify(body),
-      signal
+      signal,
+      maxResponseBytes: responseByteBudget(request.maxTokens)
       })) {
       if (!isRecord(chunk)) throw malformedResponse();
       if (completion !== undefined) throw malformedResponse();
