@@ -1360,6 +1360,7 @@ button:disabled { cursor: not-allowed; opacity: .5; }
 
 /* List Wrapper */
 .quiz-list-wrapper { display: flex; flex-direction: column; gap: 16px; }
+.quiz-summary-action { display: flex; justify-content: center; padding-top: 2px; }
 .studio-run form { display: grid; gap: 12px; padding: 16px; }
 .studio-run .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 .run-actions { display: flex; gap: 8px; align-items: center; }

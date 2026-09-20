@@ -240,17 +240,6 @@ function QuizAttempt({ projectId, insight }: { projectId: string; insight: Insig
           </div>
 
           <div className="quiz-actions-group">
-            {answeredCount > 0 && (
-              <button
-                type="button"
-                className={`btn xs quiz-action-btn${showSummary ? " primary" : ""}`}
-                onClick={() => setShowSummary(!showSummary)}
-              >
-                <Icon name="sparkle" />
-                <span>{showSummary ? t("transformations.backToQuiz") : t("transformations.viewSummary")}</span>
-              </button>
-            )}
-
             <button
               type="button"
               className="btn xs quiz-action-btn danger-hover"
@@ -331,6 +320,18 @@ function QuizAttempt({ projectId, insight }: { projectId: string; insight: Insig
               onLegacyUpdate={(upd) => update(`${idx}:${q.question}`, upd)}
             />
           ))}
+          {answeredCount > 0 && (
+            <div className="quiz-summary-action">
+              <button
+                type="button"
+                className="btn xs quiz-action-btn primary"
+                onClick={() => setShowSummary(true)}
+              >
+                <Icon name="sparkle" />
+                <span>{t("transformations.viewSummary")}</span>
+              </button>
+            </div>
+          )}
         </div>
       )}
     </div>

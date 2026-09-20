@@ -91,8 +91,11 @@ D. 16:00
   fireEvent.click(q2OptB);
   expect(screen.getByText("回答正确")).toBeTruthy();
 
+  const summaryButton = screen.getByRole("button", { name: /查看测试成绩/ });
+  expect(summaryButton.closest(".quiz-list-wrapper")).not.toBeNull();
+
   // View summary
-  fireEvent.click(screen.getByRole("button", { name: /查看测试成绩/ }));
+  fireEvent.click(summaryButton);
   expect(screen.getByText("50%")).toBeTruthy();
   expect(screen.getByText("答对 1 / 2 题")).toBeTruthy();
 });
