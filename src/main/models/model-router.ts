@@ -1,5 +1,6 @@
 import {
   modelTaskKindSchema,
+  modelOutputKind,
   type ModelProfileDto,
   type ModelTaskKind
 } from "../../shared/models";
@@ -11,7 +12,8 @@ const generationTasks = new Set<ModelTaskKind>([
   "summary",
   "key-points",
   "qa",
-  "custom-transformation"
+  "custom-transformation",
+  "podcast"
 ]);
 
 export type ModelProfileSnapshot = Readonly<ModelProfileDto>;
@@ -36,7 +38,7 @@ export class ModelRouter {
     // Specialized transformation routes are optional. If one is absent,
     // reuse the configured chat route so a missing per-task setting does not
     // turn a valid transformation into a generic failure.
-    const fallbackRoutes = explicitProfileId === undefined && configuredRoutes.length === 0 && task !== "chat"
+    const fallbackRoutes = explicitProfileId === undefined && configuredRoutes.length === 0 && task !== "chat" && task !== "podcast"
       ? this.routes.getRoute("chat")
       : configuredRoutes;
     const candidates = [
@@ -51,6 +53,7 @@ export class ModelRouter {
       seen.add(profileId);
       const profile = this.routes.getProfile(profileId);
       if (!profile || !profile.enabled || profile.capability !== requiredCapability) continue;
+      if (task !== "podcast" && modelOutputKind(profile) === "speech") continue;
       resolved.push(Object.freeze({ ...profile }));
     }
 

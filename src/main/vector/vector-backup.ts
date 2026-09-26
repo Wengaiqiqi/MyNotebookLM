@@ -1,6 +1,6 @@
 import Database from "better-sqlite3";
 import { createHash } from "node:crypto";
-import { readFile, rename, writeFile, readdir, unlink } from "node:fs/promises";
+import { copyFile, readFile, rename, writeFile, readdir, unlink } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 export type VectorBackup = { verified: boolean; createdAt: number; path?: string };
 export function keepNewestBackups(backups: VectorBackup[]): VectorBackup[] { return backups.filter((b) => b.verified).sort((a, b) => b.createdAt - a.createdAt).slice(0, 3); }
@@ -40,7 +40,11 @@ export async function backupDatabase(db: Database.Database, targetPath: string):
     await db.backup(temp);
     if (!await isVerifiedBackup(temp, createHash("sha256").update(await readFile(temp)).digest("hex"))) throw new Error("backup verification failed");
     const sha256 = createHash("sha256").update(await readFile(temp)).digest("hex");
-    await rename(temp, targetPath);
+    try { await rename(temp, targetPath); }
+    catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "EXDEV") throw error;
+      await copyFile(temp, targetPath);
+    }
     await writeFile(targetPath + ".json", JSON.stringify({ verified: true, createdAt, path: targetPath, sha256 }));
     for (const old of (await verifiedMetadata(dirname(targetPath))).sort((a, b) => b.createdAt - a.createdAt).slice(3)) { await unlink(old.path).catch(() => {}); await unlink(old.path + ".json").catch(() => {}); }
     return { verified: true, createdAt, path: targetPath, sha256 };

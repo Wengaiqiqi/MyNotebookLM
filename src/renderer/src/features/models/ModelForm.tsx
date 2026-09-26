@@ -8,6 +8,8 @@ import type {
   ProviderKind
 } from "../../../../shared/models";
 import Icon from "../../ui/Icon";
+import RoundedSelect from "../../ui/RoundedSelect";
+import { modelOutputKind } from "../../../../shared/models";
 import { toast } from "../../ui/Toast";
 
 export type SavedProfile = { profile: ModelProfileDto; credentialMask?: string };
@@ -64,6 +66,7 @@ export default function ModelForm({ capability, existing, existingProfiles, init
   const [baseUrl, setBaseUrl] = useState(primaryExisting?.baseUrl ?? (initialProviderValue === "local" ? "" : PROVIDER_DEFAULT_BASE_URL.openai ?? ""));
   const [modelId, setModelId] = useState(primaryExisting?.modelId ?? (initialProviderValue === "local" && builtInModel ? builtInModel.modelId : ""));
   const [apiKey, setApiKey] = useState("");
+  const [outputKinds, setOutputKinds] = useState<Record<string, "text" | "speech">>(() => Object.fromEntries(allExistingProfiles.filter((profile) => profile.outputKind).map((profile) => [profile.modelId, profile.outputKind!])));
   const [showKey, setShowKey] = useState(false);
 
   const initialDescriptors: ModelDescriptorDto[] = useMemo(() => {
@@ -219,6 +222,7 @@ export default function ModelForm({ capability, existing, existingProfiles, init
         capability,
         baseUrl: baseUrl.trim(),
         modelId: selectedId,
+        ...(capability === "generation" && outputKinds[selectedId] ? { outputKind: outputKinds[selectedId] } : {}),
         enabled: match ? match.enabled : true
       };
       const result = await window.myNotebook.models.saveProfile({
@@ -401,6 +405,15 @@ export default function ModelForm({ capability, existing, existingProfiles, init
             </div>
             {discoveredNote && <span className="form-ok"><Icon name="check" />{discoveredNote}</span>}
           </div>
+
+          {capability === "generation" && (selectedModelIds.length ? selectedModelIds : modelId.trim() ? [modelId.trim()] : []).map((id) => (
+            <label className="field" key={id}>
+              {t("model.outputKind")} · {id}
+              <RoundedSelect ariaLabel={`${t("model.outputKind")} · ${id}`} value={outputKinds[id] ?? modelOutputKind({ modelId: id })}
+                options={[{ value: "text", label: t("model.textOutput") }, ...(["openai", "openai-compatible", "gemini"].includes(provider) ? [{ value: "speech", label: t("model.speechOutput") }] : [])]}
+                onChange={(value) => setOutputKinds((current) => ({ ...current, [id]: value as "text" | "speech" }))} />
+            </label>
+          ))}
 
           <div className="dialog-foot" style={{ marginTop: 2 }}>
             {onCancel && <button type="button" className="btn" onClick={onCancel}>{t("common.cancel")}</button>}

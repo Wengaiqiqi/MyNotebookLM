@@ -39,7 +39,7 @@ export const updateTransformationInputSchema = createTransformationInputSchema.e
 }).strict();
 export const transformationIdInputSchema = z.object({ projectId: z.uuid(), id: z.uuid() }).strict();
 export const builtinTransformationDtoSchema = z.object({
-  key: z.enum(["summary", "key-points", "qa"]), language: z.enum(["zh-CN", "en"]), name: z.string().trim().min(1).max(100),
+  key: z.enum(["summary", "key-points", "qa", "podcast"]), language: z.enum(["zh-CN", "en"]), name: z.string().trim().min(1).max(100),
   appliesTo: transformationAppliesToSchema, prompt: z.string().trim().min(1)
 }).strict();
 
@@ -49,7 +49,8 @@ export const insightUsageSchema = z.object({
   totalTokens: z.number().int().nonnegative()
 }).strict();
 export const insightDtoSchema = z.object({
-  builtinKey: z.enum(["summary", "key-points", "qa"]).nullable().optional(),
+  builtinKey: z.enum(["summary", "key-points", "qa", "podcast"]).nullable().optional(),
+  hasAudio: z.boolean().optional(),
   id: z.uuid(),
   projectId: z.uuid(),
   transformationId: z.uuid().nullable(),
@@ -70,7 +71,7 @@ export const insightDtoSchema = z.object({
 export const transformationRunInputSchema = z.object({
   projectId: z.uuid(),
   transformationId: z.uuid().optional(),
-  builtinKey: z.enum(["summary", "key-points", "qa"]).optional(),
+  builtinKey: z.enum(["summary", "key-points", "qa", "podcast"]).optional(),
   language: z.enum(["zh-CN", "en"]).optional(),
   projectTarget: z.literal(true).optional(),
   sourceRevisionId: z.uuid().optional(),
@@ -99,6 +100,8 @@ export const transformationRunInputSchema = z.object({
 })
 
 export type TransformationAppliesTo = z.infer<typeof transformationAppliesToSchema>;
+export const podcastAudioSchema = z.object({ data: z.string().min(1).max(90_000_000), mimeType: z.literal("audio/wav") }).strict();
+export type PodcastAudioDto = z.infer<typeof podcastAudioSchema>;
 export type TransformationDto = z.infer<typeof transformationDtoSchema>;
 export type CreateTransformationInput = z.infer<typeof createTransformationInputSchema>;
 export type UpdateTransformationInput = z.infer<typeof updateTransformationInputSchema>;

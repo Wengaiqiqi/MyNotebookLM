@@ -24,7 +24,7 @@ import type { AppTheme } from "./settings";
 import { sourceKindSchema, type SourceDto, type SourceKind } from "./sources";
 import type { NoteDto, NoteLinkDto, CreateNoteInput, UpdateNoteInput, NoteStateInput, NoteIdInput, CreateNoteLinkInput, DeleteNoteLinkInput, GenerateNoteTitleInput } from "./notes";
 import type { TransformationDto, CreateTransformationInput, UpdateTransformationInput, InsightDto, TransformationRunInput, BuiltinTransformationDto } from "./transformations";
-import type { ModelRouteDto, ModelRouteAttemptDto, ModelTaskKind } from "./models";
+import { modelTaskKindSchema, type ModelRouteDto, type ModelRouteAttemptDto, type ModelTaskKind } from "./models";
 import type { TaskDto } from "./tasks";
 import type { RetrievalSearchInput, SearchHitDto, VectorHealthDto, VectorProfileInput, VectorSpaceInput, VectorTaskIdInput, VectorTaskInput } from "./vector";
 
@@ -72,12 +72,12 @@ export const NOTE_CHANNELS = {
 export const TRANSFORMATION_CHANNELS = {
   listRules: "transformations:v1:list-rules", createRule: "transformations:v1:create-rule", updateRule: "transformations:v1:update-rule", deleteRule: "transformations:v1:delete-rule",
   listBuiltins: "transformations:v1:list-builtins", run: "transformations:v1:run", cancel: "transformations:v1:cancel", retry: "transformations:v1:retry",
-  listInsights: "transformations:v1:list-insights", deleteInsight: "transformations:v1:delete-insight", convertToNote: "transformations:v1:convert-to-note"
+  listInsights: "transformations:v1:list-insights", deleteInsight: "transformations:v1:delete-insight", convertToNote: "transformations:v1:convert-to-note", getAudio: "transformations:v1:get-audio"
 } as const;
 
-export const modelRoutesInputSchema = z.object({ taskKind: z.enum(["chat", "note-title", "summary", "key-points", "qa", "custom-transformation", "embedding"]) }).strict();
-export const saveModelRoutesInputSchema = z.object({ taskKind: z.enum(["chat", "note-title", "summary", "key-points", "qa", "custom-transformation", "embedding"]), profileIds: z.array(z.uuid()).min(1).max(16) }).strict();
-export const modelRouteAttemptsInputSchema = z.object({ projectId: z.uuid(), taskKind: z.enum(["chat", "note-title", "summary", "key-points", "qa", "custom-transformation", "embedding"]).optional(), limit: z.number().int().positive().max(100).optional(), offset: z.number().int().nonnegative().max(100_000).optional() }).strict();
+export const modelRoutesInputSchema = z.object({ taskKind: modelTaskKindSchema }).strict();
+export const saveModelRoutesInputSchema = z.object({ taskKind: modelTaskKindSchema, profileIds: z.array(z.uuid()).min(1).max(16) }).strict();
+export const modelRouteAttemptsInputSchema = z.object({ projectId: z.uuid(), taskKind: modelTaskKindSchema.optional(), limit: z.number().int().positive().max(100).optional(), offset: z.number().int().nonnegative().max(100_000).optional() }).strict();
 export const noteListInputSchema = z.object({ projectId: z.uuid(), includeArchived: z.boolean().optional() }).strict();
 export const noteGenerateTitleInputSchema = z.object({ projectId: z.uuid(), noteId: z.uuid(), locale: z.enum(["zh-CN", "en"]), profileId: z.uuid().optional() }).strict();
 export const transformationRulesInputSchema = z.object({ projectId: z.uuid() }).strict();
@@ -280,6 +280,7 @@ export interface DesktopApi {
     listRules(input: { projectId: string }): Promise<Result<TransformationDto[]>>; createRule(input: CreateTransformationInput): Promise<Result<TransformationDto>>; updateRule(input: UpdateTransformationInput): Promise<Result<TransformationDto>>; deleteRule(input: { projectId: string; id: string; version: number }): Promise<Result<void>>;
     listBuiltins(input?: { language?: "zh-CN" | "en" }): Promise<Result<BuiltinTransformationDto[]>>; run(input: TransformationRunInput): Promise<Result<TaskDto>>; cancel(input: { projectId: string; taskId: string }): Promise<Result<TaskDto>>; retry(input: { projectId: string; taskId: string }): Promise<Result<TaskDto>>;
     listInsights(input: { projectId: string; limit?: number; offset?: number }): Promise<Result<InsightDto[]>>; deleteInsight(input: { projectId: string; insightId: string }): Promise<Result<void>>; convertToNote(input: { projectId: string; insightId: string }): Promise<Result<NoteDto>>;
+    getAudio(input: { projectId: string; insightId: string }): Promise<Result<import("./transformations").PodcastAudioDto>>;
   };
   credentials: {
     set(input: CredentialInput): Promise<Result<CredentialStatusDto>>;

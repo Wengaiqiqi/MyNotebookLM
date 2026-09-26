@@ -35,6 +35,7 @@ export const modelTaskKindSchema = z.enum([
   "key-points",
   "qa",
   "custom-transformation",
+  "podcast",
   "embedding"
 ]);
 
@@ -56,13 +57,17 @@ const modelProfileFieldsSchema = z.object({
   capability: modelCapabilitySchema,
   baseUrl: z.string().trim().max(2_048),
   modelId: z.string().trim().min(1).max(200),
+  outputKind: z.enum(["text", "speech"]).optional(),
   enabled: z.boolean()
 }).strict();
 
 function validateProviderCapability(
-  profile: { provider: ProviderKind; capability: ModelCapability },
+  profile: { provider: ProviderKind; capability: ModelCapability; outputKind?: "text" | "speech" | undefined },
   context: z.RefinementCtx
 ): void {
+  if (profile.outputKind === "speech" && (profile.capability !== "generation" || !["openai", "openai-compatible", "gemini"].includes(profile.provider))) {
+    context.addIssue({ code: "custom", path: ["outputKind"], message: "Speech requires an OpenAI-compatible or Gemini generation profile" });
+  }
   if (profile.provider === "anthropic" && profile.capability !== "generation") {
     context.addIssue({
       code: "custom",
@@ -255,6 +260,10 @@ export const modelTestResultDtoSchema = z.object({
 }).strict();
 
 export type ProviderKind = z.infer<typeof providerKindSchema>;
+/** Explicit selection also supports speech services with arbitrary model IDs. */
+export function modelOutputKind(profile: { modelId: string; outputKind?: "text" | "speech" | undefined }): "text" | "speech" {
+  return profile.outputKind ?? (/tts|text[-_]?to[-_]?speech|kokoro|cosyvoice|fish[-_]?speech/i.test(profile.modelId) ? "speech" : "text");
+}
 export type ModelCapability = z.infer<typeof modelCapabilitySchema>;
 export type CapabilityEvidence = z.infer<typeof capabilityEvidenceSchema>;
 export type GenerationLimits = z.infer<typeof generationLimitsSchema>;

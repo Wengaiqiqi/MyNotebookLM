@@ -8,6 +8,7 @@ import {
   discoverModelsInputSchema,
   modelDescriptorSchema,
   modelTaskKindSchema,
+  modelOutputKind,
   builtInModelProfileDtoSchema,
   updateGenerationSettingsInputSchema,
   modelProfileInputSchema,
@@ -55,6 +56,7 @@ import { OpenAiCompatibleProvider, OpenAiProvider } from "./openai-provider";
 import { ProviderRequestError } from "./http-client";
 import type { ModelDescriptor, ModelProvider } from "./provider";
 import { createLocalDirectoryEmbeddingProvider } from "../vector/local-embedding-provider";
+import { synthesizeSpeech } from "./speech-provider";
 
 export type ModelProviderFactory = (
   provider: ProviderKind,
@@ -225,6 +227,9 @@ export class ModelService {
       if (profiles.some((profile) => !profile!.enabled)) return errorResult(appError("VALIDATION", "errors.validation", true));
       const capability = taskKind === "embedding" ? "embedding" : "generation";
       if (profiles.some((profile) => profile!.capability !== capability)) return capabilityError();
+      if (taskKind === "podcast") {
+        if (!["text", "speech"].every((kind) => profiles.some((profile) => modelOutputKind(profile!) === kind))) return errorResult(appError("VALIDATION", "errors.podcastRouteMissing", true));
+      } else if (profiles.some((profile) => profile!.capability === "generation" && modelOutputKind(profile!) === "speech")) return capabilityError();
       return { ok: true, value: this.settings.replaceRoute(taskKind, input.profileIds) };
     } catch (reason) { return resultFromError(reason); }
   }
@@ -247,6 +252,7 @@ export class ModelService {
     const generationProfile = this.settings.getProfile(parsed.generationProfileId);
     if (!generationProfile) return notFound();
     if (generationProfile.capability !== "generation") return capabilityError();
+    if (modelOutputKind(generationProfile) === "speech") return capabilityError();
     if (!generationProfile.enabled) return errorResult(appError("VALIDATION", "errors.validation", true));
 
     if (!isBuiltInLocalEmbeddingProfile(parsed.embeddingProfileId)) {
@@ -322,10 +328,15 @@ export class ModelService {
     }
     if (isBuiltInLocalEmbeddingProfile(parsed.profile)) return builtInError();
 
-    const tested = await this.testProfile(parsed);
-    if (!tested.ok) return tested;
-
     const profile = modelProfileInputSchema.parse(parsed.profile);
+    const existing = this.settings.getProfile(profile.id);
+    // Updating credentials or display fields must not synthesize audio again.
+    const unchangedModel = existing && existing.provider === profile.provider
+      && existing.capability === profile.capability && existing.baseUrl === profile.baseUrl
+      && existing.modelId === profile.modelId && modelOutputKind(existing) === modelOutputKind(profile);
+    const tested = unchangedModel ? undefined : await this.testProfile(parsed);
+    if (tested && !tested.ok) return tested;
+
     try {
       if (parsed.apiKey !== undefined) {
         const prepared = await this.credentials.prepare({
@@ -335,7 +346,7 @@ export class ModelService {
         const saved = this.settings.transaction(() => {
           this.settings.saveProfile(profile);
           this.credentials.storePrepared(profile.id, prepared);
-          if (this.settings.updateGenerationLimits) {
+          if (tested?.ok && this.settings.updateGenerationLimits) {
             this.settings.updateGenerationLimits(
               profile.id,
               tested.value.generationLimits ?? null
@@ -351,7 +362,7 @@ export class ModelService {
       });
       const saved = this.settings.transaction(() => {
         this.settings.saveProfile(profile);
-        if (this.settings.updateGenerationLimits) {
+        if (tested?.ok && this.settings.updateGenerationLimits) {
           this.settings.updateGenerationLimits(profile.id, tested.value.generationLimits ?? null);
         }
         if (this.credentials.status(profile.id).hasCredential) {
@@ -480,7 +491,11 @@ export class ModelService {
       capability: profile.capability,
       baseUrl: profile.baseUrl,
       ...(input.apiKey === undefined ? {} : { apiKey: input.apiKey })
-    }, async (provider) => {
+    }, async (provider, apiKey) => {
+      if (profile.capability === "generation" && modelOutputKind(profile) === "speech") {
+        await synthesizeSpeech(profile, apiKey, [{ speaker: "A", text: "Hello." }, { speaker: "B", text: "你好。" }], new AbortController().signal);
+        return { modelId: profile.modelId, capability: profile.capability, verifiedBy: "probe" as const };
+      }
       const signal = new AbortController().signal;
       let discovered: ModelDescriptorDto[] = [];
       try {
@@ -527,7 +542,7 @@ export class ModelService {
 
   private async withProvider<T>(
     connection: ProviderConnection,
-    use: (provider: ModelProvider) => Promise<T>
+    use: (provider: ModelProvider, apiKey?: string) => Promise<T>
   ): Promise<Result<T>> {
     const invoke = async (
       storedApiKey?: string,
@@ -540,7 +555,7 @@ export class ModelService {
           baseUrl,
           connection.apiKey ?? storedApiKey
         );
-        return { ok: true, value: await use(provider) };
+        return { ok: true, value: await use(provider, connection.apiKey ?? storedApiKey) };
       } catch (reason) {
         return resultFromError(reason);
       }

@@ -17,6 +17,7 @@ type TaskRow = {
   idempotency_key: string | null;
   created_at: string;
   updated_at: string;
+  transformation_rule_id?: string;
 };
 
 function toTaskDto(row: TaskRow): TaskDto {
@@ -33,6 +34,7 @@ function toTaskDto(row: TaskRow): TaskDto {
     projectId: row.project_id,
     sourceId: row.source_id,
     kind: row.kind,
+    ...(row.transformation_rule_id?.startsWith("builtin:podcast:") ? { transformationKind: "podcast" as const } : {}),
     state: row.state,
     stage: row.stage,
     progress: row.progress_1000,
@@ -106,7 +108,7 @@ export class TaskRepository {
   }
 
   findById(id: string): TaskDto | null {
-    const row = this.db.prepare("SELECT * FROM tasks WHERE id = ?").get(id) as
+    const row = this.db.prepare("SELECT t.*, s.rule_id AS transformation_rule_id FROM tasks t LEFT JOIN transformation_task_snapshots s ON s.task_id=t.id WHERE t.id = ?").get(id) as
       | TaskRow
       | undefined;
     return row ? toTaskDto(row) : null;
@@ -179,10 +181,8 @@ export class TaskRepository {
   }
 
   private read(id: string): TaskDto {
-    const row = this.db.prepare("SELECT * FROM tasks WHERE id = ?").get(id) as
-      | TaskRow
-      | undefined;
-    if (!row) throw new TaskNotFoundError(id);
-    return toTaskDto(row);
+    const task = this.findById(id);
+    if (!task) throw new TaskNotFoundError(id);
+    return task;
   }
 }

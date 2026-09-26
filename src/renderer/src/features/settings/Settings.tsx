@@ -9,8 +9,10 @@ import type {
   ProviderKind
 } from "../../../../shared/models";
 import ModelForm from "../models/ModelForm";
+import { modelOutputKind } from "../../../../shared/models";
 import ModelAdvancedForm from "../models/ModelAdvancedForm";
 import Icon, { type IconName } from "../../ui/Icon";
+import RoundedSelect from "../../ui/RoundedSelect";
 import Modal, { DialogHead } from "../../ui/Modal";
 import { toast } from "../../ui/Toast";
 import IndexPanel from "./IndexPanel";
@@ -19,7 +21,7 @@ import type { AppLanguage, AppTheme } from "../../i18n";
 type Section = "general" | "models" | "routes" | "index";
 
 const GENERATION_TASKS: ModelTaskKind[] = ["chat", "note-title", "summary", "qa", "custom-transformation"];
-const ALL_TASKS: ModelTaskKind[] = [...GENERATION_TASKS, "embedding"];
+const ALL_TASKS: ModelTaskKind[] = [...GENERATION_TASKS, "podcast", "embedding"];
 
 const providerLabel = (t: (key: string) => string, provider: ProviderKind): string =>
   t(`model.providers.${provider}`);
@@ -438,17 +440,17 @@ function RoutesPanel({ profiles, builtIns, projectId, onSaved }: {
   const isEmbedding = taskKind === "embedding";
   const available = useMemo(() => {
     const capability = isEmbedding ? "embedding" : "generation";
-    const matching = profiles.filter((profile) => profile.enabled && profile.capability === capability);
+    const matching = profiles.filter((profile) => profile.enabled && profile.capability === capability && (taskKind === "podcast" || isEmbedding || modelOutputKind(profile) === "text"));
     const candidates: RouteProfile[] = isEmbedding ? [...matching, ...builtIns] : matching;
     return [...candidates].sort((left, right) =>
       `${left.modelId}\u0000${left.provider}`.localeCompare(`${right.modelId}\u0000${right.provider}`, undefined, { numeric: true, sensitivity: "base" })
     );
-  }, [profiles, builtIns, isEmbedding]);
+  }, [profiles, builtIns, isEmbedding, taskKind]);
   const unused = available.filter((profile) => !route.some((item) => item.profileId === profile.id));
   const profileLabel = (id: string): string => routeModelLabel(
     profiles.find((profile) => profile.id === id) ?? builtIns.find((profile) => profile.id === id),
     id
-  );
+  ) + (taskKind === "podcast" ? ` · ${t(modelOutputKind(profiles.find((profile) => profile.id === id) ?? { modelId: "" }) === "speech" ? "model.speechOutput" : "model.textOutput")}` : "");
   const addProfileLabel = isEmbedding
     ? t("routing.chooseEmbeddingProfile")
     : route.length === 0
@@ -509,7 +511,7 @@ function RoutesPanel({ profiles, builtIns, projectId, onSaved }: {
     },
     ...currentGroupModels.map((p) => ({
       value: p.id,
-      label: p.modelId
+      label: p.modelId + (taskKind === "podcast" ? ` · ${t(modelOutputKind(p) === "speech" ? "model.speechOutput" : "model.textOutput")}` : "")
     }))
   ];
 
@@ -585,6 +587,7 @@ function RoutesPanel({ profiles, builtIns, projectId, onSaved }: {
     "note-title": t("routing.tasks.note-title"),
     summary: t("routing.tasks.summary"),
     qa: t("routing.tasks.qa"),
+    podcast: t("routing.tasks.podcast"),
     "custom-transformation": t("routing.tasks.custom-transformation"),
     embedding: t("routing.tasks.embedding")
   };
@@ -604,6 +607,7 @@ function RoutesPanel({ profiles, builtIns, projectId, onSaved }: {
         </div>
 
         <div className="route-chain">
+          {taskKind === "podcast" && <p className="hint">{t("routing.podcastHint")}</p>}
           {route.map((step, index) => (
             <div className="route-step" key={`${step.profileId}-${index}`}>
               <span className="pos" aria-hidden="true">{index + 1}</span>
@@ -615,7 +619,7 @@ function RoutesPanel({ profiles, builtIns, projectId, onSaved }: {
               </span>
             </div>
           ))}
-          {!isEmbedding && route.length > 1 && <span className="fallback-hint">{t("routing.fallbackRule")}</span>}
+          {!isEmbedding && taskKind !== "podcast" && route.length > 1 && <span className="fallback-hint">{t("routing.fallbackRule")}</span>}
         </div>
 
         <div className="input-row route-cascade-picker">
@@ -665,86 +669,6 @@ function RoutesPanel({ profiles, builtIns, projectId, onSaved }: {
               {t("routing.nextPage")}
             </button>
           </div>
-        </div>
-      )}
-    </div>
-  );
-}
-
-function RoundedSelect({ value, options, ariaLabel, onChange, className = "", disabled = false }: {
-  value: string;
-  options: Array<{ value: string; label: string }>;
-  ariaLabel: string;
-  onChange: (value: string) => void;
-  className?: string;
-  disabled?: boolean;
-}) {
-  const [open, setOpen] = useState(false);
-  const [placement, setPlacement] = useState<"up" | "down">("down");
-  const rootRef = useRef<HTMLDivElement>(null);
-  const selected = options.find((option) => option.value === value) ?? options[0];
-
-  useEffect(() => {
-    if (!open) return;
-    const root = rootRef.current;
-    if (root) {
-      const rect = root.getBoundingClientRect();
-      setPlacement(window.innerHeight - rect.bottom < 280 && rect.top > 280 ? "up" : "down");
-    }
-    const close = (event: PointerEvent): void => {
-      if (event.target instanceof Node && !rootRef.current?.contains(event.target)) setOpen(false);
-    };
-    const escape = (event: KeyboardEvent): void => {
-      if (event.key === "Escape") setOpen(false);
-    };
-    document.addEventListener("pointerdown", close);
-    document.addEventListener("keydown", escape);
-    return () => {
-      document.removeEventListener("pointerdown", close);
-      document.removeEventListener("keydown", escape);
-    };
-  }, [open]);
-
-  return (
-    <div className={`rounded-select ${className}${disabled ? " is-disabled" : ""}`.trim()} ref={rootRef}>
-      <button
-        type="button"
-        className="select rounded-select-trigger"
-        aria-label={ariaLabel}
-        aria-haspopup="listbox"
-        aria-expanded={open}
-        disabled={disabled}
-        onClick={() => {
-          if (!disabled) setOpen((current) => !current);
-        }}
-        onKeyDown={(event) => {
-          if (disabled) return;
-          if (event.key === "ArrowDown" || event.key === "ArrowUp") {
-            event.preventDefault();
-            setOpen(true);
-          }
-        }}
-      >
-        <span className="select-value">{selected?.label}</span>
-        <Icon name={open ? "chevron-up" : "chevron-down"} />
-      </button>
-      {open && !disabled && (
-        <div className="rounded-select-menu" data-placement={placement} role="listbox" aria-label={ariaLabel}>
-          {options.map((option) => (
-            <button
-              type="button"
-              role="option"
-              aria-selected={option.value === value}
-              className="rounded-select-option"
-              key={option.value}
-              onClick={() => {
-                onChange(option.value);
-                setOpen(false);
-              }}
-            >
-              {option.label}
-            </button>
-          ))}
         </div>
       )}
     </div>

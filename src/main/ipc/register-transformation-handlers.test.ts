@@ -18,7 +18,7 @@ function service() {
   return {
     listRules: vi.fn(() => []), createRule: vi.fn(() => ({})), updateRule: vi.fn(() => ({})), deleteRule: vi.fn(() => undefined),
     listBuiltins: vi.fn(() => []), startTask: vi.fn(() => task), cancelTask: vi.fn(() => task), retryTask: vi.fn(() => task),
-    listInsights: vi.fn(() => []), convertToNote: vi.fn(() => ({}))
+    listInsights: vi.fn(() => []), convertToNote: vi.fn(() => ({})), getAudio: vi.fn(() => ({ data: "UklGRg==", mimeType: "audio/wav" }))
   };
 }
 
@@ -29,6 +29,9 @@ describe("registerTransformationHandlers", () => {
     await expect(invoke(ipc, TRANSFORMATION_CHANNELS.retry, { projectId: P, taskId: T })).resolves.toEqual(ok(task));
     await expect(invoke(ipc, TRANSFORMATION_CHANNELS.run, { projectId: P, builtinKey: "summary", language: "en", sourceRevisionId: T, state: "completed" })).resolves.toMatchObject({ ok: false, error: { code: "VALIDATION" } });
     expect(svc.startTask).toHaveBeenCalledWith(expect.objectContaining({ projectId: P, builtinKey: "summary" }), expect.any(AbortSignal), expect.any(Function), expect.any(Function));
+    await expect(invoke(ipc, TRANSFORMATION_CHANNELS.getAudio, { projectId: P, insightId: T })).resolves.toEqual(ok({ data: "UklGRg==", mimeType: "audio/wav" }));
+    expect(svc.getAudio).toHaveBeenCalledWith({ projectId: P, insightId: T });
+    await expect(invoke(ipc, TRANSFORMATION_CHANNELS.getAudio, { insightId: T })).resolves.toMatchObject({ ok: false, error: { code: "VALIDATION" } });
   });
 
   it("owns cancellation, forwards abort, and cleans every handler/controller", async () => {

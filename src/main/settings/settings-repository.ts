@@ -5,6 +5,7 @@ import {
   generationLimitsSchema,
   modelRouteDtoSchema,
   modelTaskKindSchema,
+  modelOutputKind,
   type ModelCapability,
   type ModelProfileDto,
   type ModelProfileInput,
@@ -43,6 +44,7 @@ type ProfileRow = {
   context_tokens_override?: number | null;
   max_output_tokens_override?: number | null;
   generation_limits_json?: string | null;
+  output_kind?: string | null;
 };
 
 type RouteRow = {
@@ -91,6 +93,7 @@ function toProfile(row: ProfileRow): ModelProfileDto {
     capability: row.capability,
     baseUrl: row.base_url,
     modelId: row.model_id,
+    ...(row.output_kind ? { outputKind: row.output_kind } : {}),
     enabled: row.enabled === 1,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
@@ -110,9 +113,11 @@ function toRoute(row: RouteRow): ModelRouteDto {
 
 export class SettingsRepository {
   private readonly supportsGenerationColumns: boolean;
+  private readonly supportsOutputKind: boolean;
 
   constructor(private readonly db: Database.Database) {
     const columns = db.pragma("table_info(model_profiles)") as Array<{ name: string }>;
+    this.supportsOutputKind = columns.some((column) => column.name === "output_kind");
     this.supportsGenerationColumns = ["context_tokens_override", "max_output_tokens_override", "generation_limits_json"].every((name) => columns.some((column) => column.name === name));
   }
 
@@ -161,7 +166,7 @@ export class SettingsRepository {
   saveProfile(input: ModelProfileInput): ModelProfileDto {
     const profile = modelProfileInputSchema.parse(input);
     const existing = this.getProfile(profile.id);
-    if (existing && existing.capability !== profile.capability) {
+    if (existing && (existing.capability !== profile.capability || modelOutputKind(existing) !== modelOutputKind(profile))) {
       const routeCount = this.db.prepare(
         "SELECT count(*) AS count FROM model_routes WHERE profile_id = ?"
       ).get(profile.id) as { count: number };
@@ -200,6 +205,7 @@ export class SettingsRepository {
         updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
     `;
     this.db.prepare(sql).run({ ...profile, enabled: profile.enabled ? 1 : 0 });
+    if (this.supportsOutputKind) this.db.prepare("UPDATE model_profiles SET output_kind = ? WHERE id = ?").run(profile.outputKind ?? null, profile.id);
     return this.getProfile(profile.id)!;
   }
 
@@ -300,6 +306,11 @@ export class SettingsRepository {
       if (profiles.some((profile) => !profile!.enabled)) {
         throw new Error("Route requires enabled profile");
       }
+      if (parsedTask === "podcast") {
+        if (!["text", "speech"].every((kind) => profiles.some((profile) => modelOutputKind(profile!) === kind))) throw new Error("Podcast route requires text and speech models");
+      } else if (profiles.some((profile) => profile!.capability === "generation" && modelOutputKind(profile!) === "speech")) {
+        throw new Error("Text tasks cannot use speech models");
+      }
 
       this.db.prepare("DELETE FROM model_routes WHERE task_kind = ?").run(parsedTask);
       const insert = this.db.prepare(`
@@ -323,7 +334,7 @@ export class SettingsRepository {
       const generationProfile = this.getProfile(generationProfileId);
       const embeddingProfile = this.getProfile(embeddingProfileId);
       if (!generationProfile || !embeddingProfile) throw new Error("Default route profile not found");
-      if (generationProfile.capability !== "generation") {
+      if (generationProfile.capability !== "generation" || modelOutputKind(generationProfile) !== "text") {
         throw new Error("Generation default route requires generation capability");
       }
       if (embeddingProfile.capability !== "embedding") {

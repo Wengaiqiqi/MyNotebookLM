@@ -10,6 +10,7 @@ import Modal, { DialogHead } from "../../ui/Modal";
 import { toast } from "../../ui/Toast";
 import SafeMarkdown from "../../chat/SafeMarkdown";
 import QuizPanel from "./QuizPanel";
+import PodcastPlayer from "./PodcastPlayer";
 import { advancePercent, progressCeiling, progressPhase } from "./progress-motion";
 import { useTaskFeed } from "../../hooks/useTaskFeed";
 import { errorText, formatDateTime, sourceReady } from "../../lib/format";
@@ -17,6 +18,8 @@ import { api as getApi } from "../../lib/api";
 import type { AppLanguage } from "../../i18n";
 
 type TransformApi = ReturnType<typeof getApi>["transformations"];
+// Retain one running display per project when tabs or settings unmount this pane.
+const progressByProject = new Map<string, { key: string; percent: number; startedAt: number; tickAt: number; state: TaskDto["state"] }>();
 
 function normalizeInsightMarkdown(text: string): string {
   // Marked treats **label** immediately followed by CJK text as literal
@@ -44,8 +47,9 @@ export default function StudioPane({ projectId }: { projectId: string }) {
   const [submittedTasks, setSubmittedTasks] = useState<TaskDto[]>([]);
 
   const feedTasks = useTaskFeed(projectId, window.myNotebook.tasks?.subscribe, window.myNotebook.tasks?.list);
-  const tasks = useMemo(() => [...feedTasks, ...submittedTasks.filter((submitted) => !feedTasks.some((task) => task.id === submitted.id))]
-    .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)), [feedTasks, submittedTasks]);
+  const tasks = useMemo(() => [...submittedTasks, ...feedTasks]
+    .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
+    .filter((task, index, all) => all.findIndex((item) => item.id === task.id) === index), [feedTasks, submittedTasks]);
   const transformTask = tasks.find((task) => task.kind === "transformation" && (task.state === "queued" || task.state === "running"))
     ?? tasks.find((task) => task.kind === "transformation");
   const completedTransformations = tasks.filter((task) => task.kind === "transformation" && task.state === "completed")
@@ -90,7 +94,7 @@ export default function StudioPane({ projectId }: { projectId: string }) {
   }, [completedTransformations, loadInsights]);
 
   useEffect(() => {
-    setSubmittedTasks((current) => current.filter((submitted) => !feedTasks.some((task) => task.id === submitted.id)));
+    setSubmittedTasks((current) => current.filter((submitted) => !feedTasks.some((task) => task.id === submitted.id && task.updatedAt >= submitted.updatedAt)));
   }, [feedTasks]);
 
   useEffect(() => { setSubmittedTasks([]); }, [projectId]);
@@ -132,7 +136,7 @@ export default function StudioPane({ projectId }: { projectId: string }) {
         : target;
       const input = chosenRule
         ? { projectId, transformationId: chosenRule.id, force: true, ...payload }
-        : { projectId, builtinKey: ruleKey as "summary" | "key-points" | "qa", language, force: true, ...payload };
+        : { projectId, builtinKey: ruleKey as "summary" | "key-points" | "qa" | "podcast", language, force: true, ...payload };
       return api.run(input).catch(() => undefined);
     }));
     const started = results.flatMap((result) => result?.ok ? [result.value] : []);
@@ -150,6 +154,7 @@ export default function StudioPane({ projectId }: { projectId: string }) {
     if (!transformTask) return;
     const result = await getApi().transformations.cancel({ projectId, taskId: transformTask.id });
     if (!result.ok) toast.error(errorText(result, t));
+    else setSubmittedTasks((current) => [result.value, ...current.filter((task) => task.id !== result.value.id)]);
   }
 
   const [retrying, setRetrying] = useState(false);
@@ -193,7 +198,8 @@ export default function StudioPane({ projectId }: { projectId: string }) {
   }
 
   const starting = running && transformTask?.state !== "queued" && transformTask?.state !== "running";
-  const taskState = starting ? "queued" : transformTask?.state;
+  const taskState = starting ? "queued" : transformTask?.state === "cancelled" ? undefined : transformTask?.state;
+  const isPodcast = starting ? ruleKey === "podcast" : transformTask?.transformationKind === "podcast";
   const reportedPercent = starting ? 0 : transformTask ? (transformTask.state === "completed" ? 100 : Math.round(transformTask.progress / 10)) : 0;
   const ceiling = progressCeiling(reportedPercent);
   const taskKey = `${transformTask?.id ?? ""}:${transformTask?.attempt ?? 0}`;
@@ -208,7 +214,7 @@ export default function StudioPane({ projectId }: { projectId: string }) {
 
   // A completed card must paint 100% on its first frame, so the value shown is
   // clamped up rather than waiting for the reset effect below.
-  const shownPercent = taskState === "completed" ? 100 : displayedPercent;
+  const shownPercent = starting ? 0 : taskState === "completed" ? 100 : isPodcast ? reportedPercent : displayedPercent;
 
   // One effect owns the whole animation:
   //   completed -> snap to 100 (the result is persisted)
@@ -220,39 +226,53 @@ export default function StudioPane({ projectId }: { projectId: string }) {
     const previous = previousState.current;
     previousState.current = taskState;
     if (taskState === "completed") {
+      progressByProject.delete(projectId);
       displayedRef.current = 100;
       setDisplayedPercent(100);
       return;
     }
-    if (taskState !== "running") return; // failed/cancelled freeze
+    if (!taskState || taskState === "failed") {
+      if (transformTask) progressByProject.delete(projectId);
+      return;
+    }
+    if (taskState !== "running") return;
+    const cached = progressByProject.get(projectId);
     if (previous !== "running" || runKey.current !== taskKey) {
       runKey.current = taskKey;
-      runStartedAt.current = Date.now();
-      displayedRef.current = 0;
-      setDisplayedPercent(0);
-      setElapsedSeconds(0);
+      const restored = previous === undefined && cached?.key === taskKey && cached.state === "running" ? cached : undefined;
+      runStartedAt.current = restored?.startedAt ?? Date.now();
+      displayedRef.current = restored?.percent ?? (previous === undefined ? reportedPercent : 0);
+      setDisplayedPercent(displayedRef.current);
+      setElapsedSeconds(Math.floor((Date.now() - runStartedAt.current) / 1000));
     }
-    let last = Date.now();
+    let last = cached?.key === taskKey && cached.state === "running" ? cached.tickAt : Date.now();
+    const remember = (): void => {
+      progressByProject.set(projectId, { key: taskKey, percent: displayedRef.current, startedAt: runStartedAt.current, tickAt: last, state: "running" });
+    };
+    remember();
     const timer = setInterval(() => {
       const now = Date.now();
       const delta = now - last;
       last = now;
       const elapsed = now - runStartedAt.current;
-      const next = advancePercent(displayedRef.current, ceiling, delta);
+      const next = isPodcast ? reportedPercent : advancePercent(displayedRef.current, ceiling, delta);
       if (next !== displayedRef.current) {
         displayedRef.current = next;
         setDisplayedPercent(next);
       }
       setElapsedSeconds(Math.floor(elapsed / 1000));
+      remember();
     }, 100);
     return () => clearInterval(timer);
-  }, [taskState, taskKey, ceiling]);
+  }, [taskState, taskKey, ceiling, isPodcast, reportedPercent, projectId]);
 
   const taskPercent = Math.round(shownPercent);
   // The label is driven by the animated number, so "preparing" stays readable
   // for the full 4s climb to 20% instead of flipping the instant inputs are ready.
   const taskLabel = taskState === "running"
-    ? t(`transformations.phases.${progressPhase(shownPercent, reportedPercent)}`)
+    ? isPodcast
+      ? t(`transformations.podcastPhases.${reportedPercent >= 98 ? "saving" : reportedPercent >= 45 ? "speech" : reportedPercent >= 20 ? "script" : "preparing"}`)
+      : t(`transformations.phases.${progressPhase(shownPercent, reportedPercent)}`)
     : t(`transformations.states.${taskState}`, taskState ?? "");
   // A sliver keeps the bar visible while the first milestone is still pending.
   const taskBarPercent = taskState === "running" || taskState === "queued" ? Math.max(taskPercent, 3) : taskPercent;
@@ -420,6 +440,7 @@ export default function StudioPane({ projectId }: { projectId: string }) {
               title={t("transformations.insightDetail")}
               body={[detailInsight.model, formatDateTime(detailInsight.createdAt, language)].filter(Boolean).join(" · ")}
             />
+            {detailInsight.hasAudio && <PodcastPlayer projectId={projectId} insightId={detailInsight.id} />}
             <div className="insight-detail-content assistant-body">
               <SafeMarkdown text={normalizeInsightMarkdown(detailInsight.content)} />
             </div>

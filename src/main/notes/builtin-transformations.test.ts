@@ -3,7 +3,7 @@ import { BUILTIN_TRANSFORMATIONS, listBuiltinTransformations } from "./builtin-t
 
 describe("built-in transformations", () => {
   it("contains immutable bilingual summary, key-points and Q&A descriptors", () => {
-    expect(listBuiltinTransformations()).toMatchInlineSnapshot(`
+    expect(listBuiltinTransformations().filter((rule) => rule.key !== "podcast")).toMatchInlineSnapshot(`
       [
         {
           "appliesTo": "source",
@@ -98,5 +98,6 @@ describe("built-in transformations", () => {
     const second = listBuiltinTransformations();
     expect(first).not.toBe(second);
     expect(first).toEqual(second);
+    expect(first.filter((rule) => rule.key === "podcast").map((rule) => rule.language)).toEqual(["zh-CN", "en"]);
   });
 });

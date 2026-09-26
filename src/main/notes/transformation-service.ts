@@ -13,6 +13,8 @@ import { listBuiltinTransformations, type BuiltinTransformationDescriptor } from
 import { renderTransformationPrompt } from "./template-renderer";
 import type { TransformationRepository } from "./transformation-repository";
 import { estimateTokens } from "../../workers/ingestion/chunker";
+import { PodcastService, validatePodcastRoute } from "./podcast-service";
+import type { ModelProfileDto } from "../../shared/models";
 
 const INPUT_TOKEN_BUDGET = 12_000;
 const OUTPUT_BYTE_LIMIT = 2 * 1024 * 1024;
@@ -25,7 +27,7 @@ export type TransformationRunRequest = Readonly<{
   projectId: string;
   rule?: Rule;
   transformationId?: string;
-  builtinKey?: "summary" | "key-points" | "qa";
+  builtinKey?: "summary" | "key-points" | "qa" | "podcast";
   language?: "zh-CN" | "en";
   projectTarget?: true;
   sourceRevisionId?: string;
@@ -46,7 +48,8 @@ export type TransformationServiceDeps = Readonly<{
   transformations: Pick<TransformationRepository, "get" | "list" | "create" | "update" | "remove">;
   notes: Pick<NoteRepository, "get" | "create">;
   generation: Pick<RoutedGeneration, "generateRouted">;
-  router: { resolve: (taskKind: "summary" | "key-points" | "qa" | "custom-transformation", profileId?: string) => readonly ModelProfileSnapshot[] };
+  router: { resolve: (taskKind: "summary" | "key-points" | "qa" | "custom-transformation" | "podcast", profileId?: string) => readonly ModelProfileSnapshot[] };
+  podcasts?: Pick<PodcastService, "render">;
   id?: () => string;
   now?: () => string;
 }>;
@@ -78,6 +81,7 @@ function sha256(value: string): string { return createHash("sha256").update(valu
 function rowInsight(row: any): InsightDto {
   return insightDtoSchema.parse({
     builtinKey: row.builtin_key ?? null,
+    ...(row.has_audio ? { hasAudio: true } : {}),
     id: row.id, projectId: row.project_id, transformationId: row.transformation_id,
     taskId: row.task_id, inputKind: row.input_kind, inputHash: row.input_hash,
     ruleVersion: row.rule_version, content: row.content, provider: row.provider,
@@ -155,7 +159,7 @@ function targetSnapshot(db: Database.Database, input: TransformationRunRequest):
   throw new Error("Transformation input is required");
 }
 
-function resolveRule(input: TransformationRunRequest, deps: TransformationServiceDeps): { id: string; version: number; prompt: string; transformationId: string | null; name: string; appliesTo: string; language?: "zh-CN" | "en"; taskKind: "summary" | "key-points" | "qa" | "custom-transformation" } {
+function resolveRule(input: TransformationRunRequest, deps: TransformationServiceDeps): { id: string; version: number; prompt: string; transformationId: string | null; name: string; appliesTo: string; language?: "zh-CN" | "en"; taskKind: "summary" | "key-points" | "qa" | "custom-transformation" | "podcast" } {
   const rule = input.rule ?? (input.transformationId ? { transformationId: input.transformationId } : input.builtinKey ? listBuiltinTransformations().find((item) => item.key === input.builtinKey && item.language === (input.language ?? "en")) : undefined);
   if (!rule) throw new Error("Transformation rule is required");
   if ("transformationId" in rule) {
@@ -183,7 +187,8 @@ export class TransformationService {
       WHEN s.rule_id LIKE 'builtin:qa:%' THEN 'qa'
       WHEN s.rule_id LIKE 'builtin:summary:%' THEN 'summary'
       WHEN s.rule_id LIKE 'builtin:key-points:%' THEN 'key-points'
-      END AS builtin_key FROM insights i
+      WHEN s.rule_id LIKE 'builtin:podcast:%' THEN 'podcast'
+      END AS builtin_key, EXISTS(SELECT 1 FROM podcast_audio pa WHERE pa.insight_id=i.id) AS has_audio FROM insights i
       LEFT JOIN transformation_task_snapshots s ON s.task_id = i.task_id AND s.project_id = i.project_id
       WHERE i.project_id = ? ORDER BY i.created_at DESC, i.id ASC LIMIT ? OFFSET ?`).all(input.projectId, limit, offset) as any[];
     return rows.map(rowInsight);
@@ -277,7 +282,9 @@ export class TransformationService {
     const bounded = truncateContent(target.content, language);
     const rendered = renderTransformationPrompt(rule.prompt, { content: bounded.content, sourceTitle: target.title, language, projectName: (this.deps.db.prepare("SELECT name FROM projects WHERE id = ?").get(input.projectId) as any)?.name ?? "" });
     if (rule.transformationId && rule.appliesTo !== target.kind) throw new Error(`Transformation rule appliesTo ${rule.appliesTo} does not match ${target.kind}`);
-    const routes = this.deps.router.resolve(rule.taskKind, input.profileId).map((profile) => ({ profileId: profile.id, provider: profile.provider, model: profile.modelId }));
+    const profiles = this.deps.router.resolve(rule.taskKind, input.profileId);
+    if (rule.taskKind === "podcast") validatePodcastRoute(profiles);
+    const routes = profiles.map((profile) => ({ profileId: profile.id, provider: profile.provider, model: profile.modelId }));
     if (routes.length === 0) throw new RoutedGenerationError({ code: "VALIDATION", messageKey: "errors.generationProfileMissing", recoverable: false });
     const inputHash = sha256(stable({ kind: target.kind, target: target.target, hashes: target.hashes }));
     const baseKey = sha256(stable({ inputHash, ruleId: rule.id, ruleVersion: rule.version, renderedPromptVersion: RENDERED_PROMPT_VERSION, routes }));
@@ -313,7 +320,7 @@ export class TransformationService {
     const request: RoutedGenerateRequest = { projectId: input.projectId, operationId: task.id, model: "transformation", messages: [{ role: "user", content: rendered }] };
     const snapshotExists = this.deps.db.prepare("SELECT 1 FROM transformation_task_snapshots WHERE task_id = ?").get(task.id);
     if (!snapshotExists) this.deps.db.prepare(`INSERT INTO transformation_task_snapshots(task_id, project_id, input_kind, input_snapshot_json, input_hash, rule_id, transformation_id, rule_version, rendered_prompt_version, rendered_prompt, route_snapshot_json, request_json, idempotency_key, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-      .run(task.id, input.projectId, target.kind, JSON.stringify({ ...target.target, content: bounded.content, truncated: bounded.truncated, hashes: target.hashes }), inputHash, rule.id, rule.transformationId, rule.version, RENDERED_PROMPT_VERSION, rendered, JSON.stringify({ taskKind: rule.taskKind, profileId: input.profileId ?? null, routes }), JSON.stringify(request), idempotencyKey, now, now);
+      .run(task.id, input.projectId, target.kind, JSON.stringify({ ...target.target, content: bounded.content, truncated: bounded.truncated, hashes: target.hashes }), inputHash, rule.id, rule.transformationId, rule.version, RENDERED_PROMPT_VERSION, rendered, JSON.stringify({ taskKind: rule.taskKind, profileId: input.profileId ?? null, routes, ...(rule.taskKind === "podcast" ? { podcastProfiles: profiles } : {}) }), JSON.stringify(request), idempotencyKey, now, now);
     let claimed: ReturnType<TransformationService["claim"]>;
     try { claimed = this.claim(task.id, "preparing"); }
     catch (error) {
@@ -355,8 +362,9 @@ export class TransformationService {
         }
         else if (event.type === "routed-complete") actual = event.profile;
       }
-      const safe = outputText(content);
-      this.deps.tasks.advance(task.id, "saving", 800);
+      const result = await this.prepareOutput(rule.taskKind, content, input.projectId, task.id, profiles, input.signal);
+      const safe = result.content;
+      this.deps.tasks.advance(task.id, "saving", rule.taskKind === "podcast" ? 980 : 800);
       const insightId = this.deps.id?.() ?? randomUUID();
       const persistedProfileId = actual?.profileId && this.deps.db.prepare("SELECT 1 FROM model_profiles WHERE id = ?").get(actual.profileId)
         ? actual.profileId : null;
@@ -364,6 +372,7 @@ export class TransformationService {
         this.deps.db.prepare("INSERT INTO insights(id, project_id, transformation_id, task_id, input_kind, input_hash, rule_version, content, provider, model, profile_id, usage_json, idempotency_key) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
           .run(insightId, input.projectId, rule.transformationId, task.id, target.kind, inputHash, rule.version, safe, actual?.provider ?? null, actual?.model ?? null, persistedProfileId, JSON.stringify(usage), idempotencyKey);
         this.deps.tasks.complete(task.id, "saving");
+        if (result.wav) this.deps.db.prepare("INSERT INTO podcast_audio(insight_id, wav) VALUES (?, ?)").run(insightId, result.wav);
       })();
       return rowInsight(this.deps.db.prepare("SELECT * FROM insights WHERE id = ?").get(insightId));
     } catch (error) {
@@ -390,6 +399,26 @@ export class TransformationService {
   deleteInsight(input: { projectId: string; insightId: string }): void {
     const result = this.deps.db.prepare("DELETE FROM insights WHERE id = ? AND project_id = ?").run(input.insightId, input.projectId);
     if (result.changes === 0) throw new TransformationInsightNotFoundError(input.insightId);
+  }
+
+  getAudio(input: { projectId: string; insightId: string }): { data: string; mimeType: "audio/wav" } {
+    const row = this.deps.db.prepare("SELECT pa.wav FROM podcast_audio pa JOIN insights i ON i.id=pa.insight_id WHERE i.id=? AND i.project_id=?").get(input.insightId, input.projectId) as { wav: Buffer } | undefined;
+    if (!row) throw new TransformationInsightNotFoundError(input.insightId);
+    return { data: row.wav.toString("base64"), mimeType: "audio/wav" };
+  }
+
+  private async prepareOutput(kind: string, content: string, projectId: string, taskId: string, profiles: readonly ModelProfileDto[], signal?: AbortSignal): Promise<{ content: string; wav?: Buffer }> {
+    if (signal?.aborted || this.deps.taskRepository.findById(taskId)?.state !== "running") throw new RoutedGenerationError({ code: "CANCELLED", messageKey: "errors.cancelled", recoverable: false });
+    if (kind !== "podcast") return { content: outputText(content) };
+    if (!this.deps.podcasts) throw new RoutedGenerationError({ code: "VALIDATION", messageKey: "errors.podcastRouteMissing", recoverable: true });
+    this.deps.tasks.advance(taskId, "generating", 450);
+    let progress = 450;
+    const result = await this.deps.podcasts.render({ projectId, taskId, content: outputText(content), profiles, signal, progress: (fraction) => {
+      progress = Math.max(progress, Math.floor(450 + fraction * 500));
+      this.deps.tasks.advance(taskId, "generating", progress);
+    } });
+    if (signal?.aborted || this.deps.taskRepository.findById(taskId)?.state !== "running") throw new RoutedGenerationError({ code: "CANCELLED", messageKey: "errors.cancelled", recoverable: false });
+    return result;
   }
 
   retry(taskId: string, signal?: AbortSignal): Promise<InsightDto> { return this.resume(taskId, signal); }
@@ -420,10 +449,16 @@ export class TransformationService {
     try {
       const persistedRoute = JSON.parse(snapshot.route_snapshot_json) as { taskKind?: string; profileId?: string | null; routes?: readonly RoutedProfile[] } | readonly RoutedProfile[];
       const routeObject = Array.isArray(persistedRoute) ? undefined : persistedRoute as { taskKind?: string; profileId?: string | null; routes?: readonly RoutedProfile[] };
-      const taskKind = routeObject?.taskKind ? routeObject.taskKind as "summary" | "key-points" | "qa" | "custom-transformation" : "custom-transformation";
+      const taskKind = routeObject?.taskKind ? routeObject.taskKind as "summary" | "key-points" | "qa" | "custom-transformation" | "podcast" : "custom-transformation";
       const persistedRouteProfileId = routeObject?.profileId ?? undefined;
       const persistedRoutes = routeObject ? routeObject.routes ?? [] : persistedRoute;
-      const currentRoutes = this.deps.router.resolve(taskKind, persistedRouteProfileId).map((profile) => ({ profileId: profile.id, provider: profile.provider, model: profile.modelId }));
+      const profiles = this.deps.router.resolve(taskKind, persistedRouteProfileId);
+      const currentRoutes = profiles.map((profile) => ({ profileId: profile.id, provider: profile.provider, model: profile.modelId }));
+      if (taskKind === "podcast") {
+        validatePodcastRoute(profiles);
+        const saved = (routeObject as { podcastProfiles?: readonly ModelProfileDto[] }).podcastProfiles;
+        if (!saved || stable(saved.map(({ id, provider, baseUrl, modelId, outputKind }) => ({ id, provider, baseUrl, modelId, outputKind }))) !== stable(profiles.map(({ id, provider, baseUrl, modelId, outputKind }) => ({ id, provider, baseUrl, modelId, outputKind })))) throw new RoutedGenerationError({ code: "VALIDATION", messageKey: "errors.validation", recoverable: true });
+      }
       if (stable(currentRoutes) !== stable(persistedRoutes)) {
         throw new RoutedGenerationError({ code: "VALIDATION", messageKey: "errors.validation", recoverable: false });
       }
@@ -446,14 +481,16 @@ export class TransformationService {
         else if (event.type === "usage") { usage.inputTokens += event.inputTokens ?? 0; usage.outputTokens += event.outputTokens ?? 0; usage.totalTokens += (event.inputTokens ?? 0) + (event.outputTokens ?? 0); }
         else if (event.type === "routed-complete") actual = event.profile;
       }
-      const safe = outputText(content);
-      this.deps.tasks.advance(taskId, "saving", 800);
+      const result = await this.prepareOutput(taskKind, content, snapshot.project_id, taskId, profiles, signal);
+      const safe = result.content;
+      this.deps.tasks.advance(taskId, "saving", taskKind === "podcast" ? 980 : 800);
       const id = this.deps.id?.() ?? randomUUID();
       const completedProfileId = actual?.profileId && this.deps.db.prepare("SELECT 1 FROM model_profiles WHERE id = ?").get(actual.profileId)
         ? actual.profileId : null;
       this.deps.db.transaction(() => {
         this.deps.db.prepare("INSERT INTO insights(id, project_id, transformation_id, task_id, input_kind, input_hash, rule_version, content, provider, model, profile_id, usage_json, idempotency_key) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)").run(id, snapshot.project_id, snapshot.transformation_id ?? null, taskId, snapshot.input_kind, snapshot.input_hash, snapshot.rule_version, safe, actual?.provider ?? null, actual?.model ?? null, completedProfileId, JSON.stringify(usage), snapshot.idempotency_key);
         this.deps.tasks.complete(taskId, "saving");
+        if (result.wav) this.deps.db.prepare("INSERT INTO podcast_audio(insight_id, wav) VALUES (?, ?)").run(id, result.wav);
       })();
       return rowInsight(this.deps.db.prepare("SELECT * FROM insights WHERE id = ?").get(id));
     } catch (error) {

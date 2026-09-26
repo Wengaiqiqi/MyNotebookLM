@@ -50,7 +50,7 @@ const mocks = vi.hoisted(() => {
         return recoveryTask ? [recoveryTask] : [];
       });
     }),
-    SpaceRepository: vi.fn(function (this: Record<string, unknown>, db: unknown) { events.push("space-repository"); this.db = db; this.active = vi.fn(() => ({ id: "old", projectId: "project-1", dimension: 2 })); this.get = vi.fn(() => ({ id: "old", projectId: "project-1", dimension: 2 })); this.recoverInterrupted = vi.fn(() => events.push("space-recovery")); }),
+    SpaceRepository: vi.fn(function (this: Record<string, unknown>, db: unknown) { events.push("space-repository"); this.db = db; this.rebuildRevisions = vi.fn(() => []); this.active = vi.fn(() => ({ id: "old", projectId: "project-1", dimension: 2 })); this.get = vi.fn(() => ({ id: "old", projectId: "project-1", dimension: 2 })); this.recoverInterrupted = vi.fn(() => events.push("space-recovery")); }),
     SpaceService: vi.fn(function (this: Record<string, any>, repository: unknown, options: any, backup: unknown) { events.push("space-service"); this.repository = repository; this.options = { ...options, rebuild: vi.fn(options.rebuild) }; this.backup = backup; this.rebuild = vi.fn((input: unknown) => this.options.rebuild(input)); this.optimize = vi.fn((input: unknown) => this.options.optimize(input)); this.cancel = vi.fn(() => false); this.recoverInterrupted = vi.fn(() => events.push("space-recovery")); }),
     registerVectorHandlers: vi.fn((_ipc: unknown, service: Record<string, (...args: any[]) => any>) => { vectorService = service; return vi.fn(); }),
     app: {
@@ -464,7 +464,7 @@ describe("main application composition", () => {
     const service = mocks.getVectorService() as { startMigration: (input: unknown) => Promise<any> };
     await expect(service.startMigration({ projectId: "project-1", profileId: "profile-1" })).resolves.toMatchObject({ ok: true });
     const rebuild = (mocks.SpaceService.mock.instances[0] as any).rebuild;
-    expect(rebuild).toHaveBeenCalledWith(expect.objectContaining({ spec: expect.objectContaining({ provider, modelId: profile.modelId, modelRevision: profile.modelId, dimension: 4 }) }));
+    expect(rebuild).toHaveBeenCalledWith(expect.objectContaining({ recoverSources: true, spec: expect.objectContaining({ provider, modelId: profile.modelId, modelRevision: profile.modelId, dimension: 4 }) }));
   });
 
   it("fails closed when a cloud migration profile has an invalid modelId", async () => {

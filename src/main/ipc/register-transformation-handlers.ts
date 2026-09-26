@@ -2,7 +2,7 @@ import type { IpcMain } from "electron";
 import { z } from "zod";
 import { internalFailure, resultSchema, validationFailure } from "../../shared/app-errors";
 import { TRANSFORMATION_CHANNELS, transformationBuiltinInputSchema, transformationConvertInputSchema, transformationInsightsInputSchema, transformationRulesInputSchema, transformationTaskInputSchema } from "../../shared/ipc";
-import { builtinTransformationDtoSchema, createTransformationInputSchema, insightDtoSchema, transformationDtoSchema, transformationRunInputSchema, updateTransformationInputSchema } from "../../shared/transformations";
+import { builtinTransformationDtoSchema, createTransformationInputSchema, insightDtoSchema, podcastAudioSchema, transformationDtoSchema, transformationRunInputSchema, updateTransformationInputSchema } from "../../shared/transformations";
 import { taskDtoSchema, type TaskDto } from "../../shared/tasks";
 import { noteDtoSchema } from "../../shared/notes";
 import { listBuiltinTransformations } from "../notes/builtin-transformations";
@@ -21,6 +21,7 @@ type Service = {
   listInsights(input: { projectId: string; limit?: number; offset?: number }): unknown;
   deleteInsight(input: { projectId: string; insightId: string }): unknown;
   convertToNote(input: { projectId: string; insightId: string }): unknown;
+  getAudio(input: { projectId: string; insightId: string }): unknown;
 };
 
 const empty = z.undefined();
@@ -58,6 +59,7 @@ export function registerTransformationHandlers(ipc: Ipc, service: Service): () =
   ipc.handle(TRANSFORMATION_CHANNELS.listInsights, (_event, input) => safe(transformationInsightsInputSchema, insights, input, (value) => service.listInsights(value as never)));
   ipc.handle(TRANSFORMATION_CHANNELS.deleteInsight, (_event, input) => safe(transformationConvertInputSchema, voidResult, input, service.deleteInsight.bind(service)));
   ipc.handle(TRANSFORMATION_CHANNELS.convertToNote, (_event, input) => safe(transformationConvertInputSchema, note, input, service.convertToNote.bind(service)));
+  ipc.handle(TRANSFORMATION_CHANNELS.getAudio, (_event, input) => safe(transformationConvertInputSchema, resultSchema(podcastAudioSchema), input, service.getAudio.bind(service)));
   const channels = Object.values(TRANSFORMATION_CHANNELS);
   return () => { for (const controller of controllers.values()) controller.abort(); controllers.clear(); channels.forEach((channel) => ipc.removeHandler(channel)); };
 }

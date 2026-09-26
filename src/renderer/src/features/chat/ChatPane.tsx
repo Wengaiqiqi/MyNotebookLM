@@ -3,7 +3,7 @@ import { useTranslation } from "react-i18next";
 import type { AppErrorDto } from "../../../../shared/app-errors";
 import type { CitationDto, ConversationDto, MessageDto } from "../../../../shared/chat";
 import type { CitationDetailResultValue } from "../../../../shared/ipc";
-import type { ModelProfileDto } from "../../../../shared/models";
+import { modelOutputKind, type ModelProfileDto } from "../../../../shared/models";
 import type { SourceDto } from "../../../../shared/sources";
 import SafeMarkdown, { canonicalizeCitationTargets } from "../../chat/SafeMarkdown";
 import { useChatStream } from "../../chat/useChatStream";
@@ -123,7 +123,7 @@ export default function ChatPane({ projectId, generationProfileId, sources, onOp
     if (!generationProfileId) { setProfiles([]); return; }
     void window.myNotebook.models.listProfiles().then((result) => {
       if (!alive || !result.ok) return;
-      const nextProfiles = result.value.profiles.filter((profile) => profile.enabled && profile.capability === "generation");
+      const nextProfiles = result.value.profiles.filter((profile) => profile.enabled && profile.capability === "generation" && modelOutputKind(profile) === "text");
       setProfiles(nextProfiles);
       if (nextProfiles.length === 0) return;
       setSelectedProfileId((current) => {

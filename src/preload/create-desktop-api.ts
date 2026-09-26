@@ -50,7 +50,7 @@ import {
 } from "../shared/ipc";
 import { sourceDtoSchema } from "../shared/sources";
 import { createNoteInputSchema, createNoteLinkInputSchema, deleteNoteLinkInputSchema, generateNoteTitleInputSchema, noteDtoSchema, noteIdInputSchema, noteLinkDtoSchema, noteStateInputSchema, updateNoteInputSchema } from "../shared/notes";
-import { builtinTransformationDtoSchema, createTransformationInputSchema, insightDtoSchema, transformationDtoSchema, transformationRunInputSchema, updateTransformationInputSchema } from "../shared/transformations";
+import { builtinTransformationDtoSchema, createTransformationInputSchema, insightDtoSchema, podcastAudioSchema, transformationDtoSchema, transformationRunInputSchema, updateTransformationInputSchema } from "../shared/transformations";
 import { taskDtoSchema } from "../shared/tasks";
 import {
   credentialInputSchema,
@@ -389,7 +389,8 @@ export function createDesktopApi(ipc: IpcInvoker): DesktopApi {
       retry: (input) => invokeResult(ipc, TRANSFORMATION_CHANNELS.retry, transformationTaskInputSchema, transformationTaskResultSchema, input),
       listInsights: (input) => invokeResult(ipc, TRANSFORMATION_CHANNELS.listInsights, transformationInsightsInputSchema, insightResultSchema, input),
       deleteInsight: (input) => invokeResult(ipc, TRANSFORMATION_CHANNELS.deleteInsight, transformationConvertInputSchema, voidResultSchema, input),
-      convertToNote: (input) => invokeResult(ipc, TRANSFORMATION_CHANNELS.convertToNote, transformationConvertInputSchema, noteResultSchema, input)
+      convertToNote: (input) => invokeResult(ipc, TRANSFORMATION_CHANNELS.convertToNote, transformationConvertInputSchema, noteResultSchema, input),
+      getAudio: (input) => invokeResult(ipc, TRANSFORMATION_CHANNELS.getAudio, transformationConvertInputSchema, resultSchema(podcastAudioSchema), input)
     }
   };
 }

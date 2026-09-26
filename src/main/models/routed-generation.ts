@@ -1,6 +1,6 @@
 import type Database from "better-sqlite3";
 import type { AppErrorDto } from "../../shared/app-errors";
-import type { ModelProfileDto, ModelTaskKind } from "../../shared/models";
+import { modelOutputKind, type ModelProfileDto, type ModelTaskKind } from "../../shared/models";
 import type { GenerateRequest, GenerationEvent, ModelProvider } from "./provider";
 import { ModelRouter, type ModelProfileSnapshot } from "./model-router";
 import { ProviderRequestError } from "./http-client";
@@ -100,7 +100,7 @@ export async function* generateRouted(
 
   const clock = deps.clock ?? (() => new Date());
   const createId = deps.id ?? (() => crypto.randomUUID());
-  const resolvedProfiles = deps.router.resolve(taskKind, overrideProfileId);
+  const resolvedProfiles = deps.router.resolve(taskKind, overrideProfileId).filter((profile) => modelOutputKind(profile) === "text");
   const profiles = request.allowFallback === false ? resolvedProfiles.slice(0, 1) : resolvedProfiles;
   if (profiles.length === 0) throw new RoutedGenerationError({ code: "VALIDATION", messageKey: "errors.generationProfileMissing", recoverable: false });
 

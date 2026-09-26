@@ -114,6 +114,13 @@ export class ProviderHttpClient {
     }
   }
 
+  async binary(baseUrl: string, endpoint: string, options: HttpRequestOptions): Promise<Buffer> {
+    const requested = await this.request(baseUrl, endpoint, options);
+    const chunks: Uint8Array[] = [];
+    for await (const chunk of this.readBytes(requested)) chunks.push(chunk);
+    return Buffer.concat(chunks);
+  }
+
   async *sse<T>(baseUrl: string, endpoint: string, options: HttpRequestOptions): AsyncIterable<T> {
     const requested = await this.request(baseUrl, endpoint, options);
     let pending = "";
@@ -156,6 +163,7 @@ export class ProviderHttpClient {
   }
 
   private async request(baseUrl: string, endpoint: string, options: HttpRequestOptions): Promise<RequestedResponse> {
+    if (options.signal.aborted) throw new ProviderRequestError(classifyProviderError({ cancelled: true }));
     // The connect deadline covers dialing + response headers only and is
     // disarmed once headers arrive: aborting a fetch signal afterwards would
     // also kill the body stream, cutting off long legitimate generations.
@@ -196,10 +204,19 @@ export class ProviderHttpClient {
   }
 
   private async *readChunks(requested: RequestedResponse): AsyncIterable<string> {
+    const decoder = new TextDecoder();
+    for await (const chunk of this.readBytes(requested)) {
+      const text = decoder.decode(chunk, { stream: true });
+      if (text) yield text;
+    }
+    const tail = decoder.decode();
+    if (tail) yield tail;
+  }
+
+  private async *readBytes(requested: RequestedResponse): AsyncIterable<Uint8Array> {
     const { response, originalSignal } = requested;
     if (!response.body) return;
     const reader = response.body.getReader();
-    const decoder = new TextDecoder();
     let total = 0;
     let completed = false;
     class IdleTimeout extends Error {}
@@ -228,12 +245,9 @@ export class ProviderHttpClient {
         if (done) break;
         total += value.byteLength;
         if (total > (requested.maxResponseBytes ?? this.maxResponseBytes)) throw new ResponseTooLargeError();
-        const text = decoder.decode(value, { stream: true });
-        if (text) yield text;
+        yield value;
       }
       completed = true;
-      const tail = decoder.decode();
-      if (tail) yield tail;
     } catch (reason) {
       if (reason instanceof ProviderRequestError) throw reason;
       if (reason instanceof ResponseTooLargeError) throw new ProviderRequestError(classifyProviderError({ responseTooLarge: true }));

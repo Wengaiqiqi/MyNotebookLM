@@ -49,6 +49,7 @@ import { NoteService } from "./notes/note-service";
 import { TitleService } from "./notes/title-service";
 import { TransformationRepository } from "./notes/transformation-repository";
 import { TransformationService } from "./notes/transformation-service";
+import { PodcastService } from "./notes/podcast-service";
 import type { Result } from "../shared/app-errors";
 import type { TaskDto } from "../shared/tasks";
 import type { SearchHitDto, VectorHealthDto } from "../shared/vector";
@@ -133,7 +134,12 @@ app.whenReady().then(async () => {
   });
   await projectService.recoverStaleDeletions?.();
   const spaces = new SpaceRepository(appDatabase.connection, undefined, undefined, lance);
-  const spaceService = new SpaceService(spaces, { rebuild: async (raw: unknown) => { const input = raw as { space: { id: string; dimension: number }; spec: { projectId: string }; signal?: AbortSignal; revisionId?: string }; const revisions = input.revisionId ? [{ id: input.revisionId }] : appDatabase!.connection.prepare("SELECT current_revision_id AS id FROM sources WHERE project_id = ? AND status = 'active' AND current_revision_id IS NOT NULL").all(input.spec.projectId) as Array<{ id: string }>; for (const revision of revisions) await indexing.rebuild(input.signal ? { revisionId: revision.id, space: input.space, signal: input.signal } : { revisionId: revision.id, space: input.space }); }, optimize: async (raw: unknown) => { const value = raw as { taskId?: string; projectId?: string; space: { id: string; dimension: number }; signal?: AbortSignal }; const taskId = value.taskId ?? (value.projectId ? taskService.createTask({ projectId: value.projectId, sourceId: null, kind: "optimize" }).id : undefined); if (!taskId) throw new Error("optimize requires taskId or projectId"); taskService.start(taskId, "indexing"); try { taskService.advance(taskId, "indexing", 500); await lance.optimize(value.space, value.signal); taskService.complete(taskId); } catch (error) { if ((error as { code?: string }).code === "TASK_CANCELLED") { const current = taskService.getById(taskId); if (current?.state === "queued" || current?.state === "running") taskService.cancel(taskId); } else taskService.fail(taskId, { code: "INTERNAL", messageKey: "errors.internal", recoverable: false }); throw error; } } }, async () => backupDatabase(appDatabase!.connection, appPaths.database + ".space-backup-" + Date.now() + ".db"));
+  const spaceService = new SpaceService(spaces, { rebuild: async (raw: unknown) => {
+    const input = raw as { space: { id: string; dimension: number }; spec: { projectId: string }; signal?: AbortSignal; revisionId?: string; recoverSources?: boolean };
+    const revisions = input.revisionId ? [{ id: input.revisionId }] : spaces.rebuildRevisions(input.spec.projectId, input.recoverSources);
+    for (const revision of revisions) await indexing.rebuild({ revisionId: revision.id, space: input.space, ...(input.signal ? { signal: input.signal } : {}) });
+    return input.recoverSources ? revisions.map(revision => revision.id) : [];
+  }, optimize: async (raw: unknown) => { const value = raw as { taskId?: string; projectId?: string; space: { id: string; dimension: number }; signal?: AbortSignal }; const taskId = value.taskId ?? (value.projectId ? taskService.createTask({ projectId: value.projectId, sourceId: null, kind: "optimize" }).id : undefined); if (!taskId) throw new Error("optimize requires taskId or projectId"); taskService.start(taskId, "indexing"); try { taskService.advance(taskId, "indexing", 500); await lance.optimize(value.space, value.signal); taskService.complete(taskId); } catch (error) { if ((error as { code?: string }).code === "TASK_CANCELLED") { const current = taskService.getById(taskId); if (current?.state === "queued" || current?.state === "running") taskService.cancel(taskId); } else taskService.fail(taskId, { code: "INTERNAL", messageKey: "errors.internal", recoverable: false }); throw error; } } }, async () => backupDatabase(appDatabase!.connection, appPaths.database + ".space-backup-" + Date.now() + ".db"));
   await spaceService.recoverInterrupted();
   const localRuntime = createTransformersEmbeddingRuntime(appPaths.models, managedActiveDirectory(appPaths.models, LOCAL_MODEL_MANIFEST));
   const stagingRuntime = createTransformersEmbeddingRuntime(appPaths.models, managedStagingDirectory(appPaths.models, LOCAL_MODEL_MANIFEST));
@@ -293,7 +299,7 @@ app.whenReady().then(async () => {
       const modelRevision = capability.modelRevision;
       const fingerprint = canonicalEmbeddingFingerprint({ provider: capability.provider, modelId: capability.modelId, modelRevision, dimension, distance: capability.distance, pooling: capability.pooling, preprocessVersion: capability.preprocessVersion, chunkingVersion: capability.chunkingVersion });
       const task = taskService.createTask({ projectId, sourceId: null, kind: "validation" });
-      return { ok: true, value: runTask(task, () => spaceService.rebuild({ taskId: task.id, spec: { projectId, provider: capability.provider, modelId: capability.modelId, modelRevision, dimension, distance: capability.distance, pooling: capability.pooling, preprocessVersion: capability.preprocessVersion, chunkingVersion: capability.chunkingVersion, fingerprint } })) };
+      return { ok: true, value: runTask(task, () => spaceService.rebuild({ taskId: task.id, recoverSources: true, spec: { projectId, provider: capability.provider, modelId: capability.modelId, modelRevision, dimension, distance: capability.distance, pooling: capability.pooling, preprocessVersion: capability.preprocessVersion, chunkingVersion: capability.chunkingVersion, fingerprint } })) };
     },
     rebuild: async ({ projectId, spaceId }: { projectId: string; spaceId: string }): Promise<Result<TaskDto>> => {
       const space = spaces.get(spaceId);
@@ -301,7 +307,7 @@ app.whenReady().then(async () => {
       const existing = activeTask(projectId);
       if (existing) return failure("CONFLICT", "errors.taskConflict", true);
       const task = taskService.createTask({ projectId, sourceId: null, kind: "validation" });
-      return { ok: true, value: runTask(task, () => spaceService.rebuild({ taskId: task.id, spec: space })) };
+      return { ok: true, value: runTask(task, () => spaceService.rebuild({ taskId: task.id, recoverSources: true, spec: space })) };
     },
     optimize: async ({ projectId, spaceId }: { projectId: string; spaceId: string }): Promise<Result<TaskDto>> => {
       const space = spaces.get(spaceId);
@@ -351,7 +357,7 @@ app.whenReady().then(async () => {
   const titleService = new TitleService(noteRepository, routedGeneration);
   const noteService = new NoteService(noteRepository, randomUUID, titleService);
   const transformationRepository = new TransformationRepository(appDatabase.connection);
-  const transformationService = new TransformationService({ db: appDatabase.connection, tasks: taskService, taskRepository, transformations: transformationRepository, notes: noteRepository, generation: routedGeneration, router: modelRouter });
+  const transformationService = new TransformationService({ db: appDatabase.connection, tasks: taskService, taskRepository, transformations: transformationRepository, notes: noteRepository, generation: routedGeneration, router: modelRouter, podcasts: new PodcastService(appDatabase.connection, credentialStore) });
   void Promise.resolve(transformationService.recoverStale(60 * 60 * 1000)).catch(() => { /* stale recovery must not block startup */ });
   cleanupNoteHandlers = registerNoteHandlers(ipcMain, noteService);
   cleanupTransformationHandlers = registerTransformationHandlers(ipcMain, transformationService);
@@ -399,9 +405,10 @@ app.whenReady().then(async () => {
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) createMainWindow();
   });
-}).catch(() => {
+}).catch((error) => {
   // Startup failures are handled at the process boundary so Electron does
   // not leave a half-initialized window alive or report an unhandled promise.
+  console.error("Startup error:", error);
   app.quit();
 });
 

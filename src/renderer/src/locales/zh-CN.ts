@@ -39,6 +39,9 @@ const zhCN = {
     retry: "重试", add: "添加", edit: "编辑", delete: "删除", close: "关闭", focusHint: "使用 Tab 键移动焦点", loading: "正在加载…"
   },
   model: {
+    outputKind: "模型用途",
+    textOutput: "文字生成",
+    speechOutput: "语音合成（TTS）",
     generation: { title: "生成模型", description: "用于对话、摘要与内容生成" },
     embedding: { title: "嵌入模型", description: "用于本地索引与语义检索" },
     newProfile: "新建{{capability}}",
@@ -136,6 +139,7 @@ const zhCN = {
     loadError: "无法加载模型设置，请检查应用连接后重试。"
   },
   routing: {
+    podcastHint: "添加文字生成模型和 TTS 模型。文字模型生成双人对话稿，TTS 模型合成音频；同类模型按排列顺序回退。",
     title: "任务路由",
     description: "为每类任务选择首选模型与有序回退链路。",
     task: "任务",
@@ -160,7 +164,7 @@ const zhCN = {
     nextPage: "下一页",
     page: "第 {{page}} 页",
     states: { started: "已开始", completed: "已完成", failed: "失败", cancelled: "已取消" },
-    tasks: { chat: "对话", "note-title": "笔记标题", summary: "摘要", "key-points": "要点", qa: "选择题测验", "custom-transformation": "自定义转换", embedding: "嵌入" }
+    tasks: { chat: "对话", "note-title": "笔记标题", summary: "摘要", "key-points": "要点", qa: "选择题测验", "custom-transformation": "自定义转换", podcast: "播客", embedding: "嵌入" }
   },
   vector: {
     eyebrow: "数据与索引",
@@ -190,6 +194,10 @@ const zhCN = {
     states: { healthy: "索引正常", unavailable: "索引不可用", corrupt: "索引需要修复", building: "正在建立索引", failed: "索引建立失败" }
   },
   errors: {
+    podcastRouteMissing: "请在设置 → 任务路由 → 播客中添加至少一个文字生成模型和一个 TTS 模型。",
+    podcastScriptInvalid: "生成的播客对话稿格式不正确或不包含两位说话者，请重试或更换文字模型。",
+    podcastSpeechUnsupported: "此提供商暂不支持播客语音合成，请使用 OpenAI、OpenAI 兼容或 Gemini 的 TTS 模型。",
+    podcastAudioUnavailable: "播客音频无法读取或播放，请重试。",
     auth: "身份验证失败，请检查 API Key 和提供商权限。",
     authentication: "身份验证失败，请检查 API Key 和提供商权限。",
     authorization: "访问被拒绝，请检查 API Key 权限和提供商账户。",
@@ -379,6 +387,9 @@ const zhCN = {
     subtitle: "导入来源、提问并沉淀笔记"
   },
   transformations: {
+    podcastSynthetic: "AI 生成的双人对谈音频",
+    podcastPlayer: "播客播放器",
+    downloadAudio: "下载音频",
     eyebrow: "研究工具",
     title: "转换",
     subtitle: "将项目内容转换为可复用的洞察。",
@@ -452,7 +463,8 @@ const zhCN = {
     convert: "转换为笔记",
     unavailable: "转换服务尚未就绪。",
     elapsed: "已用 {{seconds}} 秒",
-    phases: { preparing: "准备资料", connecting: "等待模型响应", generating: "正在生成内容", saving: "正在整理结果" },
+    phases: { preparing: "准备资料", connecting: "模型响应中", generating: "正在生成内容", saving: "正在整理结果" },
+    podcastPhases: { preparing: "准备播客资料", script: "生成双人对话稿", speech: "合成双人语音", saving: "保存播客音频" },
     states: { queued: "排队中", running: "处理中", completed: "已完成", failed: "失败", cancelled: "已取消" }
   }
 } as const;

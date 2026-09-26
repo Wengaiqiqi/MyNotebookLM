@@ -1,5 +1,5 @@
 import type Database from "better-sqlite3";
-import type { ModelProfileDto } from "../../shared/models";
+import { modelOutputKind, type ModelProfileDto } from "../../shared/models";
 import type { AppErrorDto, Result } from "../../shared/app-errors";
 import type { ChatTurn, ModelProvider } from "../models/provider";
 import { ModelRouter } from "../models/model-router";
@@ -938,14 +938,14 @@ export class ChatService {
   private generationProfiles(overrideProfileId?: string): readonly ModelProfileDto[] {
     if (this.deps.router) return this.deps.router.resolve("chat", overrideProfileId);
     const profile = this.deps.generationProfile;
-    return profile && profile.enabled && profile.capability === "generation" ? [profile] : [];
+    return profile && profile.enabled && profile.capability === "generation" && modelOutputKind(profile) === "text" ? [profile] : [];
   }
 
   private routedDeps() {
     const router = this.deps.router ?? {
       resolve: (_task: "chat", _override?: string) => {
         const profile = this.deps.generationProfile;
-        return profile && profile.enabled && profile.capability === "generation" ? [Object.freeze({ ...profile })] : [];
+        return profile && profile.enabled && profile.capability === "generation" && modelOutputKind(profile) === "text" ? [Object.freeze({ ...profile })] : [];
       }
     };
     return {

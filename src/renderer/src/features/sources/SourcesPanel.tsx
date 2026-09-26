@@ -41,17 +41,13 @@ export default function SourcesPanel({ projectId, embeddingProfileId, onImported
 
   useEffect(() => { void refresh(); }, [refresh]);
 
-  // First build of the project's embedding Space: once the migration task
-  // completes, retry the imports that failed for lack of a Space.
+  // The main process recovers pending sources before completing the rebuild.
   useEffect(() => {
     if (!spaceBuilding) return;
     const migration = tasks.find((task) => task.kind === "validation");
     if (!migration) return;
     if (migration.state === "completed") {
       setSpaceBuilding(false);
-      for (const [sourceId, task] of failedTaskBySource) {
-        if (task.error?.code === "INDEX_UNAVAILABLE") void retry(sourceId);
-      }
       toast.success(t("vector.rebuilt"));
     } else if (migration.state === "failed" || migration.state === "cancelled") {
       setSpaceBuilding(false);
@@ -88,10 +84,11 @@ export default function SourcesPanel({ projectId, embeddingProfileId, onImported
   const failedTaskBySource = useMemo(() => {
     const next = new Map<string, TaskDto>();
     for (const [sourceId, task] of taskBySource) {
-      if (task.state === "failed") next.set(sourceId, task);
+      const source = sources.find((item) => item.id === sourceId);
+      if (task.state === "failed" && !(source && sourceReady(source) && source.updatedAt >= task.updatedAt)) next.set(sourceId, task);
     }
     return next;
-  }, [taskBySource]);
+  }, [taskBySource, sources]);
 
   async function remove(source: SourceDto): Promise<void> {
     const result = await api().sources.remove({ projectId, sourceId: source.id });

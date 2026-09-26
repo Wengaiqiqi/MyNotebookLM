@@ -39,6 +39,9 @@ const en = {
     retry: "Retry", add: "Add", edit: "Edit", delete: "Delete", close: "Close", focusHint: "Use Tab to move focus", loading: "Loading…"
   },
   model: {
+    outputKind: "Model purpose",
+    textOutput: "Text generation",
+    speechOutput: "Speech synthesis (TTS)",
     generation: { title: "Generation model", description: "Used for chat, summaries and content generation" },
     embedding: { title: "Embedding model", description: "Used for local indexing and semantic retrieval" },
     newProfile: "New {{capability}}",
@@ -136,6 +139,7 @@ const en = {
     loadError: "Unable to load model settings. Check the app connection and retry."
   },
   routing: {
+    podcastHint: "Add text and TTS models. Text models write the dialogue; TTS models synthesize audio. Models of the same kind fall back in the listed order.",
     title: "Task routing",
     description: "Choose a preferred model and ordered fallback chain per task kind.",
     task: "Task",
@@ -160,7 +164,7 @@ const en = {
     nextPage: "Next",
     page: "Page {{page}}",
     states: { started: "Started", completed: "Completed", failed: "Failed", cancelled: "Cancelled" },
-    tasks: { chat: "Chat", "note-title": "Note title", summary: "Summary", "key-points": "Key points", qa: "Quiz", "custom-transformation": "Custom transformation", embedding: "Embedding" }
+    tasks: { chat: "Chat", "note-title": "Note title", summary: "Summary", "key-points": "Key points", qa: "Quiz", "custom-transformation": "Custom transformation", podcast: "Podcast", embedding: "Embedding" }
   },
   vector: {
     eyebrow: "Data & index",
@@ -190,6 +194,10 @@ const en = {
     states: { healthy: "Index healthy", unavailable: "Index unavailable", corrupt: "Index needs repair", building: "Building index", failed: "Index build failed" }
   },
   errors: {
+    podcastRouteMissing: "Add at least one text model and one TTS model in Settings → Task routing → Podcast.",
+    podcastScriptInvalid: "The podcast script is invalid or does not include two speakers. Retry or choose another text model.",
+    podcastSpeechUnsupported: "This provider does not support podcast speech synthesis. Use an OpenAI, OpenAI-compatible or Gemini TTS model.",
+    podcastAudioUnavailable: "The podcast audio could not be loaded or played. Please retry.",
     auth: "Authentication failed. Check the API key and provider permissions.",
     authentication: "Authentication failed. Check the API key and provider permissions.",
     authorization: "Access denied. Check the API key permissions and provider account.",
@@ -379,6 +387,9 @@ const en = {
     subtitle: "Import sources, ask questions, capture notes"
   },
   transformations: {
+    podcastSynthetic: "AI-generated two-person audio",
+    podcastPlayer: "Podcast player",
+    downloadAudio: "Download audio",
     eyebrow: "Research tools",
     title: "Transformations",
     subtitle: "Turn project content into reusable insights.",
@@ -452,7 +463,8 @@ const en = {
     convert: "Convert to note",
     unavailable: "Transformations are unavailable until the desktop service is ready.",
     elapsed: "{{seconds}}s",
-    phases: { preparing: "Preparing inputs", connecting: "Waiting for the model", generating: "Generating content", saving: "Finalizing results" },
+    phases: { preparing: "Preparing inputs", connecting: "Model responding", generating: "Generating content", saving: "Finalizing results" },
+    podcastPhases: { preparing: "Preparing podcast sources", script: "Writing the dialogue", speech: "Synthesizing both voices", saving: "Saving podcast audio" },
     states: { queued: "Queued", running: "Processing", completed: "Completed", failed: "Failed", cancelled: "Cancelled" }
   }
 } as const;
