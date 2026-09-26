@@ -279,20 +279,24 @@ describe("StudioPane", () => {
       expect(fill().style.width).toBe("20%");
       // The copy replaces in place once the number reaches the milestone.
       expect(screen.queryByText("准备资料")).toBeNull();
-      expect(screen.getByText("等待模型响应")).toBeTruthy();
+      expect(screen.getByText("模型响应中")).toBeTruthy();
 
-      // Inputs confirmed ready: the number holds at 20 until the provider answers.
+      // Model response in progress advances at 4% per second.
       await act(async () => { emit({ ...taskDto(), state: "running", stage: "generating", progress: 200, updatedAt: "2026-01-01T00:00:01.500Z" }); });
       expect(percent()).toBe(20);
-      expect(screen.getByText("等待模型响应")).toBeTruthy();
+      expect(screen.getByText("模型响应中")).toBeTruthy();
+      await act(async () => { vi.advanceTimersByTime(2_500); });
+      expect(percent()).toBe(30);
 
-      // Only a real provider response may raise the ceiling past 20%.
+      // A real response changes the label immediately and catches up to 50%.
       await act(async () => { emit({ ...taskDto(), state: "running", stage: "generating", progress: 400, updatedAt: "2026-01-01T00:00:02.000Z" }); });
-      await act(async () => { vi.advanceTimersByTime(5_000); });
-      expect(percent()).toBe(50);
       expect(screen.getByText("正在生成内容")).toBeTruthy();
+      await act(async () => { vi.advanceTimersByTime(600); });
+      expect(percent()).toBe(48);
+      await act(async () => { vi.advanceTimersByTime(100); });
+      expect(percent()).toBe(50);
 
-      // 20 -> 80 takes 10s, then stops at the reported ceiling, never past it.
+      // Generation keeps its 6%/s rate and stops at 80%.
       await act(async () => { vi.advanceTimersByTime(5_000); });
       expect(percent()).toBe(80);
       await act(async () => { vi.advanceTimersByTime(60_000); });

@@ -452,7 +452,7 @@ const zhCN = {
     convert: "转换为笔记",
     unavailable: "转换服务尚未就绪。",
     elapsed: "已用 {{seconds}} 秒",
-    phases: { preparing: "准备资料", connecting: "等待模型响应", generating: "正在生成内容", saving: "正在整理结果" },
+    phases: { preparing: "准备资料", connecting: "模型响应中", generating: "正在生成内容", saving: "正在整理结果" },
     states: { queued: "排队中", running: "处理中", completed: "已完成", failed: "失败", cancelled: "已取消" }
   }
 } as const;

@@ -452,7 +452,7 @@ const en = {
     convert: "Convert to note",
     unavailable: "Transformations are unavailable until the desktop service is ready.",
     elapsed: "{{seconds}}s",
-    phases: { preparing: "Preparing inputs", connecting: "Waiting for the model", generating: "Generating content", saving: "Finalizing results" },
+    phases: { preparing: "Preparing inputs", connecting: "Model responding", generating: "Generating content", saving: "Finalizing results" },
     states: { queued: "Queued", running: "Processing", completed: "Completed", failed: "Failed", cancelled: "Cancelled" }
   }
 } as const;

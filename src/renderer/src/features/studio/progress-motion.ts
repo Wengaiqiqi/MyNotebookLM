@@ -3,34 +3,32 @@
  *
  * The main process only reports milestones (20 = inputs ready, 40 = provider
  * answered, 80 = text generated, 100 = persisted). The renderer walks the shown
- * number toward those ceilings at a per-segment rate so the percentage always
- * climbs instead of jumping, and never overtakes a milestone the main process
- * has not confirmed yet.
+ * number toward display ceilings at a per-segment rate. Waiting for a response
+ * may climb to 50%; a confirmed response catches up there within two seconds.
  */
 
 /**
  * Highest percentage the card may show for the reported milestone.
  *
- * 0 = nothing confirmed yet, 20 = inputs ready, 80 = text generated, 100 =
- * persisted. The number is free to climb on its own between milestones, so a
- * long generation still reads as motion, but it never crosses one the main
- * process has not confirmed.
+ * Model response caps at 50%, content generation at 80%, saving at 99%, and
+ * the persisted result is the only state that reaches 100%.
  */
 export function progressCeiling(backendPercent: number): number {
   if (backendPercent >= 100) return 100;
   // 99 keeps the last point for the persisted result.
   if (backendPercent >= 80) return 99;
-  // The provider answered: content streams at 6%/s up to 80 (10s for the span).
+  // The provider answered: catch up to 50, then stream at 6%/s up to 80.
   if (backendPercent >= 40) return 80;
-  // Inputs ready, provider silent: hold at 20 rather than fake generation.
-  return 20;
+  // Model response in progress: climb at 4%/s, capped at 50%.
+  return 50;
 }
 
 /** Percentage points per second for the segment the number is currently in. */
-function percentPerSecond(current: number): number {
+function percentPerSecond(current: number, ceiling: number): number {
   // 0 -> 20 takes 4s, so "preparing" is always visible for at least that long.
   if (current < 20) return 5;
-  // 20 -> 80 while content generates: the whole stretch takes 10s.
+  if (ceiling <= 50) return 4;
+  // Keep the existing content generation rate after reaching 50%.
   if (current < 80) return 6;
   // 80 -> 99 while the result is written; settles in about a second.
   return 20;
@@ -39,7 +37,9 @@ function percentPerSecond(current: number): number {
 /** Walks the displayed number toward the ceiling; never decreases. */
 export function advancePercent(current: number, ceiling: number, elapsedMs: number): number {
   if (current >= ceiling) return current;
-  return Math.min(ceiling, current + (percentPerSecond(current) * elapsedMs) / 1000);
+  // A real response catches up to 50%, then the next tick resumes normal motion.
+  if (ceiling >= 80 && current < 50) return Math.min(50, current + (30 * elapsedMs) / 1000);
+  return Math.min(ceiling, current + (percentPerSecond(current, ceiling) * elapsedMs) / 1000);
 }
 
 /**
