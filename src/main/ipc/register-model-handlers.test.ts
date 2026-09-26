@@ -83,6 +83,7 @@ function createService() {
     saveProfile: vi.fn(async () => ok(profileDto)),
     deleteProfile: vi.fn(async () => ok(undefined)),
     discover: vi.fn(async () => ok(descriptors)),
+    discoverVoices: vi.fn(async () => ok([{ id: "vendor-voice", name: "Vendor voice" }])),
     test: vi.fn(async () => ok({
       modelId: profile.modelId,
       capability: profile.capability,
@@ -135,6 +136,7 @@ describe("registerModelHandlers", () => {
     await invoke(ipc, MODEL_CHANNELS.saveProfile, { profile, apiKey: "secret" });
     await invoke(ipc, MODEL_CHANNELS.deleteProfile, { id: PROFILE_ID });
     await invoke(ipc, MODEL_CHANNELS.discover, discoveryInput);
+    await expect(invoke(ipc, MODEL_CHANNELS.discoverVoices, { ...discoveryInput, modelId: "custom-tts" })).resolves.toEqual(ok([{ id: "vendor-voice", name: "Vendor voice" }]));
     await invoke(ipc, MODEL_CHANNELS.test, { profile });
     await invoke(ipc, MODEL_CHANNELS.getRoutes, { taskKind: "summary" });
     await invoke(ipc, MODEL_CHANNELS.saveRoutes, { taskKind: "summary", profileIds: [PROFILE_ID] });

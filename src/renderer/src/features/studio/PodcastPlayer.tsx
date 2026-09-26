@@ -24,6 +24,5 @@ export default function PodcastPlayer({ projectId, insightId }: { projectId: str
   return <div style={{ display: "grid", gap: 8, marginBottom: 16 }}>
     <small>{t("transformations.podcastSynthetic")}</small>
     <audio controls preload="metadata" src={url} aria-label={t("transformations.podcastPlayer")} style={{ width: "100%" }} onError={() => setError("errors.podcastAudioUnavailable")} />
-    <a className="btn ghost sm" href={url} download={`podcast-${insightId}.wav`}>{t("transformations.downloadAudio")}</a>
   </div>;
 }

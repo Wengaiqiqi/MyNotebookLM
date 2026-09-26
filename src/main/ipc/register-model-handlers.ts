@@ -21,6 +21,8 @@ import {
   defaultModelRoutesDtoSchema,
   deleteModelProfileInputSchema,
   discoverModelsInputSchema,
+  discoverSpeechVoicesInputSchema,
+  speechVoiceDescriptorSchema,
   modelDescriptorSchema,
   modelProfileDtoSchema,
   modelProfileListDtoSchema,
@@ -127,6 +129,9 @@ export function registerModelHandlers(
     validatedCall(testModelInputSchema, testResultSchema, input, (parsed) =>
       service.test(parsed)
     )
+  );
+  ipc.handle(MODEL_CHANNELS.discoverVoices, (_event, input) =>
+    validatedCall(discoverSpeechVoicesInputSchema, resultSchema(speechVoiceDescriptorSchema.array()), input, (parsed) => service.discoverVoices(parsed))
   );
   ipc.handle(MODEL_CHANNELS.updateGenerationSettings, (_event, input) =>
     validatedCall(updateGenerationSettingsInputSchema, profileResultSchema, input, (parsed) =>

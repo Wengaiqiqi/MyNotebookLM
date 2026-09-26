@@ -45,6 +45,7 @@ type ProfileRow = {
   max_output_tokens_override?: number | null;
   generation_limits_json?: string | null;
   output_kind?: string | null;
+  speech_voices_json?: string | null;
 };
 
 type RouteRow = {
@@ -94,6 +95,7 @@ function toProfile(row: ProfileRow): ModelProfileDto {
     baseUrl: row.base_url,
     modelId: row.model_id,
     ...(row.output_kind ? { outputKind: row.output_kind } : {}),
+    ...(row.speech_voices_json ? { speechVoices: JSON.parse(row.speech_voices_json) } : {}),
     enabled: row.enabled === 1,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
@@ -114,10 +116,12 @@ function toRoute(row: RouteRow): ModelRouteDto {
 export class SettingsRepository {
   private readonly supportsGenerationColumns: boolean;
   private readonly supportsOutputKind: boolean;
+  private readonly supportsSpeechVoices: boolean;
 
   constructor(private readonly db: Database.Database) {
     const columns = db.pragma("table_info(model_profiles)") as Array<{ name: string }>;
     this.supportsOutputKind = columns.some((column) => column.name === "output_kind");
+    this.supportsSpeechVoices = columns.some((column) => column.name === "speech_voices_json");
     this.supportsGenerationColumns = ["context_tokens_override", "max_output_tokens_override", "generation_limits_json"].every((name) => columns.some((column) => column.name === name));
   }
 
@@ -206,6 +210,7 @@ export class SettingsRepository {
     `;
     this.db.prepare(sql).run({ ...profile, enabled: profile.enabled ? 1 : 0 });
     if (this.supportsOutputKind) this.db.prepare("UPDATE model_profiles SET output_kind = ? WHERE id = ?").run(profile.outputKind ?? null, profile.id);
+    if (this.supportsSpeechVoices) this.db.prepare("UPDATE model_profiles SET speech_voices_json = ? WHERE id = ?").run(profile.speechVoices ? JSON.stringify(profile.speechVoices) : null, profile.id);
     return this.getProfile(profile.id)!;
   }
 

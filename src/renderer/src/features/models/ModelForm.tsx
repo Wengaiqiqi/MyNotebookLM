@@ -8,7 +8,6 @@ import type {
   ProviderKind
 } from "../../../../shared/models";
 import Icon from "../../ui/Icon";
-import RoundedSelect from "../../ui/RoundedSelect";
 import { modelOutputKind } from "../../../../shared/models";
 import { toast } from "../../ui/Toast";
 
@@ -51,6 +50,8 @@ export default function ModelForm({ capability, existing, existingProfiles, init
     ? existingProfiles
     : (userExisting ? [userExisting] : []);
   const primaryExisting = allExistingProfiles[0];
+  const existingText = allExistingProfiles.filter((profile) => capability !== "generation" || modelOutputKind(profile) === "text");
+  const existingSpeech = allExistingProfiles.filter((profile) => capability === "generation" && modelOutputKind(profile) === "speech");
   const isEdit = allExistingProfiles.length > 0;
 
   const initialProviderValue = primaryExisting?.provider ?? initialProvider ?? "openai";
@@ -64,9 +65,9 @@ export default function ModelForm({ capability, existing, existingProfiles, init
   );
   const [name, setName] = useState(primaryExisting ? cleanDisplayName(primaryExisting.name) : "");
   const [baseUrl, setBaseUrl] = useState(primaryExisting?.baseUrl ?? (initialProviderValue === "local" ? "" : PROVIDER_DEFAULT_BASE_URL.openai ?? ""));
-  const [modelId, setModelId] = useState(primaryExisting?.modelId ?? (initialProviderValue === "local" && builtInModel ? builtInModel.modelId : ""));
+  const [modelId, setModelId] = useState(existingText[0]?.modelId ?? (initialProviderValue === "local" && builtInModel ? builtInModel.modelId : ""));
+  const [speechModelId, setSpeechModelId] = useState(existingSpeech[0]?.modelId ?? "");
   const [apiKey, setApiKey] = useState("");
-  const [outputKinds, setOutputKinds] = useState<Record<string, "text" | "speech">>(() => Object.fromEntries(allExistingProfiles.filter((profile) => profile.outputKind).map((profile) => [profile.modelId, profile.outputKind!])));
   const [showKey, setShowKey] = useState(false);
 
   const initialDescriptors: ModelDescriptorDto[] = useMemo(() => {
@@ -79,15 +80,21 @@ export default function ModelForm({ capability, existing, existingProfiles, init
   }, [allExistingProfiles, capability]);
 
   const [discovered, setDiscovered] = useState<ModelDescriptorDto[]>(initialDescriptors);
-  const [selectedModelIds, setSelectedModelIds] = useState<string[]>(allExistingProfiles.map((p) => p.modelId));
-  const [discovering, setDiscovering] = useState(false);
-  const [discoveredNote, setDiscoveredNote] = useState("");
+  const [selectedModelIds, setSelectedModelIds] = useState<string[]>(existingText.map((p) => p.modelId));
+  const [selectedSpeechModelIds, setSelectedSpeechModelIds] = useState<string[]>(existingSpeech.map((p) => p.modelId));
+  const [discovering, setDiscovering] = useState<"text" | "speech" | null>(null);
+  const [discoveredNotes, setDiscoveredNotes] = useState({ text: "", speech: "" });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const localTouched = useRef(Boolean(primaryExisting?.provider === "local"));
 
   const providers = capability === "generation" ? GENERATION_PROVIDERS : EMBEDDING_PROVIDERS;
   const needsKey = provider !== "ollama" && provider !== "local";
+  const supportsSpeech = capability === "generation" && ["openai", "openai-compatible", "gemini"].includes(provider);
+  const modelSelections = [
+    ...(selectedModelIds.length ? selectedModelIds : modelId.trim() ? [modelId.trim()] : []).map((id) => ({ modelId: id, outputKind: "text" as const })),
+    ...(supportsSpeech ? (selectedSpeechModelIds.length ? selectedSpeechModelIds : speechModelId.trim() ? [speechModelId.trim()] : []) : []).map((id) => ({ modelId: id, outputKind: "speech" as const }))
+  ];
   const namePlaceholder = useMemo(() =>
     `${t(`model.providers.${provider}`)} · ${capability === "generation" ? t("model.generation.title") : t("model.embedding.title")}`,
   [provider, capability, t]);
@@ -103,7 +110,9 @@ export default function ModelForm({ capability, existing, existingProfiles, init
     if (next === provider) return;
     setProvider(next);
     setDiscovered([]);
-    setDiscoveredNote("");
+    setDiscoveredNotes({ text: "", speech: "" });
+    setSpeechModelId("");
+    setSelectedSpeechModelIds([]);
     setError("");
     localTouched.current = true;
     if (next === "local") {
@@ -155,11 +164,11 @@ export default function ModelForm({ capability, existing, existingProfiles, init
     onProfileSelected?.(undefined);
   }
 
-  async function discover(): Promise<void> {
+  async function discover(kind: "text" | "speech"): Promise<void> {
     if (provider === "local") return;
     if (!baseUrl.trim()) { setError(t("model.validation.address")); return; }
     if (needsKey && !apiKey.trim() && !isEdit) { setError(t("model.validation.apiKey")); return; }
-    setDiscovering(true); setError(""); setDiscoveredNote("");
+    setDiscovering(kind); setError(""); setDiscoveredNotes((current) => ({ ...current, [kind]: "" }));
     const result = await window.myNotebook.models.discover({
       provider,
       capability,
@@ -167,7 +176,7 @@ export default function ModelForm({ capability, existing, existingProfiles, init
       ...(primaryExisting?.id ? { profileId: primaryExisting.id } : {}),
       ...(apiKey.trim() ? { apiKey: apiKey.trim() } : {})
     }).catch(() => undefined);
-    setDiscovering(false);
+    setDiscovering(null);
     if (!result?.ok) { setError(t(result?.error.messageKey ?? "errors.internal")); return; }
     // Model catalogs usually cannot prove capabilities from the listing alone
     // (OpenAI-compatible and official DeepSeek endpoints return an empty
@@ -187,8 +196,7 @@ export default function ModelForm({ capability, existing, existingProfiles, init
       }
     }
     setDiscovered(Array.from(mergedMap.values()));
-    setDiscoveredNote(t("model.fetchSuccess"));
-    if (usable.length > 0 && !modelId) setModelId(usable[0]!.id);
+    setDiscoveredNotes((current) => ({ ...current, [kind]: t("model.fetchSuccess") }));
   }
 
   async function save(): Promise<void> {
@@ -196,25 +204,14 @@ export default function ModelForm({ capability, existing, existingProfiles, init
       onProfileSelected?.(builtInModel);
       return;
     }
-    const modelIds = selectedModelIds.length > 0 ? selectedModelIds : modelId.trim() ? [modelId.trim()] : [];
-    if (!name.trim() || modelIds.length === 0 || saving) return;
+    if (!name.trim() || modelSelections.length === 0 || saving) return;
     if (!baseUrl.trim()) { setError(provider === "local" ? t("model.validation.localModelPath") : t("model.validation.address")); return; }
     setSaving(true); setError("");
 
-    const existingByModelId = new Map<string, ModelProfileDto>();
-    for (const p of allExistingProfiles) {
-      existingByModelId.set(p.modelId, p);
-    }
-
-    // Delete profiles that the user unselected
-    const removedProfiles = allExistingProfiles.filter((p) => !modelIds.includes(p.modelId));
-    for (const removed of removedProfiles) {
-      await window.myNotebook.models.deleteProfile({ id: removed.id }).catch(() => undefined);
-    }
-
     let savedProfile: ModelProfileDto | undefined;
-    for (const selectedId of modelIds) {
-      const match = existingByModelId.get(selectedId);
+    for (const selection of modelSelections) {
+      const selectedId = selection.modelId;
+      const match = allExistingProfiles.find((profile) => profile.modelId === selectedId && (capability !== "generation" || modelOutputKind(profile) === selection.outputKind));
       const profile = {
         id: match?.id ?? crypto.randomUUID(),
         name: name.trim(),
@@ -222,7 +219,10 @@ export default function ModelForm({ capability, existing, existingProfiles, init
         capability,
         baseUrl: baseUrl.trim(),
         modelId: selectedId,
-        ...(capability === "generation" && outputKinds[selectedId] ? { outputKind: outputKinds[selectedId] } : {}),
+        ...(capability === "generation" ? { outputKind: selection.outputKind } : {}),
+        ...(match?.speechVoices && match.provider === provider && match.baseUrl === baseUrl.trim()
+          && selection.outputKind === "speech"
+          ? { speechVoices: match.speechVoices } : {}),
         enabled: match ? match.enabled : true
       };
       const result = await window.myNotebook.models.saveProfile({
@@ -234,7 +234,14 @@ export default function ModelForm({ capability, existing, existingProfiles, init
         setError(t(result?.error.messageKey ?? "errors.internal"));
         return;
       }
-      savedProfile = result.value;
+      // Onboarding needs a text model for the default chat route.
+      if (!savedProfile || selection.outputKind === "text") savedProfile = result.value;
+    }
+    // Preserve existing profiles until all new selections have saved successfully.
+    const removedProfiles = allExistingProfiles.filter((profile) => !modelSelections.some((selection) => selection.modelId === profile.modelId && (capability !== "generation" || selection.outputKind === modelOutputKind(profile))));
+    for (const removed of removedProfiles) {
+      const result = await window.myNotebook.models.deleteProfile({ id: removed.id }).catch(() => undefined);
+      if (!result?.ok) { setSaving(false); setError(t(result?.error.messageKey ?? "errors.internal")); return; }
     }
     setSaving(false);
     if (!savedProfile) return;
@@ -369,55 +376,50 @@ export default function ModelForm({ capability, existing, existingProfiles, init
             </label>
           )}
 
-          <div className="field">
-            <div className="input-row">
-              {provider === "local" ? (
-                <input
-                  className="input"
-                  value={modelId}
-                  onChange={(event) => { setSelectedModelIds([]); setModelId(event.target.value); }}
-                  placeholder={t("model.modelName")}
-                  aria-label={t("model.modelName")}
-                  spellCheck={false}
-                />
-              ) : (
-                <ModelPicker
-                  id={`model-id-${capability}`}
-                  value={modelId}
-                  selectedIds={selectedModelIds}
-                  descriptors={discovered}
-                  multiple
-                  placeholder={t("model.modelName")}
-                  ariaLabel={t("model.modelName")}
-                  selectedLabel={(count) => t("model.selectedModels", { count })}
-                  emptyLabel={t("model.noDiscoveredModels")}
-                  doneLabel={t("common.confirm")}
-                  onValueChange={(value) => { setSelectedModelIds([]); setModelId(value); }}
-                  onSelectionChange={(values) => { setSelectedModelIds(values); setModelId(values[0] ?? ""); }}
-                />
-              )}
-              {provider !== "local" && (
-                <button type="button" className="btn outline" disabled={discovering} onClick={() => void discover()}>
-                  {discovering ? <span className="spinner" aria-hidden="true" /> : <Icon name="retry" />}
-                  {discovering ? t("model.fetching") : t("model.getModels")}
-                </button>
-              )}
-            </div>
-            {discoveredNote && <span className="form-ok"><Icon name="check" />{discoveredNote}</span>}
-          </div>
-
-          {capability === "generation" && (selectedModelIds.length ? selectedModelIds : modelId.trim() ? [modelId.trim()] : []).map((id) => (
-            <label className="field" key={id}>
-              {t("model.outputKind")} · {id}
-              <RoundedSelect ariaLabel={`${t("model.outputKind")} · ${id}`} value={outputKinds[id] ?? modelOutputKind({ modelId: id })}
-                options={[{ value: "text", label: t("model.textOutput") }, ...(["openai", "openai-compatible", "gemini"].includes(provider) ? [{ value: "speech", label: t("model.speechOutput") }] : [])]}
-                onChange={(value) => setOutputKinds((current) => ({ ...current, [id]: value as "text" | "speech" }))} />
-            </label>
-          ))}
+          {(supportsSpeech ? ["text", "speech"] as const : ["text"] as const).map((kind) => {
+            const speech = kind === "speech";
+            const label = capability === "generation" ? t(speech ? "model.selectSpeechModel" : "model.selectTextModel") : t("model.modelName");
+            return <div className="field" key={kind} role="group" aria-label={capability === "generation" ? t(speech ? "model.speechOutput" : "model.textOutput") : t("model.embedding.title")}>
+              <div className="input-row">
+                {provider === "local" ? (
+                  <input
+                    className="input"
+                    value={modelId}
+                    onChange={(event) => { setSelectedModelIds([]); setModelId(event.target.value); }}
+                    placeholder={t("model.modelName")}
+                    aria-label={t("model.modelName")}
+                    spellCheck={false}
+                  />
+                ) : (
+                  <ModelPicker
+                    id={`model-id-${capability}-${kind}`}
+                    value={speech ? speechModelId : modelId}
+                    selectedIds={speech ? selectedSpeechModelIds : selectedModelIds}
+                    descriptors={discovered}
+                    multiple
+                    placeholder={label}
+                    ariaLabel={label}
+                    selectedLabel={(count) => t("model.selectedModels", { count })}
+                    emptyLabel={t("model.noDiscoveredModels")}
+                    doneLabel={t("common.confirm")}
+                    onValueChange={(value) => { if (speech) { setSelectedSpeechModelIds([]); setSpeechModelId(value); } else { setSelectedModelIds([]); setModelId(value); } }}
+                    onSelectionChange={(values) => { if (speech) { setSelectedSpeechModelIds(values); setSpeechModelId(values[0] ?? ""); } else { setSelectedModelIds(values); setModelId(values[0] ?? ""); } }}
+                  />
+                )}
+                {provider !== "local" && (
+                  <button type="button" className="btn outline" disabled={discovering !== null} onClick={() => void discover(kind)}>
+                    {discovering === kind ? <span className="spinner" aria-hidden="true" /> : <Icon name="retry" />}
+                    {discovering === kind ? t("model.fetching") : t("model.getModels")}
+                  </button>
+                )}
+              </div>
+              {discoveredNotes[kind] && <span className="form-ok"><Icon name="check" />{discoveredNotes[kind]}</span>}
+            </div>;
+          })}
 
           <div className="dialog-foot" style={{ marginTop: 2 }}>
             {onCancel && <button type="button" className="btn" onClick={onCancel}>{t("common.cancel")}</button>}
-            <button type="button" className="btn primary" disabled={saving || !name.trim() || (selectedModelIds.length === 0 && !modelId.trim()) || (provider === "local" && !baseUrl.trim())} onClick={() => void save()}>
+            <button type="button" className="btn primary" disabled={saving || !name.trim() || modelSelections.length === 0 || (provider === "local" && !baseUrl.trim())} onClick={() => void save()}>
               {saving ? <span className="spinner light" aria-hidden="true" /> : <Icon name="check" />}
               {t("common.save")}
             </button>

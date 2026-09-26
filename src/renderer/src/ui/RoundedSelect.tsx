@@ -11,6 +11,7 @@ export default function RoundedSelect({ value, options, ariaLabel, onChange, cla
 }) {
   const [open, setOpen] = useState(false);
   const [placement, setPlacement] = useState<"up" | "down">("down");
+  const [menuHeight, setMenuHeight] = useState<number>();
   const rootRef = useRef<HTMLDivElement>(null);
   const selected = options.find((option) => option.value === value) ?? options[0];
 
@@ -19,7 +20,16 @@ export default function RoundedSelect({ value, options, ariaLabel, onChange, cla
     const root = rootRef.current;
     if (root) {
       const rect = root.getBoundingClientRect();
-      setPlacement(window.innerHeight - rect.bottom < 280 && rect.top > 280 ? "up" : "down");
+      let top = 0, bottom = window.innerHeight;
+      for (let parent = root.parentElement; parent; parent = parent.parentElement) {
+        if (!/auto|scroll|hidden|clip/.test(getComputedStyle(parent).overflowY)) continue;
+        const bounds = parent.getBoundingClientRect();
+        top = Math.max(top, bounds.top); bottom = Math.min(bottom, bounds.bottom);
+      }
+      const above = rect.top - top - 12, below = bottom - rect.bottom - 12;
+      const up = below < 260 && above > below;
+      setPlacement(up ? "up" : "down");
+      setMenuHeight(Math.max(40, Math.min(260, up ? above : below)));
     }
     const close = (event: PointerEvent): void => {
       if (event.target instanceof Node && !rootRef.current?.contains(event.target)) setOpen(false);
@@ -65,7 +75,7 @@ export default function RoundedSelect({ value, options, ariaLabel, onChange, cla
         <Icon name={open ? "chevron-up" : "chevron-down"} />
       </button>
       {open && !disabled && (
-        <div className="rounded-select-menu" data-placement={placement} role="listbox" aria-label={ariaLabel}>
+        <div className="rounded-select-menu" data-placement={placement} style={{ maxHeight: menuHeight }} role="listbox" aria-label={ariaLabel}>
           {options.map((option) => (
             <button
               type="button"

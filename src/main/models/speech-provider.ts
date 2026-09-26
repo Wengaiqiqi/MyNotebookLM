@@ -4,6 +4,7 @@ import type { ModelProfileInput } from "../../shared/models";
 import { ProviderHttpClient, ProviderRequestError } from "./http-client";
 import { classifyProviderError } from "./provider-errors";
 import { RoutedGenerationError } from "./routed-generation";
+import { discoverSpeechVoices } from "./speech-voices";
 
 export const MAX_AUDIO_BYTES = 64 * 1024 * 1024;
 export const podcastScriptSchema = z.object({
@@ -60,16 +61,26 @@ export function readWave(wav: Buffer): { pcm: Buffer; sampleRate: number; channe
   return { ...format, pcm };
 }
 
-/** Fixed two voices for the experiment; retain whole turns and pauses. */
-export async function synthesizeSpeech(profile: Pick<ModelProfileInput, "provider" | "baseUrl" | "modelId">, apiKey: string | undefined, turns: readonly SpeechTurn[], signal: AbortSignal, progress = (_fraction: number): void => {}): Promise<Buffer> {
+/** Keep speaker selections consistent across the whole conversation. */
+export async function synthesizeSpeech(profile: Pick<ModelProfileInput, "provider" | "baseUrl" | "modelId" | "speechVoices">, apiKey: string | undefined, turns: readonly SpeechTurn[], signal: AbortSignal, progress = (_fraction: number): void => {}): Promise<Buffer> {
   if (signal.aborted) throw new ProviderRequestError(classifyProviderError({ cancelled: true }));
+  if (!["openai", "openai-compatible", "gemini"].includes(profile.provider)) throw new RoutedGenerationError({ code: "VALIDATION", messageKey: "errors.podcastSpeechUnsupported", recoverable: true });
+  let selectedVoices = profile.speechVoices;
+  if (!selectedVoices) {
+    const catalog = await discoverSpeechVoices(profile, apiKey, signal);
+    const chinese = turns.some((turn) => /[\u3400-\u9fff]/.test(turn.text));
+    const matching = catalog.filter((voice) => voice.language && (chinese ? /zh|中文|Chinese/i : /en|英文|English/i).test(voice.language));
+    const choices = matching.length >= 2 ? matching : catalog;
+    if (choices.length < 2) throw new RoutedGenerationError({ code: "VALIDATION", messageKey: "errors.podcastVoicesRequired", recoverable: true });
+    selectedVoices = { A: choices[0]!.id, B: choices[1]!.id };
+  }
   const client = new ProviderHttpClient(fetch, { timeoutMs: 120_000, idleTimeoutMs: 180_000, maxResponseBytes: MAX_AUDIO_BYTES });
   const headers = new Headers({ "content-type": "application/json" });
   if (profile.provider === "gemini") {
     if (apiKey) headers.set("x-goog-api-key", apiKey);
     const base = profile.baseUrl.replace(/\/+$/, "").replace(/\/v1beta$/, "");
     const model = profile.modelId.replace(/^models\//, "");
-    const speakers = [{ speaker: "A", voice: "Puck" }, { speaker: "B", voice: "Kore" }];
+    const speakers = [{ speaker: "A", voice: selectedVoices.A }, { speaker: "B", voice: selectedVoices.B }];
     // The 3.8 API returns WAV; legacy generateContent returns headerless PCM.
     const interactions = /^gemini-3\.8-/.test(model);
     const body = interactions ? {
@@ -110,14 +121,14 @@ export async function synthesizeSpeech(profile: Pick<ModelProfileInput, "provide
         method: "POST", headers, signal,
         body: JSON.stringify({ model: profile.modelId, stream: false,
           messages: [{ role: "user", content: chinese ? "自然、清晰的双人播客对谈语气，只朗读给定台词。" : "Natural, clear conversational podcast delivery. Read only the supplied words." }, { role: "assistant", content: turn.text }],
-          audio: { format: "wav", voice: chinese ? (turn.speaker === "A" ? "冰糖" : "苏打") : (turn.speaker === "A" ? "Mia" : "Milo") }
+          audio: { format: "wav", voice: selectedVoices[turn.speaker] }
         })
       });
       wav = decodeAudio(response?.choices?.[0]?.message?.audio?.data);
     } else {
       wav = await client.binary(profile.baseUrl, "/audio/speech", {
         method: "POST", headers, signal,
-        body: JSON.stringify({ model: profile.modelId, input: turn.text, voice: turn.speaker === "A" ? "alloy" : "echo", response_format: "wav" })
+        body: JSON.stringify({ model: profile.modelId, input: turn.text, voice: selectedVoices[turn.speaker], response_format: "wav" })
       });
     }
     const clip = readWave(wav);

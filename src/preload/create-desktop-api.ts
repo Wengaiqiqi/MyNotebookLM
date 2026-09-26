@@ -59,6 +59,8 @@ import {
   defaultModelRoutesDtoSchema,
   deleteModelProfileInputSchema,
   discoverModelsInputSchema,
+  discoverSpeechVoicesInputSchema,
+  speechVoiceDescriptorSchema,
   modelDescriptorSchema,
   modelProfileDtoSchema,
   modelProfileListDtoSchema,
@@ -263,6 +265,13 @@ export function createDesktopApi(ipc: IpcInvoker): DesktopApi {
         MODEL_CHANNELS.test,
         testModelInputSchema,
         modelTestResultSchema,
+        input
+      ),
+      discoverVoices: (input) => invokeResult(
+        ipc,
+        MODEL_CHANNELS.discoverVoices,
+        discoverSpeechVoicesInputSchema,
+        resultSchema(speechVoiceDescriptorSchema.array()),
         input
       ),
       updateGenerationSettings: (input) => invokeResult(

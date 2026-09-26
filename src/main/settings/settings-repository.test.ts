@@ -110,6 +110,14 @@ describe("SettingsRepository", () => {
     ]);
   });
 
+  it("persists per-model voice selections across repository recreation and validates their capability", () => {
+    const input = { id: GENERATION_ID, name: "TTS", provider: "openai-compatible" as const, capability: "generation" as const, baseUrl: "https://speech.example/v1", modelId: "custom-tts", outputKind: "speech" as const, speechVoices: { A: "vendor-a", B: "vendor-b" }, enabled: true };
+    repository.saveProfile(input);
+    expect(new SettingsRepository(appDatabase.connection).getProfile(GENERATION_ID)?.speechVoices).toEqual(input.speechVoices);
+    expect(() => repository.saveProfile({ ...input, outputKind: "text" })).toThrow();
+    expect(() => repository.saveProfile({ ...input, speechVoices: { A: "", B: "vendor-b" } })).toThrow();
+  });
+
   it("preserves advanced settings on provider save and restart, clears only explicit overrides", () => {
     const profile = { id: GENERATION_ID, name: "Model", provider: "openai" as const, capability: "generation" as const, baseUrl: "https://example.test", modelId: "m", enabled: true };
     repository.saveProfile(profile);

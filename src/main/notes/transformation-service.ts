@@ -81,7 +81,7 @@ function sha256(value: string): string { return createHash("sha256").update(valu
 function rowInsight(row: any): InsightDto {
   return insightDtoSchema.parse({
     builtinKey: row.builtin_key ?? null,
-    ...(row.has_audio ? { hasAudio: true } : {}),
+    ...(row.has_audio ? { hasAudio: true, speechModel: row.speech_model ?? null } : {}),
     id: row.id, projectId: row.project_id, transformationId: row.transformation_id,
     taskId: row.task_id, inputKind: row.input_kind, inputHash: row.input_hash,
     ruleVersion: row.rule_version, content: row.content, provider: row.provider,
@@ -188,7 +188,10 @@ export class TransformationService {
       WHEN s.rule_id LIKE 'builtin:summary:%' THEN 'summary'
       WHEN s.rule_id LIKE 'builtin:key-points:%' THEN 'key-points'
       WHEN s.rule_id LIKE 'builtin:podcast:%' THEN 'podcast'
-      END AS builtin_key, EXISTS(SELECT 1 FROM podcast_audio pa WHERE pa.insight_id=i.id) AS has_audio FROM insights i
+      END AS builtin_key, EXISTS(SELECT 1 FROM podcast_audio pa WHERE pa.insight_id=i.id) AS has_audio,
+      (SELECT a.model FROM model_route_attempts a WHERE a.operation_id=i.task_id AND a.project_id=i.project_id
+        AND a.task_kind='podcast' AND a.state='completed' ORDER BY a.attempt_order DESC LIMIT 1) AS speech_model
+      FROM insights i
       LEFT JOIN transformation_task_snapshots s ON s.task_id = i.task_id AND s.project_id = i.project_id
       WHERE i.project_id = ? ORDER BY i.created_at DESC, i.id ASC LIMIT ? OFFSET ?`).all(input.projectId, limit, offset) as any[];
     return rows.map(rowInsight);

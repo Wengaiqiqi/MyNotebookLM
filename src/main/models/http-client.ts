@@ -37,7 +37,7 @@ type RequestedResponse = Readonly<{
 }>;
 
 export class ProviderRequestError extends Error {
-  constructor(readonly failure: ProviderFailure) {
+  constructor(readonly failure: ProviderFailure, readonly status?: number) {
     super(failure.error.messageKey);
     this.name = "ProviderRequestError";
   }
@@ -183,7 +183,7 @@ export class ProviderHttpClient {
         const body = await readErrorBody(response, options.signal);
         if (options.signal.aborted) throw new ProviderRequestError(classifyProviderError({ cancelled: true }));
         if (!body) void response.body?.cancel().catch(() => undefined);
-        throw new ProviderRequestError(classifyProviderError({ status: response.status, headers: response.headers, body }));
+        throw new ProviderRequestError(classifyProviderError({ status: response.status, headers: response.headers, body }), response.status);
       }
       return { response, originalSignal: options.signal, ...(maxResponseBytes === undefined ? {} : { maxResponseBytes }) };
     } catch (reason) {

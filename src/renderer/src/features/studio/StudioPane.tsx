@@ -11,7 +11,8 @@ import { toast } from "../../ui/Toast";
 import SafeMarkdown from "../../chat/SafeMarkdown";
 import QuizPanel from "./QuizPanel";
 import PodcastPlayer from "./PodcastPlayer";
-import { advancePercent, progressCeiling, progressPhase } from "./progress-motion";
+import PodcastVoices from "./PodcastVoices";
+import { advancePercent, advancePodcastPercent, progressCeiling, progressPhase } from "./progress-motion";
 import { useTaskFeed } from "../../hooks/useTaskFeed";
 import { errorText, formatDateTime, sourceReady } from "../../lib/format";
 import { api as getApi } from "../../lib/api";
@@ -41,8 +42,10 @@ export default function StudioPane({ projectId }: { projectId: string }) {
   const [targetSelections, setTargetSelections] = useState<Record<"source" | "message" | "answer", string[]>>({ source: [], message: [], answer: [] });
   const [openMenu, setOpenMenu] = useState<"source" | "message" | "answer" | null>(null);
   const targetMenuRef = useRef<HTMLDivElement>(null);
+  const runFormRef = useRef<HTMLFormElement>(null);
   const [editorRule, setEditorRule] = useState<TransformationDto | null | undefined>(undefined); // undefined = closed
   const [running, setRunning] = useState(false);
+  const [voicesReady, setVoicesReady] = useState(false);
   const [detailInsight, setDetailInsight] = useState<InsightDto | null>(null);
   const [submittedTasks, setSubmittedTasks] = useState<TaskDto[]>([]);
 
@@ -124,7 +127,7 @@ export default function StudioPane({ projectId }: { projectId: string }) {
   async function run(): Promise<void> {
     const api: TransformApi = getApi().transformations;
     const hasSelection = Object.values(targetSelections).some((ids) => ids.length > 0);
-    if (!hasSelection || running || retrying || transformTask?.state === "running" || transformTask?.state === "queued") return;
+    if (!hasSelection || running || retrying || (ruleKey === "podcast" && !voicesReady) || transformTask?.state === "running" || transformTask?.state === "queued") return;
     setRunning(true);
     const targets: Array<Record<string, string>> = [];
     if (targetSelections.source.length > 0) targets.push({ sourceRevisionIds: targetSelections.source.join(",") });
@@ -203,18 +206,21 @@ export default function StudioPane({ projectId }: { projectId: string }) {
   const reportedPercent = starting ? 0 : transformTask ? (transformTask.state === "completed" ? 100 : Math.round(transformTask.progress / 10)) : 0;
   const ceiling = progressCeiling(reportedPercent);
   const taskKey = `${transformTask?.id ?? ""}:${transformTask?.attempt ?? 0}`;
+  useEffect(() => {
+    if ((taskState === "queued" || taskState === "running") && runFormRef.current) runFormRef.current.scrollTop = runFormRef.current.scrollHeight;
+  }, [taskKey, taskState]);
   const [displayedPercent, setDisplayedPercent] = useState(0);
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const displayedRef = useRef(0);
   // Wall-clock start of the current run; a ref so milestone updates do not
-  // restart the clock (and the 4s "preparing" dwell) mid-run.
+  // restart preparation or the elapsed-time clock mid-run.
   const runStartedAt = useRef(Date.now());
   const previousState = useRef<TaskDto["state"] | undefined>(undefined);
   const runKey = useRef<string>("");
 
   // A completed card must paint 100% on its first frame, so the value shown is
   // clamped up rather than waiting for the reset effect below.
-  const shownPercent = starting ? 0 : taskState === "completed" ? 100 : isPodcast ? reportedPercent : displayedPercent;
+  const shownPercent = starting ? 0 : taskState === "completed" ? 100 : isPodcast && displayedPercent >= 20 ? Math.max(displayedPercent, reportedPercent) : displayedPercent;
 
   // One effect owns the whole animation:
   //   completed -> snap to 100 (the result is persisted)
@@ -241,7 +247,7 @@ export default function StudioPane({ projectId }: { projectId: string }) {
       runKey.current = taskKey;
       const restored = previous === undefined && cached?.key === taskKey && cached.state === "running" ? cached : undefined;
       runStartedAt.current = restored?.startedAt ?? Date.now();
-      displayedRef.current = restored?.percent ?? (previous === undefined ? reportedPercent : 0);
+      displayedRef.current = restored?.percent ?? (previous === undefined && (!isPodcast || reportedPercent >= 45) ? reportedPercent : 0);
       setDisplayedPercent(displayedRef.current);
       setElapsedSeconds(Math.floor((Date.now() - runStartedAt.current) / 1000));
     }
@@ -255,7 +261,7 @@ export default function StudioPane({ projectId }: { projectId: string }) {
       const delta = now - last;
       last = now;
       const elapsed = now - runStartedAt.current;
-      const next = isPodcast ? reportedPercent : advancePercent(displayedRef.current, ceiling, delta);
+      const next = isPodcast ? advancePodcastPercent(displayedRef.current, reportedPercent, elapsed) : advancePercent(displayedRef.current, ceiling, delta);
       if (next !== displayedRef.current) {
         displayedRef.current = next;
         setDisplayedPercent(next);
@@ -267,11 +273,11 @@ export default function StudioPane({ projectId }: { projectId: string }) {
   }, [taskState, taskKey, ceiling, isPodcast, reportedPercent, projectId]);
 
   const taskPercent = Math.round(shownPercent);
-  // The label is driven by the animated number, so "preparing" stays readable
-  // for the full 4s climb to 20% instead of flipping the instant inputs are ready.
+  // Keep preparation visible during the opening animation; later podcast
+  // phases follow actual script, speech and saving milestones.
   const taskLabel = taskState === "running"
     ? isPodcast
-      ? t(`transformations.podcastPhases.${reportedPercent >= 98 ? "saving" : reportedPercent >= 45 ? "speech" : reportedPercent >= 20 ? "script" : "preparing"}`)
+      ? t(`transformations.podcastPhases.${shownPercent < 20 || reportedPercent < 20 ? "preparing" : reportedPercent >= 98 ? "saving" : reportedPercent >= 45 ? "speech" : "script"}`)
       : t(`transformations.phases.${progressPhase(shownPercent, reportedPercent)}`)
     : t(`transformations.states.${taskState}`, taskState ?? "");
   // A sliver keeps the bar visible while the first milestone is still pending.
@@ -279,16 +285,16 @@ export default function StudioPane({ projectId }: { projectId: string }) {
 
   return (
     <div className="pane studio">
-      <section className="panel studio-run" aria-label={t("transformations.runTitle")}>
+      <section className={`panel studio-run${ruleKey === "podcast" ? " is-podcast" : ""}`} aria-label={t("transformations.runTitle")}>
         <header className="panel-head"><h2>{t("transformations.runTitle")}</h2></header>
-        <form onSubmit={(event) => { event.preventDefault(); void run(); }}>
+        <form ref={runFormRef} onSubmit={(event) => { event.preventDefault(); void run(); }}>
           <label className="field">
             {t("transformations.rule")}
             <RuleSelect
               value={ruleKey}
               options={ruleOptions}
               ariaLabel={t("transformations.rule")}
-              onChange={setRuleKey}
+              onChange={(key) => { setVoicesReady(false); setRuleKey(key); }}
               footer={<button type="button" className="rounded-select-option rule-create" onClick={() => setEditorRule(null)}><Icon name="plus" />{t("transformations.newRule")}</button>}
             />
           </label>
@@ -327,11 +333,13 @@ export default function StudioPane({ projectId }: { projectId: string }) {
             })}
           </div>
 
+          {ruleKey === "podcast" && <PodcastVoices disabled={running || transformTask?.state === "running" || transformTask?.state === "queued"} onReadyChange={setVoicesReady} />}
+
           <div className="run-actions">
             <button
               type="submit"
               className="btn primary"
-              disabled={Object.values(targetSelections).every((ids) => ids.length === 0) || running || retrying || transformTask?.state === "running" || transformTask?.state === "queued" || (!chosenBuiltin && !chosenRule)}
+              disabled={Object.values(targetSelections).every((ids) => ids.length === 0) || running || retrying || (ruleKey === "podcast" && !voicesReady) || transformTask?.state === "running" || transformTask?.state === "queued" || (!chosenBuiltin && !chosenRule)}
             >
               {running ? <span className="spinner light" aria-hidden="true" /> : <Icon name="sparkle" />}
               {t("transformations.run")}
@@ -437,8 +445,8 @@ export default function StudioPane({ projectId }: { projectId: string }) {
               id="insight-detail-title"
               icon="sparkle"
               accent
-              title={t("transformations.insightDetail")}
-              body={[detailInsight.model, formatDateTime(detailInsight.createdAt, language)].filter(Boolean).join(" · ")}
+              title={t(detailInsight.hasAudio ? "transformations.podcastDetail" : "transformations.insightDetail")}
+              body={[detailInsight.model, ...(detailInsight.hasAudio ? [detailInsight.speechModel ?? t("model.speechOutput")] : []), formatDateTime(detailInsight.createdAt, language)].filter(Boolean).join(" · ")}
             />
             {detailInsight.hasAudio && <PodcastPlayer projectId={projectId} insightId={detailInsight.id} />}
             <div className="insight-detail-content assistant-body">

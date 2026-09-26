@@ -10,6 +10,8 @@ import type {
   DefaultModelRoutesDto,
   DeleteModelProfileInput,
   DiscoverModelsInput,
+  DiscoverSpeechVoicesInput,
+  SpeechVoiceDescriptor,
   ModelDescriptorDto,
   ModelProfileDto,
   ModelProfileListDto,
@@ -56,6 +58,7 @@ export const MODEL_CHANNELS = {
   saveProfile: "models:v1:save-profile",
   deleteProfile: "models:v1:delete-profile",
   discover: "models:v1:discover",
+  discoverVoices: "models:v1:discover-voices",
   test: "models:v1:test",
   updateGenerationSettings: "models:v1:update-generation-settings",
   getRoutes: "models:v1:get-routes",
@@ -265,6 +268,7 @@ export interface DesktopApi {
     saveProfile(input: SaveModelProfileInput): Promise<Result<ModelProfileDto>>;
     deleteProfile(input: DeleteModelProfileInput): Promise<Result<void>>;
     discover(input: DiscoverModelsInput): Promise<Result<ModelDescriptorDto[]>>;
+    discoverVoices(input: DiscoverSpeechVoicesInput): Promise<Result<SpeechVoiceDescriptor[]>>;
     test(input: TestModelInput): Promise<Result<ModelTestResultDto>>;
     updateGenerationSettings(input: UpdateGenerationSettingsInput): Promise<Result<ModelProfileDto>>;
     getRoutes?(input: { taskKind: ModelTaskKind }): Promise<Result<ModelRouteDto[]>>;

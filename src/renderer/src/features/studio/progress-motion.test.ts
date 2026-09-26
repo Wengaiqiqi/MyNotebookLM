@@ -1,7 +1,16 @@
 import { describe, expect, it } from "vitest";
-import { advancePercent, progressCeiling, progressPhase } from "./progress-motion";
+import { advancePercent, advancePodcastPercent, progressCeiling, progressPhase } from "./progress-motion";
 
 describe("progress motion", () => {
+  it("animates only the first three seconds of podcast preparation even when the provider responds quickly", () => {
+    expect(advancePodcastPercent(0, 20, 0)).toBe(0);
+    expect(advancePodcastPercent(0, 20, 1500)).toBe(10);
+    expect(advancePodcastPercent(10, 45, 2900)).toBeCloseTo(19.333333);
+    expect(advancePodcastPercent(19, 45, 3000)).toBe(20);
+    expect(advancePodcastPercent(20, 45, 3100)).toBe(45);
+    expect(advancePodcastPercent(45, 45, 60_000)).toBe(45);
+    expect(advancePodcastPercent(70, 45, 60_000)).toBe(70);
+  });
   it("caps the displayed number at the reported milestone", () => {
     expect(progressCeiling(0)).toBe(50);
     expect(progressCeiling(20)).toBe(50);

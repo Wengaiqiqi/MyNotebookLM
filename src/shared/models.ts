@@ -50,6 +50,17 @@ export const embeddingMetadataSchema = z.object({
   preprocessingVersion: z.string().trim().min(1).max(100)
 }).strict();
 
+export const speechVoicesSchema = z.object({
+  A: z.string().trim().min(1).max(200),
+  B: z.string().trim().min(1).max(200)
+}).strict();
+
+export const speechVoiceDescriptorSchema = z.object({
+  id: z.string().trim().min(1).max(200),
+  name: z.string().trim().min(1).max(200),
+  language: z.string().trim().max(100).optional()
+}).strict();
+
 const modelProfileFieldsSchema = z.object({
   id: z.uuid(),
   name: z.string().trim().min(1).max(100),
@@ -58,13 +69,17 @@ const modelProfileFieldsSchema = z.object({
   baseUrl: z.string().trim().max(2_048),
   modelId: z.string().trim().min(1).max(200),
   outputKind: z.enum(["text", "speech"]).optional(),
+  speechVoices: speechVoicesSchema.optional(),
   enabled: z.boolean()
 }).strict();
 
 function validateProviderCapability(
-  profile: { provider: ProviderKind; capability: ModelCapability; outputKind?: "text" | "speech" | undefined },
+  profile: { provider: ProviderKind; capability: ModelCapability; modelId?: string | undefined; outputKind?: "text" | "speech" | undefined; speechVoices?: SpeechVoices | undefined },
   context: z.RefinementCtx
 ): void {
+  if (profile.speechVoices && (profile.capability !== "generation" || modelOutputKind({ modelId: profile.modelId ?? "", outputKind: profile.outputKind }) !== "speech")) {
+    context.addIssue({ code: "custom", path: ["speechVoices"], message: "Voices require a speech generation profile" });
+  }
   if (profile.outputKind === "speech" && (profile.capability !== "generation" || !["openai", "openai-compatible", "gemini"].includes(profile.provider))) {
     context.addIssue({ code: "custom", path: ["outputKind"], message: "Speech requires an OpenAI-compatible or Gemini generation profile" });
   }
@@ -215,6 +230,13 @@ export const discoverModelsInputSchema = z.object(providerConnectionFields).stri
   }
 );
 
+export const discoverSpeechVoicesInputSchema = z.object({
+  ...providerConnectionFields,
+  capability: z.literal("generation"),
+  provider: z.enum(["openai", "openai-compatible", "gemini"]),
+  modelId: z.string().trim().min(1).max(200)
+}).strict().superRefine((input, context) => validateProviderAddress(input, context));
+
 export const testModelInputSchema = z.object({
   profile: z.union([modelProfileInputSchema, builtInModelProfileDtoSchema]),
   apiKey: apiKeySchema.optional()
@@ -260,6 +282,9 @@ export const modelTestResultDtoSchema = z.object({
 }).strict();
 
 export type ProviderKind = z.infer<typeof providerKindSchema>;
+export type SpeechVoices = z.infer<typeof speechVoicesSchema>;
+export type SpeechVoiceDescriptor = z.infer<typeof speechVoiceDescriptorSchema>;
+export type DiscoverSpeechVoicesInput = z.infer<typeof discoverSpeechVoicesInputSchema>;
 /** Explicit selection also supports speech services with arbitrary model IDs. */
 export function modelOutputKind(profile: { modelId: string; outputKind?: "text" | "speech" | undefined }): "text" | "speech" {
   return profile.outputKind ?? (/tts|text[-_]?to[-_]?speech|kokoro|cosyvoice|fish[-_]?speech/i.test(profile.modelId) ? "speech" : "text");

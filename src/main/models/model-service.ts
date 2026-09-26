@@ -6,6 +6,9 @@ import {
   defaultModelRoutesDtoSchema,
   deleteModelProfileInputSchema,
   discoverModelsInputSchema,
+  discoverSpeechVoicesInputSchema,
+  type DiscoverSpeechVoicesInput,
+  type SpeechVoiceDescriptor,
   modelDescriptorSchema,
   modelTaskKindSchema,
   modelOutputKind,
@@ -57,6 +60,7 @@ import { ProviderRequestError } from "./http-client";
 import type { ModelDescriptor, ModelProvider } from "./provider";
 import { createLocalDirectoryEmbeddingProvider } from "../vector/local-embedding-provider";
 import { synthesizeSpeech } from "./speech-provider";
+import { discoverSpeechVoices } from "./speech-voices";
 
 export type ModelProviderFactory = (
   provider: ProviderKind,
@@ -319,6 +323,21 @@ export class ModelService {
     return this.testProfile(parsed);
   }
 
+  async discoverVoices(input: DiscoverSpeechVoicesInput): Promise<Result<SpeechVoiceDescriptor[]>> {
+    try {
+      const parsed = discoverSpeechVoicesInputSchema.parse(input);
+      if (parsed.profileId) {
+        const profile = this.settings.getProfile(parsed.profileId);
+        if (!profile) return notFound();
+        if (profile.capability !== "generation") return capabilityError();
+        if (profile.provider !== parsed.provider || canonicalCredentialBaseUrl(profile.baseUrl) !== canonicalCredentialBaseUrl(parsed.baseUrl)) return credentialBindingError();
+      }
+      return this.withProvider(parsed, (_provider, apiKey) => discoverSpeechVoices(parsed, apiKey, new AbortController().signal));
+    } catch (reason) {
+      return resultFromError(reason);
+    }
+  }
+
   async saveProfile(input: SaveModelProfileInput): Promise<Result<ModelProfileDto>> {
     let parsed: SaveModelProfileInput;
     try {
@@ -492,16 +511,24 @@ export class ModelService {
       baseUrl: profile.baseUrl,
       ...(input.apiKey === undefined ? {} : { apiKey: input.apiKey })
     }, async (provider, apiKey) => {
-      if (profile.capability === "generation" && modelOutputKind(profile) === "speech") {
-        await synthesizeSpeech(profile, apiKey, [{ speaker: "A", text: "Hello." }, { speaker: "B", text: "你好。" }], new AbortController().signal);
-        return { modelId: profile.modelId, capability: profile.capability, verifiedBy: "probe" as const };
-      }
       const signal = new AbortController().signal;
       let discovered: ModelDescriptorDto[] = [];
       try {
         discovered = parseDiscoveredModels(await provider.discover(signal));
       } catch {
         // Some compatible endpoints cannot list models; the capability probe is authoritative.
+      }
+      if (profile.capability === "generation" && modelOutputKind(profile) === "speech") {
+        // Voices are selected in the conversion pane, after the connection is saved.
+        const listed = discovered.find((model) => model.id === profile.modelId);
+        if (listed?.capabilityEvidence === "authoritative" && !listed.capabilities.includes("generation")) {
+          throw new ModelServiceError(appError("VALIDATION", "errors.modelCapability"));
+        }
+        if (!profile.speechVoices && listed) {
+          return { modelId: profile.modelId, capability: profile.capability, verifiedBy: "discovery" as const };
+        }
+        await synthesizeSpeech(profile, apiKey, [{ speaker: "A", text: "Hello." }, { speaker: "B", text: "你好。" }], signal);
+        return { modelId: profile.modelId, capability: profile.capability, verifiedBy: "probe" as const };
       }
       const authoritativeMatch = discovered.find((model) =>
         model.id === profile.modelId && model.capabilityEvidence === "authoritative"

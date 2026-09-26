@@ -4,7 +4,7 @@ import { ProviderHttpClient } from "./http-client";
 
 const turns = [{ speaker: "A" as const, text: "What does the source say?" }, { speaker: "B" as const, text: "资料给出了证据。" }];
 const script = { title: "Evidence", turns };
-const profile = { provider: "openai-compatible" as const, baseUrl: "https://speech.example/v1", modelId: "custom-speech" };
+const profile = { provider: "openai-compatible" as const, baseUrl: "https://speech.example/v1", modelId: "custom-speech", speechVoices: { A: "voice-a", B: "voice-b" } };
 const wave = () => pcmWave(Buffer.from([1, 0, 2, 0]));
 afterEach(() => vi.unstubAllGlobals());
 
@@ -35,7 +35,7 @@ describe("podcast speech", () => {
     const result = await synthesizeSpeech(profile, "key", turns, new AbortController().signal, (value) => progress.push(value));
     expect(fetch.mock.calls).toHaveLength(2);
     const calls = fetch.mock.calls as unknown as [string, RequestInit][];
-    expect(calls.map(([, init]) => JSON.parse(String(init.body)).voice)).toEqual(["alloy", "echo"]);
+    expect(calls.map(([, init]) => JSON.parse(String(init.body)).voice)).toEqual(["voice-a", "voice-b"]);
     expect(calls[0]![0]).toBe("https://speech.example/v1/audio/speech");
     expect(new Headers(calls[0]![1].headers).get("authorization")).toBe("Bearer key");
     const pcm = readWave(result).pcm;
@@ -52,7 +52,7 @@ describe("podcast speech", () => {
     expect(fetch).toHaveBeenCalledTimes(1);
   });
 
-  it("uses MiMo Chat Completions audio with separate preset voices", async () => {
+  it("uses MiMo Chat Completions audio with the selected voices across languages", async () => {
     const fetch = vi.fn(async (_url: string | URL | Request, init?: RequestInit) => {
       const body = JSON.parse(String(init?.body));
       expect(body).toMatchObject({ model: "mimo-v2.5-tts", stream: false, audio: { format: "wav" } });
@@ -66,11 +66,11 @@ describe("podcast speech", () => {
       expect(readWave(result).pcm.length).toBe(2 * (4 + 8_640));
     }
     expect(fetch.mock.calls.map(([url]) => String(url))).toEqual(Array(4).fill("https://speech.example/v1/chat/completions"));
-    expect(fetch.mock.calls.map(([, init]) => JSON.parse(String(init?.body)).audio.voice)).toEqual(["冰糖", "苏打", "冰糖", "苏打"]);
+    expect(fetch.mock.calls.map(([, init]) => JSON.parse(String(init?.body)).audio.voice)).toEqual(["voice-a", "voice-b", "voice-a", "voice-b"]);
     expect(fetch.mock.calls.slice(0, 2).map(([, init]) => JSON.parse(String(init?.body)).messages[1].content)).toEqual(turns.map((turn) => turn.text));
     expect(new Headers(fetch.mock.calls[0]?.[1]?.headers).get("authorization")).toBe("Bearer key");
     await synthesizeSpeech({ ...profile, modelId: "mimo-v2.5-tts" }, undefined, turns.map((turn) => ({ ...turn, text: "English dialogue." })), new AbortController().signal);
-    expect(fetch.mock.calls.slice(-2).map(([, init]) => JSON.parse(String(init?.body)).audio.voice)).toEqual(["Mia", "Milo"]);
+    expect(fetch.mock.calls.slice(-2).map(([, init]) => JSON.parse(String(init?.body)).audio.voice)).toEqual(["voice-a", "voice-b"]);
   });
 
   it("rejects missing or invalid MiMo audio rather than saving a partial podcast", async () => {
@@ -84,7 +84,7 @@ describe("podcast speech", () => {
     const fetch = vi.fn(async (_url: string | URL | Request, init?: RequestInit) => {
       const body = JSON.parse(String(init?.body));
       if (body.model) {
-        expect(body.generation_config.speech_config.speakers.map((speaker: any) => speaker.voice)).toEqual(["Puck", "Kore"]);
+        expect(body.generation_config.speech_config.speakers.map((speaker: any) => speaker.voice)).toEqual(["voice-a", "voice-b"]);
         expect(body.input[0].content.map((turn: any) => turn.annotations[0].speaker)).toEqual(["A", "B"]);
         return Response.json({ steps: [{ type: "model_output", content: [{ type: "audio", mime_type: "audio/wav", data: wave().toString("base64") }] }] });
       }

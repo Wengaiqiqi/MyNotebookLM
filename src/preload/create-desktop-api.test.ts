@@ -83,6 +83,7 @@ describe("createDesktopApi", () => {
       "deleteProfile",
       "discover",
       "test",
+      "discoverVoices",
       "updateGenerationSettings",
       "getRoutes",
       "saveRoutes",

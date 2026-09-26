@@ -211,6 +211,14 @@ describe("createModelProvider", () => {
 });
 
 describe("ModelService", () => {
+  it("registers a listed TTS model before voices are chosen in the conversion pane", async () => {
+    const remote = provider([{ id: "custom-tts", displayName: "Custom TTS", capabilities: [], capabilityEvidence: "probe-required" }]);
+    const { service, repository } = setup(remote);
+    const result = await service.saveProfile({ profile: { ...profile, modelId: "custom-tts", outputKind: "speech" }, apiKey: "test-voice-key" });
+    expect(result.ok).toBe(true);
+    expect(repository.getProfile(PROFILE_ID)).toMatchObject({ modelId: "custom-tts", outputKind: "speech" });
+    expect(remote.generate).not.toHaveBeenCalled();
+  });
   it.each([
     ["AUTH", "errors.authentication", false, undefined],
     ["RATE_LIMITED", "errors.rateLimited", true, 1500],
@@ -403,6 +411,27 @@ describe("ModelService", () => {
       "stored-secret"
     );
     expect(JSON.stringify(result)).not.toContain("stored-secret");
+  });
+
+  it("discovers voices using the saved credential and rejects changed origins before reading it", async () => {
+    const { service, repository, credentials } = setup();
+    repository.profiles.set(PROFILE_ID, dto(profile));
+    credentials.secrets.set(PROFILE_ID, "stored-voice-secret");
+    const fetch = vi.fn(async (_url: string | URL | Request, init?: RequestInit) => {
+      expect(new Headers(init?.headers).get("authorization")).toBe("Bearer stored-voice-secret");
+      return Response.json({ voices: ["vendor-one", "vendor-two"] });
+    });
+    vi.stubGlobal("fetch", fetch);
+    try {
+      const input = { profileId: PROFILE_ID, provider: "openai" as const, capability: "generation" as const, baseUrl: profile.baseUrl, modelId: "custom-tts" };
+      const result = await service.discoverVoices(input);
+      expect(result).toEqual({ ok: true, value: [{ id: "vendor-one", name: "vendor-one" }, { id: "vendor-two", name: "vendor-two" }] });
+      expect(JSON.stringify(result)).not.toContain("stored-voice-secret");
+      credentials.secretUses.length = 0;
+      expect((await service.discoverVoices({ ...input, baseUrl: "https://different.example/v1" })).ok).toBe(false);
+      expect(credentials.secretUses).toEqual([]);
+      expect(fetch).toHaveBeenCalledTimes(1);
+    } finally { vi.unstubAllGlobals(); }
   });
 
   it("never decrypts a stored credential for caller-supplied provider or endpoint changes", async () => {

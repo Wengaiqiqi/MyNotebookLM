@@ -56,7 +56,9 @@ describe("Onboarding embedding setup", () => {
 
     expect(document.getElementById("model-baseurl-embedding")).toBeTruthy();
     expect(document.getElementById("model-key-embedding")).toBeTruthy();
-    expect(screen.getAllByRole("combobox", { name: "模型名称" })).toHaveLength(2);
+    expect(screen.getByRole("combobox", { name: "请选择文字生成模型" })).toBeTruthy();
+    expect(screen.getByRole("combobox", { name: "请选择语音生成模型，可留空" })).toBeTruthy();
+    expect(screen.getByRole("combobox", { name: "模型名称" })).toBeTruthy();
     expect(screen.getAllByRole("button", { name: "Gemini" })).toHaveLength(2);
 
     fireEvent.click(within(embeddingProviders).getByRole("button", { name: "内置模型" }));

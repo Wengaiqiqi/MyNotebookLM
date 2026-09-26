@@ -52,7 +52,7 @@ describe("podcast integration", () => {
       return new Response(`data: ${JSON.stringify({ choices: [{ delta: { content }, finish_reason: null }] })}\n\ndata: ${JSON.stringify({ choices: [{ delta: {}, finish_reason: "stop" }] })}\n\ndata: [DONE]\n\n`);
     }));
     expect((await models.saveProfile({ profile: { ...base, id: textId, modelId: "writer" }, apiKey: "test-key" })).ok).toBe(true);
-    expect((await models.saveProfile({ profile: { ...base, id: speechId, modelId: "arbitrary-name", outputKind: "speech" }, apiKey: "test-key" })).ok).toBe(true);
+    expect((await models.saveProfile({ profile: { ...base, id: speechId, modelId: "arbitrary-name", outputKind: "speech", speechVoices: { A: "custom-a", B: "custom-b" } }, apiKey: "test-key" })).ok).toBe(true);
     expect((await models.saveRoutes({ taskKind: "podcast", profileIds: [speechId, textId] })).ok).toBe(true);
   });
   afterEach(() => { db.close(); vi.unstubAllGlobals(); rmSync(root, { recursive: true, force: true }); });
@@ -61,7 +61,7 @@ describe("podcast integration", () => {
     const progress = vi.spyOn(tasks, "advance");
     const result = await service.run({ projectId, noteId, builtinKey: "podcast", language: "en" });
     expect(result.content).toContain("**B**: The source reports a finding.");
-    expect(service.listInsights({ projectId })[0]).toMatchObject({ id: result.id, hasAudio: true, builtinKey: "podcast" });
+    expect(service.listInsights({ projectId })[0]).toMatchObject({ id: result.id, hasAudio: true, builtinKey: "podcast", model: "writer", speechModel: "arbitrary-name" });
     const audio = service.getAudio({ projectId, insightId: result.id });
     expect(Buffer.from(audio.data, "base64").toString("ascii", 0, 4)).toBe("RIFF");
     expect(() => service.getAudio({ projectId: noteId, insightId: result.id })).toThrow("Transformation insight not found");
@@ -120,7 +120,7 @@ describe("podcast integration", () => {
 
   it("falls back after partially synthesizing without regressing task progress", async () => {
     const backupId = "55555555-5555-4555-8555-555555555555";
-    expect((await models.saveProfile({ profile: { ...base, id: backupId, modelId: "backup-tts", outputKind: "speech" }, apiKey: "test-key" })).ok).toBe(true);
+    expect((await models.saveProfile({ profile: { ...base, id: backupId, modelId: "backup-tts", outputKind: "speech", speechVoices: { A: "fallback-a", B: "fallback-b" } }, apiKey: "test-key" })).ok).toBe(true);
     expect((await models.saveRoutes({ taskKind: "podcast", profileIds: [speechId, textId, backupId] })).ok).toBe(true);
     const original = fetch;
     vi.stubGlobal("fetch", vi.fn(async (url, init) => {
@@ -130,6 +130,7 @@ describe("podcast integration", () => {
     }));
     const result = await service.run({ projectId, noteId, builtinKey: "podcast", language: "en" });
     expect(tasks.getById(result.taskId!)?.state).toBe("completed");
+    expect(service.listInsights({ projectId })[0]?.speechModel).toBe("backup-tts");
     expect(settings.listRouteAttempts({ projectId, taskKind: "podcast" })).toMatchObject([{ model: "backup-tts", state: "completed" }]);
     expect(db.connection.prepare("SELECT state FROM model_route_attempts WHERE operation_id=? ORDER BY attempt_order").all(result.taskId)).toEqual([{ state: "completed" }, { state: "failed" }, { state: "completed" }]);
   });

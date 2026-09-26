@@ -98,6 +98,34 @@ afterEach(() => {
 });
 
 describe("StudioPane", () => {
+  it("animates podcast preparation from zero to 20% in three seconds and preserves it across tabs", async () => {
+    vi.useFakeTimers();
+    try {
+      const api = mockApi();
+      const active: TaskDto = { ...taskDto(), id: "podcast-preparation", state: "running", stage: "generating", progress: 200, transformationKind: "podcast" };
+      vi.mocked(api.tasks!.list).mockResolvedValue([active]);
+      const first = render(<StudioPane projectId={projectId} />);
+      await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+      expect(screen.getByText("0%")).toBeTruthy();
+      expect(screen.getByText("准备播客资料")).toBeTruthy();
+      await act(async () => { vi.advanceTimersByTime(1500); });
+      expect(screen.getByText("10%")).toBeTruthy();
+      expect(screen.queryByText("生成双人对话稿")).toBeNull();
+      first.unmount();
+      render(<StudioPane projectId={projectId} />);
+      await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+      expect(screen.getByText("10%")).toBeTruthy();
+      await act(async () => { vi.advanceTimersByTime(1400); });
+      expect(screen.getByText("19%")).toBeTruthy();
+      expect(screen.getByText("准备播客资料")).toBeTruthy();
+      await act(async () => { vi.advanceTimersByTime(100); });
+      expect(screen.getByText("20%")).toBeTruthy();
+      expect(screen.getByText("生成双人对话稿")).toBeTruthy();
+      await act(async () => { vi.advanceTimersByTime(30_000); });
+      expect(screen.getByText("20%")).toBeTruthy();
+    } finally { vi.useRealTimers(); }
+  });
+
   it("removes cancelled work immediately and keeps it absent after remount", async () => {
     const api = mockApi();
     const active: TaskDto = { ...taskDto(), state: "running", progress: 200 };

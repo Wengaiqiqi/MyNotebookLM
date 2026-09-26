@@ -40,6 +40,11 @@ export function advancePercent(current: number, ceiling: number, elapsedMs: numb
   return Math.min(ceiling, current + (percentPerSecond(current, ceiling) * elapsedMs) / 1000);
 }
 
+/** Animate podcast preparation for three seconds, then use actual milestones. */
+export function advancePodcastPercent(current: number, backendPercent: number, elapsedMs: number): number {
+  return Math.max(current, current < 20 ? Math.min(20, (Math.max(0, elapsedMs) * 20) / 3000) : backendPercent);
+}
+
 /**
  * Phase copy.
  *

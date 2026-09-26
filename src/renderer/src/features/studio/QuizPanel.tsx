@@ -486,7 +486,7 @@ function QuestionCard({
             </span>
             <button
               type="button"
-              className="btn xs quiz-retry-btn"
+              className="btn xs danger-soft quiz-retry-btn"
               onClick={onResetCurrent}
               title={t("transformations.tryAgain")}
             >
