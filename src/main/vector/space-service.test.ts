@@ -28,13 +28,13 @@ describe("SpaceService", () => {
     expect(calls).toEqual(["state", "clear:active", "failed:active"]);
   });
   it("rolls back a failed, cancelled, or crashed build and retains the old space", async () => {
-    const states: string[] = []; const service = new SpaceService({ createOrReuse: () => ({ id: "new", state: "preparing" }), activate: () => states.push("active"), fail: () => states.push("failed") } as never);
-    await expect(service.build({} as never, async () => { throw new Error("boom"); })).rejects.toThrow("boom");
+    const states: string[] = []; const service = new SpaceService({ createOrReuse: () => ({ id: "new", state: "preparing" }), activate: () => states.push("active"), fail: () => states.push("failed") } as never, { rebuild: async () => { throw new Error("boom"); }, optimize: async () => {} });
+    await expect(service.rebuild({ spec: {} as never })).rejects.toThrow("boom");
     expect(states).toEqual(["failed"]);
   });
   it("uses explicit cancellation semantics", async () => {
-    const states: string[] = []; const service = new SpaceService({ createOrReuse: () => ({ id: "new", projectId: "p", state: "preparing" }), activate: () => states.push("active"), fail: () => states.push("failed"), cancel: () => states.push("cancelled") } as never);
-    const error = await service.build({} as never, async () => {}, AbortSignal.abort()).catch(e => e);
+    const states: string[] = []; const service = new SpaceService({ createOrReuse: () => ({ id: "new", projectId: "p", state: "preparing" }), activate: () => states.push("active"), fail: () => states.push("failed"), cancel: () => states.push("cancelled") } as never, { rebuild: async () => {}, optimize: async () => {} });
+    const error = await service.rebuild({ spec: {} as never, signal: AbortSignal.abort() }).catch(e => e);
     expect(error).toMatchObject({ code: "SPACE_BUILD_CANCELLED" }); expect(states).toEqual(["cancelled"]);
   });
   it("runs startup recovery, rebuilds from SQLite, and schedules optimize", async () => {
@@ -42,15 +42,15 @@ describe("SpaceService", () => {
     await service.recoverInterrupted(); await service.rebuild({ spec: { projectId: "p" } } as never); const task = service.optimize({} as never); expect(task).toBeInstanceOf(Promise); await task; expect(calls).toEqual(["recover", "rebuild", "optimize"]);
   });
   it("backs up before activating and surfaces backup failure", async () => {
-    const calls: string[] = []; const service = new SpaceService({ createOrReuse: () => ({ id: "new", state: "preparing" }), activate: () => calls.push("active"), fail: () => calls.push("failed") } as never, undefined, async () => { calls.push("backup"); throw new Error("backup failed"); });
-    await expect(service.build({} as never, async () => {})).rejects.toThrow("backup failed"); expect(calls).toEqual(["backup", "failed"]);
+    const calls: string[] = []; const service = new SpaceService({ createOrReuse: () => ({ id: "new", state: "preparing" }), activate: () => calls.push("active"), fail: () => calls.push("failed") } as never, { rebuild: async () => {}, optimize: async () => {} }, async () => { calls.push("backup"); throw new Error("backup failed"); });
+    await expect(service.rebuild({ spec: {} as never })).rejects.toThrow("backup failed"); expect(calls).toEqual(["backup", "failed"]);
   });
 
   it("cleans a failed build shadow after work, backup, or activation errors", async () => {
     for (const stage of ["work", "backup", "activate"]) {
       const calls: string[] = [];
-      const service = new SpaceService({ createOrReuse: () => ({ id: "new", state: "preparing" }), activate: () => { calls.push("active"); if (stage === "activate") throw new Error("activate failed"); }, fail: async () => { calls.push("failed"); }, } as never, undefined, stage === "backup" ? async () => { throw new Error("backup failed"); } : undefined);
-      await expect(service.build({} as never, async () => { if (stage === "work") throw new Error("work failed"); })).rejects.toThrow(stage + " failed");
+      const service = new SpaceService({ createOrReuse: () => ({ id: "new", state: "preparing" }), activate: () => { calls.push("active"); if (stage === "activate") throw new Error("activate failed"); }, fail: async () => { calls.push("failed"); }, } as never, { rebuild: async () => { if (stage === "work") throw new Error("work failed"); }, optimize: async () => {} }, stage === "backup" ? async () => { throw new Error("backup failed"); } : undefined);
+      await expect(service.rebuild({ spec: {} as never })).rejects.toThrow(stage + " failed");
       expect(calls).toEqual([...(stage === "activate" ? ["active"] : []), "failed"]);
     }
   });

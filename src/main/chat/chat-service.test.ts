@@ -11,7 +11,6 @@ import type { GenerateRequest, GenerationEvent } from "../models/provider";
 import { ProviderRequestError } from "../models/http-client";
 import { classifyProviderError } from "../models/provider-errors";
 import { SettingsRepository } from "../settings/settings-repository";
-import { RouteRepository } from "../models/route-repository";
 import { ModelRouter } from "../models/model-router";
 import { ModelService } from "../models/model-service";
 import type { CredentialStore } from "../credentials/credential-store";
@@ -388,7 +387,7 @@ function expectOk(result: Result<{ requestId: string; assistantMessageId: string
   it("pins continuation to the original model, reparses the merged answer, and accumulates usage", async () => {
     const primary = makeProfile();
     const fallback = { ...makeProfile(), id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", name: "Fallback", modelId: "fallback" };
-    const routes = new RouteRepository(new SettingsRepository(world.database.connection));
+    const routes = new SettingsRepository(world.database.connection);
     for (const item of [primary, fallback]) routes.saveProfile({ id: item.id, name: item.name, provider: item.provider, capability: item.capability, baseUrl: item.baseUrl, modelId: item.modelId, enabled: item.enabled });
     routes.replaceRoute("chat", [primary.id, fallback.id]);
     let primaryCalls = 0;
@@ -567,7 +566,7 @@ function expectOk(result: Result<{ requestId: string; assistantMessageId: string
   it("uses the real multi-profile route and writes the completing profile", async () => {
     const primary = makeProfile();
     const fallback = { ...makeProfile(), id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", name: "Fallback", modelId: "fallback" };
-    const routes = new RouteRepository(new SettingsRepository(world.database.connection));
+    const routes = new SettingsRepository(world.database.connection);
     for (const item of [primary, fallback]) routes.saveProfile({ id: item.id, name: item.name, provider: item.provider, capability: item.capability, baseUrl: item.baseUrl, modelId: item.modelId, enabled: item.enabled });
     routes.replaceRoute("chat", [primary.id, fallback.id]);
     const deps = baseDeps({
@@ -589,7 +588,7 @@ function expectOk(result: Result<{ requestId: string; assistantMessageId: string
   it("cancels a real routed attempt and chat draft on stop", async () => {
     const primary = makeProfile();
     const fallback = { ...makeProfile(), id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", modelId: "fallback" };
-    const routes = new RouteRepository(new SettingsRepository(world.database.connection));
+    const routes = new SettingsRepository(world.database.connection);
     for (const item of [primary, fallback]) routes.saveProfile({ id: item.id, name: item.name, provider: item.provider, capability: item.capability, baseUrl: item.baseUrl, modelId: item.modelId, enabled: item.enabled });
     routes.replaceRoute("chat", [primary.id, fallback.id]);
     let release!: () => void;

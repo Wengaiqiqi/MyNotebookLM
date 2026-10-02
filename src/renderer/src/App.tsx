@@ -173,7 +173,6 @@ export default function App() {
                   key={selectedProject.id}
                   projectId={selectedProject.id}
                   section={section}
-                  onSectionChange={setSection}
                   routes={routes}
                   onOpenSettings={() => { setSettingsModelId(null); setSettingsOpen(true); }}
                   onOpenModelSettings={(profileId) => { setSettingsModelId(profileId); setSettingsOpen(true); }}

@@ -141,9 +141,8 @@ describe("podcast integration", () => {
     for (const file of readdirSync(path.resolve("src/main/db/migrations")).filter((file) => Number(file.slice(0, 3)) <= 16)) copyFileSync(path.resolve("src/main/db/migrations", file), path.join(migrationDir, file));
     const old = openAppDatabase(oldPath, migrationDir);
     old.connection.prepare("INSERT INTO projects(id,name) VALUES (?, 'Existing')").run(projectId);
-    const oldSettings = new SettingsRepository(old.connection);
-    oldSettings.saveProfile({ ...base, id: textId, modelId: "writer" });
-    oldSettings.replaceRoute("chat", [textId]);
+    old.connection.prepare("INSERT INTO model_profiles(id,name,provider,capability,base_url,model_id,enabled) VALUES (?,?,'openai-compatible','generation',?,'writer',1)").run(textId, base.name, base.baseUrl);
+    old.connection.prepare("INSERT INTO model_routes(task_kind,position,profile_id) VALUES ('chat',0,?)").run(textId);
     old.connection.prepare("INSERT INTO model_route_attempts(id,project_id,operation_id,task_kind,attempt_order,profile_id,provider,model,state,is_fallback) VALUES (?,?,'old','chat',0,?,'openai-compatible','writer','completed',1)").run(speechId, projectId, textId);
     old.close();
     const upgraded = openAppDatabase(oldPath, path.resolve("src/main/db/migrations"));

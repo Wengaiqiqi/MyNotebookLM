@@ -1,13 +1,14 @@
 import React, { useEffect, useRef, useState } from "react";
 import Icon from "./Icon";
 
-export default function RoundedSelect({ value, options, ariaLabel, onChange, className = "", disabled = false }: {
+export default function RoundedSelect({ value, options, ariaLabel, onChange, className = "", disabled = false, footer }: {
   value: string;
   options: Array<{ value: string; label: string }>;
   ariaLabel: string;
   onChange: (value: string) => void;
   className?: string;
   disabled?: boolean;
+  footer?: React.ReactNode;
 }) {
   const [open, setOpen] = useState(false);
   const [placement, setPlacement] = useState<"up" | "down">("down");
@@ -75,22 +76,25 @@ export default function RoundedSelect({ value, options, ariaLabel, onChange, cla
         <Icon name={open ? "chevron-up" : "chevron-down"} />
       </button>
       {open && !disabled && (
-        <div className="rounded-select-menu" data-placement={placement} style={{ maxHeight: menuHeight }} role="listbox" aria-label={ariaLabel}>
-          {options.map((option) => (
-            <button
-              type="button"
-              role="option"
-              aria-selected={option.value === value}
-              className="rounded-select-option"
-              key={option.value}
-              onClick={() => {
-                onChange(option.value);
-                setOpen(false);
-              }}
-            >
-              {option.label}
-            </button>
-          ))}
+        <div className="rounded-select-menu" data-placement={placement} style={{ maxHeight: menuHeight }}>
+          <div className="rounded-select-options" role="listbox" aria-label={ariaLabel}>
+            {options.map((option) => (
+              <button
+                type="button"
+                role="option"
+                aria-selected={option.value === value}
+                className="rounded-select-option"
+                key={option.value}
+                onClick={() => {
+                  onChange(option.value);
+                  setOpen(false);
+                }}
+              >
+                {option.label}
+              </button>
+            ))}
+          </div>
+          {footer && <div className="rule-select-footer" onClick={() => setOpen(false)}>{footer}</div>}
         </div>
       )}
     </div>

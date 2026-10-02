@@ -42,7 +42,6 @@ import { BUILT_IN_LOCAL_EMBEDDING_PROFILE, isBuiltInLocalEmbeddingProfile } from
 import { createEmbeddingProvider } from "./vector/embedding-provider";
 import { RetrievalService } from "./retrieval/retrieval-service";
 import { ModelRouter } from "./models/model-router";
-import { RouteRepository } from "./models/route-repository";
 import { RoutedGeneration } from "./models/routed-generation";
 import { NoteRepository } from "./notes/note-repository";
 import { NoteService } from "./notes/note-service";
@@ -341,8 +340,7 @@ app.whenReady().then(async () => {
     }, undefined, (input) => new CitationOpener(appDatabase!.connection).openSource(input));
     cleanupVectorHandlers = registerVectorHandlers(ipcMain, vectorService);
   }
-  const routeRepository = new RouteRepository(settingsRepository);
-  const modelRouter = new ModelRouter(routeRepository);
+  const modelRouter = new ModelRouter(settingsRepository);
   const providerFactory = (profile: import("../shared/models").ModelProfileDto) => ({
     describe: () => { throw new Error("provider describe is not used for generation"); },
     discover: (signal: AbortSignal) => credentialStore.withSecret(profile.id, { provider: profile.provider, baseUrl: profile.baseUrl }, (apiKey) => createModelProvider(profile.provider, profile.baseUrl, apiKey).discover(signal)),

@@ -114,16 +114,7 @@ function toRoute(row: RouteRow): ModelRouteDto {
 }
 
 export class SettingsRepository {
-  private readonly supportsGenerationColumns: boolean;
-  private readonly supportsOutputKind: boolean;
-  private readonly supportsSpeechVoices: boolean;
-
-  constructor(private readonly db: Database.Database) {
-    const columns = db.pragma("table_info(model_profiles)") as Array<{ name: string }>;
-    this.supportsOutputKind = columns.some((column) => column.name === "output_kind");
-    this.supportsSpeechVoices = columns.some((column) => column.name === "speech_voices_json");
-    this.supportsGenerationColumns = ["context_tokens_override", "max_output_tokens_override", "generation_limits_json"].every((name) => columns.some((column) => column.name === name));
-  }
+  constructor(private readonly db: Database.Database) {}
 
   transaction<T>(work: () => T): T {
     return this.db.transaction(work)();
@@ -178,7 +169,7 @@ export class SettingsRepository {
         throw new Error("Profile capability cannot change while the profile is used by a route");
       }
     }
-    const sql = this.supportsGenerationColumns ? `
+    const sql = `
       INSERT INTO model_profiles(id, name, provider, capability, base_url, model_id, enabled)
       VALUES (@id, @name, @provider, @capability, @baseUrl, @modelId, @enabled)
       ON CONFLICT(id) DO UPDATE SET
@@ -196,21 +187,10 @@ export class SettingsRepository {
           ELSE model_profiles.generation_limits_json
         END,
         updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
-    ` : `
-      INSERT INTO model_profiles(id, name, provider, capability, base_url, model_id, enabled)
-      VALUES (@id, @name, @provider, @capability, @baseUrl, @modelId, @enabled)
-      ON CONFLICT(id) DO UPDATE SET
-        name = excluded.name,
-        provider = excluded.provider,
-        capability = excluded.capability,
-        base_url = excluded.base_url,
-        model_id = excluded.model_id,
-        enabled = excluded.enabled,
-        updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
     `;
     this.db.prepare(sql).run({ ...profile, enabled: profile.enabled ? 1 : 0 });
-    if (this.supportsOutputKind) this.db.prepare("UPDATE model_profiles SET output_kind = ? WHERE id = ?").run(profile.outputKind ?? null, profile.id);
-    if (this.supportsSpeechVoices) this.db.prepare("UPDATE model_profiles SET speech_voices_json = ? WHERE id = ?").run(profile.speechVoices ? JSON.stringify(profile.speechVoices) : null, profile.id);
+    this.db.prepare("UPDATE model_profiles SET output_kind = ? WHERE id = ?").run(profile.outputKind ?? null, profile.id);
+    this.db.prepare("UPDATE model_profiles SET speech_voices_json = ? WHERE id = ?").run(profile.speechVoices ? JSON.stringify(profile.speechVoices) : null, profile.id);
     return this.getProfile(profile.id)!;
   }
 
@@ -219,7 +199,6 @@ export class SettingsRepository {
     contextTokensOverride?: number | null;
     maxOutputTokensOverride?: number | null;
   }): ModelProfileDto {
-    if (!this.supportsGenerationColumns) throw new Error("Generation settings are unavailable in this database schema");
     const current = this.getProfile(input.profileId);
     if (!current) throw new Error("Profile not found");
     const contextTokensOverride = input.contextTokensOverride === undefined
@@ -239,7 +218,6 @@ export class SettingsRepository {
   }
 
   updateGenerationLimits(profileId: string, limits: GenerationLimits | null): ModelProfileDto {
-    if (!this.supportsGenerationColumns) throw new Error("Generation settings are unavailable in this database schema");
     if (!this.getProfile(profileId)) throw new Error("Profile not found");
     const parsed = limits === null ? null : generationLimitsSchema.parse(limits);
     this.db.prepare(`

@@ -6,6 +6,7 @@ import type { ConversationDto, MessageDto } from "../../../../shared/chat";
 import type { SourceDto } from "../../../../shared/sources";
 import type { TaskDto } from "../../../../shared/tasks";
 import Icon from "../../ui/Icon";
+import RoundedSelect from "../../ui/RoundedSelect";
 import Modal, { DialogHead } from "../../ui/Modal";
 import { toast } from "../../ui/Toast";
 import SafeMarkdown from "../../chat/SafeMarkdown";
@@ -290,7 +291,7 @@ export default function StudioPane({ projectId }: { projectId: string }) {
         <form ref={runFormRef} onSubmit={(event) => { event.preventDefault(); void run(); }}>
           <label className="field">
             {t("transformations.rule")}
-            <RuleSelect
+            <RoundedSelect
               value={ruleKey}
               options={ruleOptions}
               ariaLabel={t("transformations.rule")}
@@ -475,84 +476,6 @@ export default function StudioPane({ projectId }: { projectId: string }) {
   );
 }
 
-function RuleSelect({ value, options, ariaLabel, onChange, footer }: {
-  footer?: React.ReactNode;
-  value: string;
-  options: Array<{ value: string; label: string }>;
-  ariaLabel: string;
-  onChange: (value: string) => void;
-}) {
-  const [open, setOpen] = useState(false);
-  const [placement, setPlacement] = useState<"up" | "down">("down");
-  const rootRef = useRef<HTMLDivElement>(null);
-  const selected = options.find((option) => option.value === value) ?? options[0];
-
-  useEffect(() => {
-    if (!open) return;
-    const root = rootRef.current;
-    if (root) {
-      const rect = root.getBoundingClientRect();
-      setPlacement(window.innerHeight - rect.bottom < 260 && rect.top > 260 ? "up" : "down");
-    }
-    const close = (event: PointerEvent): void => {
-      if (event.target instanceof Node && !rootRef.current?.contains(event.target)) setOpen(false);
-    };
-    const escape = (event: KeyboardEvent): void => {
-      if (event.key === "Escape") setOpen(false);
-    };
-    document.addEventListener("pointerdown", close);
-    document.addEventListener("keydown", escape);
-    return () => {
-      document.removeEventListener("pointerdown", close);
-      document.removeEventListener("keydown", escape);
-    };
-  }, [open]);
-
-  return (
-    <div className="rounded-select" ref={rootRef}>
-      <button
-        type="button"
-        className="select rounded-select-trigger"
-        aria-label={ariaLabel}
-        aria-haspopup="listbox"
-        aria-expanded={open}
-        onClick={() => setOpen((current) => !current)}
-        onKeyDown={(event) => {
-          if (event.key === "ArrowDown" || event.key === "ArrowUp") {
-            event.preventDefault();
-            setOpen(true);
-          }
-        }}
-      >
-        <span className="select-value">{selected?.label}</span>
-        <Icon name={open ? "chevron-up" : "chevron-down"} />
-      </button>
-      {open && (
-        <div className="rounded-select-menu" data-placement={placement}>
-        <div role="listbox" aria-label={ariaLabel}>
-          {options.map((option) => (
-            <button
-              type="button"
-              role="option"
-              aria-selected={option.value === value}
-              className="rounded-select-option"
-              key={option.value}
-              onClick={() => {
-                onChange(option.value);
-                setOpen(false);
-              }}
-            >
-              {option.label}
-            </button>
-          ))}
-        </div>
-        {footer && <div className="rule-select-footer" onClick={() => setOpen(false)}>{footer}</div>}
-        </div>
-      )}
-    </div>
-  );
-}
-
 function RuleEditor({ projectId, rule, onClose, onSaved }: {
   projectId: string;
   rule?: TransformationDto | undefined;
@@ -596,7 +519,7 @@ function RuleEditor({ projectId, rule, onClose, onSaved }: {
         </label>
         <label className="field">
           {t("transformations.appliesTo")}
-          <RuleSelect
+          <RoundedSelect
             value={appliesTo}
             options={targetOptions.map((option) => ({ value: option, label: t(`transformations.targetKinds.${option}`, option) }))}
             ariaLabel={t("transformations.appliesTo")}

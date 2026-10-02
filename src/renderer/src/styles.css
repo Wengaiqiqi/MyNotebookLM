@@ -265,13 +265,6 @@ button:disabled { cursor: not-allowed; opacity: .5; }
 .settings-entry svg { width: 16px; height: 16px; }
 .settings-entry .chev { margin-left: auto; }
 
-.sidebar-note {
-  display: flex; align-items: flex-start; gap: 7px;
-  padding: 8px 10px; border-radius: 9px;
-  background: var(--danger-soft); color: var(--danger); font-size: 12px;
-}
-.sidebar-note svg { width: 14px; height: 14px; flex: none; margin-top: 1px; }
-.sidebar-note button { margin-left: auto; border: 0; background: transparent; color: inherit; font-size: 12px; text-decoration: underline; }
 
 /* popover menu */
 .menu-pop-veil { position: fixed; inset: 0; z-index: 85; }
@@ -387,10 +380,6 @@ button:disabled { cursor: not-allowed; opacity: .5; }
    Workspace shell
    ------------------------------------------------------------ */
 .workspace { flex: 1; min-height: 0; display: flex; flex-direction: column; padding: 14px 18px 18px; gap: 12px; }
-.workspace-head { display: flex; align-items: center; gap: 14px; min-height: 44px; }
-.workspace-head h1 { font-size: 21px; font-weight: 700; letter-spacing: -.02em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.workspace-head .sub { color: var(--ink-3); font-size: 12.5px; margin-top: 1px; }
-.workspace-head .spacer { flex: 1; }
 
 .tabs {
   display: inline-flex; gap: 2px; padding: 3px;
@@ -819,16 +808,6 @@ button:disabled { cursor: not-allowed; opacity: .5; }
 .composer-bar { display: flex; align-items: center; gap: 8px; padding: 4px 8px 6px; }
 .thinking-picker .model-menu { width: fit-content; min-width: 128px; }
 .thinking-picker .model-option-copy strong { font-weight: 550; }
-.thinking-toggle {
-  display: inline-flex; align-items: center; gap: 6px;
-  min-height: 30px; padding: 3px 10px;
-  border: 0; border-radius: 999px; background: transparent;
-  color: var(--ink-3); font-size: 12.5px; font-weight: 550;
-  transition: background .12s ease, color .12s ease;
-}
-.thinking-toggle:hover { background: var(--surface-2); color: var(--ink); }
-.thinking-toggle[aria-pressed="true"] { background: var(--accent-soft); color: var(--accent); }
-.thinking-toggle svg { width: 13px; height: 13px; }
 .model-picker { position: relative; }
 .model-pill {
   display: inline-flex; align-items: center; gap: 7px;
@@ -1534,31 +1513,7 @@ button:disabled { cursor: not-allowed; opacity: .5; }
 .settings-nav button[aria-current="page"] { background: var(--surface); color: var(--ink); box-shadow: var(--shadow-1); }
 .settings-nav button svg { width: 16px; height: 16px; }
 
-.profile-row {
-  display: flex; align-items: center; gap: 12px;
-  padding: 13px 16px; border: 1px solid var(--line); border-radius: 13px;
-  background: var(--surface);
-}
-.profile-row + .profile-row { margin-top: 8px; }
-.profile-row .p-icon {
-  display: grid; place-items: center; flex: none;
-  width: 38px; height: 38px; border-radius: 11px; font-weight: 750; font-size: 12px;
-  background: var(--accent-soft); color: var(--accent);
-}
-.profile-row .copy { min-width: 0; flex: 1; }
-.profile-row .copy strong { display: flex; align-items: baseline; gap: 8px; min-width: 0; font-size: 13.5px; font-weight: 650; }
-.profile-row .copy strong > span:first-child { flex: none; }
-.profile-row .copy .profile-model-id {
-  min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-  color: var(--ink-2); font-size: 12.5px; font-weight: 500;
-}
-.profile-row .row-actions { display: flex; gap: 4px; }
 
-.route-group { padding: 16px; }
-.route-group + .route-group { margin-top: 12px; }
-.route-group-head { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
-.route-group-head h3 { font-size: 14px; font-weight: 650; }
-.route-group-head .spacer { flex: 1; }
 .route-chain { display: flex; flex-direction: column; gap: 6px; }
 .route-step {
   display: flex; align-items: center; gap: 10px;
@@ -1594,6 +1549,7 @@ button:disabled { cursor: not-allowed; opacity: .5; }
   scrollbar-color: var(--line-strong) transparent; animation: pop-in .14s ease;
 }
 .rounded-select-menu[data-placement="up"] { top: auto; bottom: calc(100% + 6px); }
+.rounded-select-options { display: grid; gap: 2px; }
 .rounded-select-option {
   display: block; width: 100%; min-height: 34px; padding: 7px 10px;
   border: 0; border-radius: 8px; background: transparent; color: var(--ink);

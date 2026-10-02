@@ -7,8 +7,8 @@ describe("RetrievalService", () => {
     const lance = { vectorSearch: vi.fn(async () => { await gate; return [{ chunkId: "c1", contentHash: "h1", sourceId: "s1", revisionId: "r1", ordinal: 0, text: "stale", locatorJson: "{}" }]; }), textSearch: vi.fn(async () => [{ chunkId: "c1", contentHash: "h1", sourceId: "s1", revisionId: "r1", ordinal: 0, text: "stale", locatorJson: "{}" }]) };
     const db = { prepare: vi.fn(() => ({ get: () => ({ project_id: "p1", status: "active", current_revision_id: "r1", revision_state: "ready", space_state: "active", chunk_id: "c1", source_id: "s1", revision_id: "r1", text: "authoritative", locator_json: "{\"page\":1}" }) })) } as any;
     const service = new RetrievalService({ db, lance: lance as any, provider: { embedBatch: vi.fn(async () => [[1, 0]]) } as any });
-    const promise = service.search("p1", "hello"); await new Promise(r => setTimeout(r, 0)); expect(lance.textSearch).toHaveBeenCalled(); release();
-    await expect(promise).resolves.toEqual([expect.objectContaining({ text: "authoritative" })]);
+    const promise = service.search({ projectId: "p1", query: "hello", limit: 20 }); await new Promise(r => setTimeout(r, 0)); expect(lance.textSearch).toHaveBeenCalled(); release();
+    await expect(promise).resolves.toEqual({ ok: true, value: [expect.objectContaining({ text: "authoritative" })] });
     expect(lance.textSearch).toHaveBeenCalledWith(expect.anything(), "hello", 160, { projectId: "p1" });
     expect(lance.vectorSearch).toHaveBeenCalledWith(expect.anything(), [1, 0], 160, { projectId: "p1" });
   });
@@ -34,7 +34,7 @@ describe("RetrievalService", () => {
 
   it("returns typed repair action when active index is unavailable", async () => {
     const service = new RetrievalService({ db: {} as any, lance: {} as any, provider: {} as any, resolveSpace: async () => null });
-    await expect(service.search("p1", "x")).rejects.toMatchObject({ code: "INDEX_UNAVAILABLE", repair: true });
+    await expect(service.search({ projectId: "p1", query: "x", limit: 20 })).resolves.toMatchObject({ ok: false, error: { code: "INDEX_UNAVAILABLE", recoverable: true } });
   });
 
   it("fails closed without calling the fallback provider when the configured resolver returns null", async () => {
@@ -96,6 +96,7 @@ describe("RetrievalService", () => {
     const embedBatch = vi.fn(async () => [[1, 0]]);
     const candidates = (limit: number) => Array.from({ length: limit }, (_, index) => ({
       chunkId: `c${index}`,
+      projectId: "p1", spaceId: "sp1", vector: [1, 0], locatorJson: "{}", createdAt: 0,
       contentHash: `h${index}`,
       sourceId: "s1",
       revisionId: "r1",

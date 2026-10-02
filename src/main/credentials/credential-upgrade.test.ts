@@ -57,25 +57,15 @@ describe("credential binding migration", () => {
     }
     const databasePath = path.join(root, "app.db");
     const v2 = openAppDatabase(databasePath, migrations);
-    new SettingsRepository(v2.connection).saveProfile({
-      id: PROFILE_ID,
-      name: "Interrupted profile",
-      provider: "openai",
-      capability: "generation",
-      baseUrl: ATTACKER_URL,
-      modelId: "gpt-test",
-      enabled: true
-    });
+    v2.connection.prepare(`
+      INSERT INTO model_profiles(id, name, provider, capability, base_url, model_id, enabled)
+      VALUES (?, 'Interrupted profile', 'openai', 'generation', ?, 'gpt-test', 1)
+    `).run(PROFILE_ID, ATTACKER_URL);
     v2.connection.prepare(`
       INSERT INTO credentials(profile_id, encrypted_secret) VALUES (?, ?)
     `).run(PROFILE_ID, Buffer.from("protected:old-secret"));
     v2.close();
-    copyFileSync(
-      path.resolve("src/main/db/migrations/003_credential_binding.sql"),
-      path.join(migrations, "003_credential_binding.sql")
-    );
-
-    const upgraded = openAppDatabase(databasePath, migrations);
+    const upgraded = openAppDatabase(databasePath, path.resolve("src/main/db/migrations"));
     databases.push(upgraded);
     const protector = new CountingProtector();
     const credentials = new CredentialStore(upgraded.connection, protector);

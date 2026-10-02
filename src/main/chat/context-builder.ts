@@ -147,17 +147,6 @@ export function estimateHistoryPairTokens(pair: HistoryPair): number {
     + messageCost({ role: "assistant", content: sanitizeHistoryText(pair.assistant.content) });
 }
 
-export function historyReserveTokens(input: {
-  question: string;
-  limits?: EffectiveGenerationLimits;
-  contextTokens?: number;
-  outputTokens?: number;
-  locale?: PromptLocale;
-  additionalMessages?: ChatTurn[];
-}): number {
-  return Math.floor(historyLoadBudgetTokens(input) * HISTORY_RESERVE_RATIO);
-}
-
 export function historyLoadBudgetTokens(input: {
   question: string;
   limits?: EffectiveGenerationLimits;

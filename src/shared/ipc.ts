@@ -229,15 +229,7 @@ export const chatRequestEventSchemas = {
 
 export const chatRequestEventTypeSchema = z.enum(Object.keys(chatRequestEventSchemas) as [(keyof typeof chatRequestEventSchemas), ...(keyof typeof chatRequestEventSchemas)[]]);
 export type ChatRequestEventType = keyof typeof chatRequestEventSchemas;
-export type ChatRequestEvent =
-  | { type: "started"; requestId: string; messageId: string; operation?: "initial" | "continue"; message?: MessageDto; offset?: number }
-  | { type: "retrieval"; requestId: string }
-  | { type: "text-delta"; requestId: string; messageId: string; text: string; offset?: number }
-  | { type: "usage"; requestId: string; usage: z.infer<typeof chatUsageDtoSchema> }
-  | { type: "fallback"; requestId: string; attempted: { provider: string; model: string; profileId: string | null }; next: { provider: string; model: string; profileId: string | null }; errorCode: string }
-  | { type: "completed"; requestId: string; messageId: string; message: MessageDto }
-  | { type: "cancelled"; requestId: string; messageId: string; message: MessageDto; operation?: "initial" | "continue" }
-  | { type: "failed"; requestId: string; messageId: string; error: import("./app-errors").AppErrorDto; operation?: "initial" | "continue"; message?: MessageDto };
+export type ChatRequestEvent = z.infer<(typeof chatRequestEventSchemas)[ChatRequestEventType]>;
 
 export interface DesktopApi {
   vector: { getHealth(input: VectorTaskInput): Promise<Result<VectorHealthDto>>; startMigration(input: VectorProfileInput): Promise<Result<TaskDto>>; rebuild(input: VectorSpaceInput): Promise<Result<TaskDto>>; optimize(input: VectorSpaceInput): Promise<Result<TaskDto>>; cancelTask(input: VectorTaskIdInput): Promise<Result<TaskDto>>; subscribe(projectId: string, listener: (task: TaskDto) => void): () => void; };

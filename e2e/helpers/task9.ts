@@ -212,27 +212,6 @@ export async function seedTextSource(
   return { sourceId, revisionId, chunkId };
 }
 
-export async function seedMalformedIngestTask(
-  userDataDir: string,
-  projectId: string
-): Promise<{ sourceId: string; taskId: string }> {
-  const { default: Database } = await import("better-sqlite3");
-  const sourceId = crypto.randomUUID();
-  const taskId = crypto.randomUUID();
-  const database = new Database(path.join(userDataDir, "data", "app.db"));
-  try {
-    database.prepare(
-      "INSERT INTO sources(id, project_id, kind, display_name, status) VALUES (?, ?, 'pdf', ?, 'active')"
-    ).run(sourceId, projectId, "broken.pdf");
-    database.prepare(
-      "INSERT INTO tasks(id, project_id, source_id, kind, state, stage, progress_1000, attempt) VALUES (?, ?, ?, 'ingest', 'queued', 'staging', 0, 0)"
-    ).run(taskId, projectId, sourceId);
-  } finally {
-    database.close();
-  }
-  return { sourceId, taskId };
-}
-
 export function embedFingerprint(modelId = "text-embedding-e2e"): string {
   return createHash("sha256").update(JSON.stringify({
     provider: "openai-compatible",

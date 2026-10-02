@@ -470,6 +470,7 @@ describe("StudioPane", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "规则" }));
     fireEvent.click(screen.getByRole("button", { name: "新建自定义规则" }));
+    expect(screen.queryByRole("listbox", { name: "规则" })).toBeNull();
     const target = await screen.findByRole("button", { name: "适用目标" });
     expect(target.className).toContain("rounded-select-trigger");
     fireEvent.click(target);

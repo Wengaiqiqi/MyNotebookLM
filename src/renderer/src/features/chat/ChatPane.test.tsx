@@ -119,10 +119,17 @@ describe("ChatPane conversation creation", () => {
     fireEvent.click(screen.getByRole("button", { name: "发送" }));
     await waitFor(() => expect(api.chat.send).toHaveBeenCalled());
     await act(async () => {
+      sink?.({ type: "started", requestId, messageId: "assistant-failed" });
+      sink?.({ type: "text-delta", requestId, messageId: "assistant-failed", text: "保留的部分回答" });
+    });
+    expect(screen.getByText("保留的部分回答")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "重试" })).toBeNull();
+    await act(async () => {
       sink?.({ type: "failed", requestId, messageId: "assistant-failed", error: { code: "TIMEOUT", messageKey: "errors.timeout", recoverable: true } });
       await Promise.resolve();
     });
 
+    expect(screen.getByText("保留的部分回答")).toBeTruthy();
     const errorBubble = document.querySelector(".assistant-error");
     expect(errorBubble?.textContent).toContain("提供商响应超时");
     expect(document.querySelector(".chat-note.error")).toBeNull();
@@ -406,6 +413,8 @@ describe("ChatPane conversation creation", () => {
       />
     );
 
+    expect(await screen.findByText("未完成回答")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "重试" })).toBeNull();
     fireEvent.click(await screen.findByRole("button", { name: "编辑并重新发送" }));
     const editor = screen.getByRole("textbox", { name: "编辑并重新发送" });
     const userMessage = editor.closest(".msg.user") as HTMLElement;

@@ -1,8 +1,6 @@
 import React, { useCallback, useEffect, useState } from "react";
-import { useTranslation } from "react-i18next";
 import type { DefaultModelRoutesDto } from "../../../../shared/models";
 import type { SourceDto } from "../../../../shared/sources";
-import Icon from "../../ui/Icon";
 import ChatPane from "../chat/ChatPane";
 import SourcesPanel from "../sources/SourcesPanel";
 import NotesPane from "../notes/NotesPane";
@@ -11,16 +9,13 @@ import { useTaskFeed } from "../../hooks/useTaskFeed";
 
 export type Section = "research" | "notes" | "studio";
 
-export default function Workspace({ projectId, section, onSectionChange, routes, onOpenSettings, onOpenModelSettings, onSourcesChanged }: {
+export default function Workspace({ projectId, section, routes, onOpenSettings, onOpenModelSettings }: {
   projectId: string;
   section: Section;
-  onSectionChange: (section: Section) => void;
   routes: DefaultModelRoutesDto;
   onOpenSettings: () => void;
   onOpenModelSettings: (profileId: string | null) => void;
-  onSourcesChanged?: () => void;
 }) {
-  const { t } = useTranslation();
   const [sources, setSources] = useState<SourceDto[]>([]);
   const [sourcesVersion, setSourcesVersion] = useState(0);
 
@@ -38,7 +33,6 @@ export default function Workspace({ projectId, section, onSectionChange, routes,
   useEffect(() => {
     if (settled) {
       void refreshSources();
-      onSourcesChanged?.();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tasks]);
@@ -50,7 +44,7 @@ export default function Workspace({ projectId, section, onSectionChange, routes,
           <SourcesPanel
             projectId={projectId}
             embeddingProfileId={routes.embeddingProfileId}
-            onImported={() => { setSourcesVersion((value) => value + 1); onSourcesChanged?.(); }}
+            onImported={() => { setSourcesVersion((value) => value + 1); }}
             onOpenSettings={onOpenSettings}
           />
           <ChatPane

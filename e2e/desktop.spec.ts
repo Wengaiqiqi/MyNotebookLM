@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+import { closeElectron } from "./helpers/task9";
 import * as lancedb from "@lancedb/lancedb";
 import Database from "better-sqlite3";
 import { createHash } from "node:crypto";
@@ -28,20 +29,6 @@ async function launchWithUserData(
     }
   });
   return { app, page: await app.firstWindow() };
-}
-
-async function closeElectron(app: ElectronApplication): Promise<void> {
-  const pid = await app.evaluate(() => process.pid);
-  await app.close();
-  for (let attempt = 0; attempt < 100; attempt++) {
-    try {
-      process.kill(pid, 0);
-    } catch {
-      return;
-    }
-    await new Promise((resolve) => setTimeout(resolve, 50));
-  }
-  throw new Error(`Electron ${pid}: shutdown timeout`);
 }
 
 async function captureRoutingScreenshot(page: Page, filePath: string): Promise<void> {

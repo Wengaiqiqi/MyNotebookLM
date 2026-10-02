@@ -326,4 +326,15 @@ describe("SettingsRepository", () => {
       { operationId: "operation-1", attemptOrder: 1, model: "fallback" }
     ]);
   });
+
+  it("rejects duplicate IDs and invalid empty or embedding routes", () => {
+    for (const [id, capability] of [[GENERATION_ID, "generation"], [EMBEDDING_ID, "embedding"]] as const) {
+      repository.saveProfile({ id, name: id, provider: "openai", capability, baseUrl: "https://api.openai.com/v1", modelId: id, enabled: true });
+    }
+
+    expect(() => repository.replaceRoute("chat", [])).toThrow(/at least one/i);
+    expect(() => repository.replaceRoute("chat", [GENERATION_ID, GENERATION_ID])).toThrow(/duplicate/i);
+    expect(() => repository.replaceRoute("embedding", [])).toThrow(/exactly one/i);
+    expect(() => repository.replaceRoute("embedding", [EMBEDDING_ID, GENERATION_ID])).toThrow(/exactly one/i);
+  });
 });

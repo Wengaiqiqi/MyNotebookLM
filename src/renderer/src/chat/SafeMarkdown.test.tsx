@@ -5,9 +5,9 @@ import DOMPurify from "dompurify";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { CitationDto, MessageDto } from "../../../shared/chat";
-import { citationSchema, messageStateSchema } from "../../../shared/chat";
-import SafeMarkdown, { AssistantMessageView } from "./SafeMarkdown";
+import type { CitationDto } from "../../../shared/chat";
+import { citationSchema } from "../../../shared/chat";
+import SafeMarkdown from "./SafeMarkdown";
 
 const roots: Root[] = [];
 
@@ -46,30 +46,6 @@ const baseCitation: CitationDto = citationSchema.parse({
   locator: { kind: "page", page: 3 },
   start: 12
 });
-
-function assistantMessage(overrides: Partial<MessageDto> = {}): MessageDto {
-  return {
-    id: "msg-1",
-    conversationId: "conv-1",
-    sequence: 2,
-    role: "assistant",
-    content: "",
-    state: messageStateSchema.parse("completed"),
-    replyToMessageId: null,
-    supersedesMessageId: null,
-    superseded: false,
-    provider: "openai",
-    profileId: "p1",
-    model: "gpt-test",
-    usage: null,
-    errorCode: null,
-    completionReason: null,
-    createdAt: "2026-08-27T00:00:00.000Z",
-    updatedAt: "2026-08-27T00:00:00.000Z",
-    citations: [],
-    ...overrides
-  };
-}
 
 describe("SafeMarkdown sanitization", () => {
   it.each([
@@ -224,7 +200,7 @@ describe("SafeMarkdown sanitization", () => {
   });
 });
 
-describe("AssistantMessageView", () => {
+describe("SafeMarkdown link hardening", () => {
   it("keeps safe link href by passing the explicit attribute allowlist to sanitize", async () => {
     const container = await render(
       <SafeMarkdown text={"[docs](https://example.com/docs) and ![img](https://cdn.example/x.png)"} citations={[]} />
@@ -240,42 +216,5 @@ describe("AssistantMessageView", () => {
       await render(<SafeMarkdown text="[x](https://example.com)" citations={[]} />);
     }
     expect(addHookSpy).not.toHaveBeenCalled();
-  });
-
-  it("shows failed state preserving partial content and exposes repair action", async () => {
-    let repairs = 0;
-    const container = await render(
-      <AssistantMessageView
-        message={assistantMessage({
-          state: "failed",
-          errorCode: "PROVIDER",
-          content: "Partial reasoning preserved even when failing"
-        })}
-        onRepair={() => { repairs += 1; }}
-      />
-    );
-    expect(container.textContent).toContain("Partial reasoning preserved even when failing");
-    container.querySelector<HTMLButtonElement>("button[data-repair]")?.click();
-    expect(repairs).toBe(1);
-  });
-
-  it("shows cancelled state preserving the partial answer without repair action", async () => {
-    const container = await render(
-      <AssistantMessageView
-        message={assistantMessage({ state: "cancelled", content: "stopped midway" })}
-      />
-    );
-    expect(container.textContent).toContain("stopped midway");
-    expect(container.querySelector("[data-repair]")).toBeNull();
-  });
-
-  it("shows streaming state before completion", async () => {
-    const container = await render(
-      <AssistantMessageView
-        message={assistantMessage({ state: "streaming", content: "so far" })}
-      />
-    );
-    expect(container.textContent).toContain("so far");
-    expect(container.querySelector("[data-repair]")).toBeNull();
   });
 });

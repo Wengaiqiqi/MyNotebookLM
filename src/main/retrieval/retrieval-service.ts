@@ -57,27 +57,21 @@ export class RetrievalService {
   private readonly store: Pick<LanceStore, "vectorSearch" | "textSearch">;
   private readonly provider: Pick<EmbeddingProvider, "embedBatch">;
   private readonly db: Database.Database;
-  private readonly resolveSpace?: (projectId: string, space: { id: string; dimension: number; fingerprint: string }) => Promise<{ provider: QueryProvider } | null>;
+  private readonly resolveSpace: ((projectId: string, space: { id: string; dimension: number; fingerprint: string }) => Promise<{ provider: QueryProvider } | null>) | undefined;
 
-  constructor(a: any, b?: any, c?: any) {
-    if (a?.lance) {
-      this.db = a.db;
-      this.store = a.lance;
-      this.provider = a.provider;
-      this.resolveSpace = a.resolveSpace;
-    } else {
-      this.store = a;
-      this.provider = b;
-      this.db = c;
-    }
+  constructor(input: {
+    db: RetrievalService["db"];
+    lance: RetrievalService["store"];
+    provider: RetrievalService["provider"];
+    resolveSpace?: RetrievalService["resolveSpace"];
+  }) {
+    this.db = input.db;
+    this.store = input.lance;
+    this.provider = input.provider;
+    this.resolveSpace = input.resolveSpace;
   }
 
-  async search(input: SearchInput | string, query?: string): Promise<any> {
-    if (typeof input === "string") {
-      const result = await this.search({ projectId: input, query: query ?? "", limit: 20 });
-      if (!result.ok) throw { code: result.error.code, repair: result.error.code === "INDEX_UNAVAILABLE" };
-      return result.value;
-    }
+  async search(input: SearchInput): Promise<any> {
     try {
       const prepared = await this.prepare({ projectId: input.projectId, query: input.query, ...(input.signal ? { signal: input.signal } : {}) });
       const candidateLimit = Math.min(CHAT_CANDIDATE_LIMIT, Math.max(48, input.limit * 8));

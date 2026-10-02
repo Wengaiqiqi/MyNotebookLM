@@ -83,9 +83,8 @@ describe("Space lifecycle real restart recovery", () => {
     const databasePath = path.join(root, "app.db"); const db = openAppDatabase(databasePath, path.resolve("src/main/db/migrations")); const c = db.connection;
     c.prepare("INSERT INTO projects(id,name) VALUES(?,?)").run("p", "P");
     const repo = new SpaceRepository(c); const backupPath = path.join(root, "space.db");
-    const service = new SpaceService(repo, undefined, async () => backupDatabase(c, backupPath));
-    const space = repo.createOrReuse(spec("p", "verified"));
-    await service.build(spec("p", "verified"), async () => repo.setState(space.id, "validating", 1000));
+    const service = new SpaceService(repo, { rebuild: async () => {}, optimize: async () => {} }, async () => backupDatabase(c, backupPath));
+    await service.rebuild({ spec: spec("p", "verified") });
     expect(repo.active("p")?.fingerprint).toBe("verified");
     const backup = new Database(backupPath);
     expect(backup.pragma("integrity_check", { simple: true })).toBe("ok");
@@ -97,9 +96,8 @@ describe("Space lifecycle real restart recovery", () => {
     const root = await mkdtemp(path.join(os.tmpdir(), "space-backup-failure-")); roots.push(root);
     const db = openAppDatabase(path.join(root, "app.db"), path.resolve("src/main/db/migrations")); const c = db.connection;
     c.prepare("INSERT INTO projects(id,name) VALUES(?,?)").run("p", "P");
-    const repo = new SpaceRepository(c); const service = new SpaceService(repo, undefined, async () => { throw new Error("backup failed"); });
-    const space = repo.createOrReuse(spec("p", "failed"));
-    await expect(service.build(spec("p", "failed"), async () => repo.setState(space.id, "validating", 1000))).rejects.toThrow("backup failed");
+    const repo = new SpaceRepository(c); const service = new SpaceService(repo, { rebuild: async () => {}, optimize: async () => {} }, async () => { throw new Error("backup failed"); });
+    await expect(service.rebuild({ spec: spec("p", "failed") })).rejects.toThrow("backup failed");
     expect(repo.active("p")).toBeUndefined();
     expect(repo.createOrReuse(spec("p", "failed")).state).toBe("failed");
     db.close();

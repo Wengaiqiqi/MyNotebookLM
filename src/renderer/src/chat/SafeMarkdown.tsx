@@ -4,8 +4,7 @@ import katex from "katex";
 import "katex/contrib/mhchem";
 import "katex/dist/katex.min.css";
 import { marked } from "marked";
-import { useTranslation } from "react-i18next";
-import type { CitationDto, MessageDto } from "../../../shared/chat";
+import type { CitationDto } from "../../../shared/chat";
 
 // Plan 4 global constraint allowlist: text, headings, lists, tables, blockquotes,
 // code and safe links. Everything else (scripts, styles, iframes, images, event
@@ -207,56 +206,3 @@ export default function SafeMarkdown({ text, citations = [], onCitationOpen, all
   }, [text, canonical, onCitationOpen, allowSafeHtml]);
   return <div className="safe-markdown" ref={hostRef} />;
 }
-
-const messageStateLabels: Record<MessageDto["state"], string> = {
-  streaming: "chat.message.streaming",
-  completed: "chat.message.completed",
-  cancelled: "chat.message.cancelled",
-  failed: "chat.message.failed"
-};
-
-const repairLabels: Record<string, string> = {
-  CANCELLED: "chat.repair.retry",
-  PROVIDER: "chat.repair.repair",
-  TIMEOUT: "chat.repair.retry",
-  NETWORK: "chat.repair.retry",
-  INTERNAL: "chat.repair.repair"
-};
-
-export interface AssistantMessageViewProps {
-  message: MessageDto;
-  onCitationOpen?: (citation: CitationDto) => void;
-  /** Repair/resume hook; only rendered when the message exposes a failed draft. */
-  onRepair?: () => void;
-}
-
-function AssistantMessageViewBase({ message, onCitationOpen, onRepair }: AssistantMessageViewProps) {
-  const { t } = useTranslation();
-  const showRepair = message.state === "failed";
-  return (
-    <article className={`assistant-message is-${message.state}`} data-state={message.state}>
-      <SafeMarkdown
-        text={message.content}
-        citations={message.citations}
-        onCitationOpen={onCitationOpen}
-      />
-      {showRepair ? (
-        <div role="alert" className="assistant-message-error">
-          <span>{t(messageStateLabels.failed, { defaultValue: "The answer failed." })}</span>
-          <button type="button" data-repair onClick={onRepair}>
-            {t(repairLabels[message.errorCode ?? "INTERNAL"] ?? "chat.repair.repair", { defaultValue: "Repair answer" })}
-          </button>
-        </div>
-      ) : null}
-      {message.state === "streaming" ? (
-        <span aria-live="polite">{t(messageStateLabels.streaming, { defaultValue: "Answering…" })}</span>
-      ) : null}
-      {message.state === "cancelled" ? (
-        <span data-cancelled>{t(messageStateLabels.cancelled, { defaultValue: "Stopped." })}</span>
-      ) : null}
-    </article>
-  );
-}
-
-/** Functional state view: streams SafeMarkdown content with status plumbing, no final styling. */
-export const AssistantMessageView = AssistantMessageViewBase;

@@ -51,7 +51,6 @@ export class WorkerPool {
   readonly concurrency: number;
   private readonly workers = new Set<PoolWorker>();
   private readonly active = new Map<string, ActiveWorkerJob>();
-  private readonly cancelled = new Set<string>();
   private readonly queue: WorkerJob[] = [];
   private durablePayload: DurablePayloadLoader | undefined;
   private onProgress: ((taskId: string, value: number) => void) | undefined;
@@ -103,7 +102,6 @@ export class WorkerPool {
         clearTimeout(timer);
         if (this.active.get(job.taskId)?.worker === worker) this.active.delete(job.taskId);
         this.workers.delete(worker);
-        this.cancelled.delete(job.taskId);
         worker.removeAllListeners();
         if (terminateWorker) void worker.terminate().catch(() => undefined);
 
@@ -179,7 +177,6 @@ export class WorkerPool {
     }
     const active = this.active.get(taskId);
     if (active) {
-      this.cancelled.add(taskId);
       try { active.worker.postMessage({ version: 1, type: "cancel", taskId }); } catch { /* worker exit reports the terminal state */ }
     }
   }

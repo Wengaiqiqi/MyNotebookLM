@@ -165,7 +165,7 @@ describe("RAG integration with real LanceDB and streaming chat", () => {
 
   it("streams a cited answer end to end through retrieval and persists the completed message", async () => {
     const connection = await setupWorld();
-    const retrieval = new RetrievalService({ db: connection, lance, provider: fakeEmbeddingProvider() });
+    const retrieval = new RetrievalService({ db: connection, lance: lance!, provider: fakeEmbeddingProvider() });
     const search = await retrieval.search({ projectId: PROJECT_ID, query: "alpha", limit: 12 });
     if (!search.ok) throw new Error(JSON.stringify(search.error));
     expect(search.value.map((hit: { chunkId: string }) => hit.chunkId)).toEqual([CHUNK_A, CHUNK_B]);
@@ -215,7 +215,7 @@ describe("RAG integration with real LanceDB and streaming chat", () => {
       yield { type: "usage", inputTokens: 10, outputTokens: 5 };
       yield { type: "done", finishReason: calls < 3 ? "length" : "stop" };
     } };
-    const create = () => new ChatService({ ...chatDeps(connection, new RetrievalService({ db: connection, lance, provider: fakeEmbeddingProvider() }), model), generationProfile: selected });
+    const create = () => new ChatService({ ...chatDeps(connection, new RetrievalService({ db: connection, lance: lance!, provider: fakeEmbeddingProvider() }), model), generationProfile: selected });
     let service = create();
     const conversation = service.createConversation({ projectId: PROJECT_ID, title: "Continue" });
     const sent = await service.send({ requestId: REQUEST_ID, projectId: PROJECT_ID, conversationId: conversation.id, question: "alpha" }, () => {});
@@ -239,7 +239,7 @@ describe("RAG integration with real LanceDB and streaming chat", () => {
 
   it("stops a streaming turn mid-flight and keeps partial text as cancelled", async () => {
     const connection = await setupWorld();
-    const retrieval = new RetrievalService({ db: connection, lance, provider: fakeEmbeddingProvider() });
+    const retrieval = new RetrievalService({ db: connection, lance: lance!, provider: fakeEmbeddingProvider() });
     const service = new ChatService(chatDeps(connection, retrieval, slowProvider()));
     const conversation = service.createConversation({ projectId: PROJECT_ID, title: "Stop" });
     const events: Array<Record<string, unknown>> = [];
@@ -261,7 +261,7 @@ describe("RAG integration with real LanceDB and streaming chat", () => {
 
   it("answers without citations when no evidence is retrieved", async () => {
     const connection = await setupWorld();
-    const retrieval = new RetrievalService({ db: connection, lance, provider: fakeEmbeddingProvider() });
+    const retrieval = new RetrievalService({ db: connection, lance: lance!, provider: fakeEmbeddingProvider() });
     const provider = await startHttpGenerationProvider("There is no evidence in the sources for this request.");
     const service = new ChatService({ ...chatDeps(connection, retrieval, provider), retrieval: async () => [] });
     const conversation = service.createConversation({ projectId: PROJECT_ID, title: "No evidence" });
@@ -280,7 +280,7 @@ describe("RAG integration with real LanceDB and streaming chat", () => {
 
   it("keeps invalid citation markers visible in text but persists no citation rows for them", async () => {
     const connection = await setupWorld();
-    const retrieval = new RetrievalService({ db: connection, lance, provider: fakeEmbeddingProvider() });
+    const retrieval = new RetrievalService({ db: connection, lance: lance!, provider: fakeEmbeddingProvider() });
     const provider = await startHttpGenerationProvider("[S2] plus ", "[S13]");
     const service = new ChatService({
       ...chatDeps(connection, retrieval, provider),
@@ -305,7 +305,7 @@ describe("RAG integration with real LanceDB and streaming chat", () => {
 
   it("regenerates a reply without duplicating the user row or its citations", async () => {
     const connection = await setupWorld();
-    const retrieval = new RetrievalService({ db: connection, lance, provider: fakeEmbeddingProvider() });
+    const retrieval = new RetrievalService({ db: connection, lance: lance!, provider: fakeEmbeddingProvider() });
     const service = new ChatService(chatDeps(connection, retrieval));
     const conversation = service.createConversation({ projectId: PROJECT_ID, title: "Regenerate" });
     const firstEvents: Array<Record<string, unknown>> = [];

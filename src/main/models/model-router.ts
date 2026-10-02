@@ -4,7 +4,7 @@ import {
   type ModelProfileDto,
   type ModelTaskKind
 } from "../../shared/models";
-import type { RouteRepository } from "./route-repository";
+import type { SettingsRepository } from "../settings/settings-repository";
 
 const generationTasks = new Set<ModelTaskKind>([
   "chat",
@@ -20,7 +20,7 @@ export type ModelProfileSnapshot = Readonly<ModelProfileDto>;
 
 export class ModelRouter {
   constructor(
-    private readonly routes: Pick<RouteRepository, "getProfile" | "getRoute">
+    private readonly routes: Pick<SettingsRepository, "getProfile" | "getRoute">
   ) {}
 
   resolve(taskKind: ModelTaskKind, explicitProfileId?: string): readonly ModelProfileSnapshot[] {
