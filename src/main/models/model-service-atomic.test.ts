@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { ModelProfileInput, ProviderKind } from "../../shared/models";
+import { modelTaskKindSchema, type ModelProfileInput, type ProviderKind } from "../../shared/models";
 import { CredentialStore, type SecretProtector } from "../credentials/credential-store";
 import { openAppDatabase, type AppDatabase } from "../db/database";
 import { SettingsRepository } from "../settings/settings-repository";
@@ -92,6 +92,57 @@ describe("ModelService atomic profile credential replacement", () => {
       async (secret) => secret
     )).resolves.toBe("old-secret");
   }
+
+  it.each([false, true])("initializes only the first text and speech models, speech first=%s", async (speechFirst) => {
+    const textProfiles: ModelProfileInput[] = [
+      { ...oldProfile, id: "22222222-2222-4222-8222-222222222222", modelId: "first-text", outputKind: "text" },
+      { ...oldProfile, id: "33333333-3333-4333-8333-333333333333", modelId: "second-text", outputKind: "text" }
+    ];
+    const speechProfiles: ModelProfileInput[] = [
+      { ...oldProfile, id: "44444444-4444-4444-8444-444444444444", modelId: "first-voice", outputKind: "speech" },
+      { ...oldProfile, id: "55555555-5555-4555-8555-555555555555", modelId: "second-voice", outputKind: "speech" }
+    ];
+    const profiles = speechFirst ? [...speechProfiles, ...textProfiles] : [...textProfiles, ...speechProfiles];
+    const remote = successfulProvider();
+    vi.mocked(remote.discover).mockResolvedValue(profiles.map(({ modelId }) => ({
+      id: modelId, displayName: modelId, capabilities: ["generation"], capabilityEvidence: "authoritative"
+    })));
+    const models = service(() => remote);
+    for (const [index, profile] of profiles.entries()) {
+      expect((await models.saveProfile({ profile, ...(index === 0 ? { apiKey: "new-secret" } : {}) })).ok).toBe(true);
+    }
+
+    const settings = new SettingsRepository(appDatabase.connection);
+    for (const task of modelTaskKindSchema.options.filter((task) => task !== "embedding" && task !== "podcast")) {
+      expect(settings.getRoute(task).map((route) => route.profileId)).toEqual([textProfiles[0]!.id]);
+    }
+    expect(settings.getRoute("podcast").map((route) => route.profileId)).toEqual(
+      speechFirst ? [speechProfiles[0]!.id, textProfiles[0]!.id] : [textProfiles[0]!.id, speechProfiles[0]!.id]
+    );
+    expect(settings.getRoute("embedding")).toEqual([]);
+    expect(settings.listProfiles()).toHaveLength(5);
+
+    settings.replaceRoute("chat", [textProfiles[1]!.id, textProfiles[0]!.id]);
+    expect((await models.saveProfile({ profile: { ...textProfiles[1]!, name: "Edited" } })).ok).toBe(true);
+    expect((await models.saveProfile({ profile: { ...oldProfile, id: "66666666-6666-4666-8666-666666666666", modelId: "new-model" } })).ok).toBe(true);
+    expect(settings.getRoute("chat").map((route) => route.profileId)).toEqual([textProfiles[1]!.id, textProfiles[0]!.id]);
+    expect(settings.getRoute("podcast")).toHaveLength(2);
+    expect(settings.getRoute("summary").map((route) => route.profileId)).toEqual([textProfiles[0]!.id]);
+  });
+
+  it("rolls back a new profile, credential and all defaults when route initialization fails", async () => {
+    appDatabase.connection.exec(`
+      CREATE TRIGGER fail_initial_route BEFORE INSERT ON model_routes
+      WHEN NEW.task_kind = 'summary'
+      BEGIN SELECT RAISE(ABORT, 'forced route failure'); END
+    `);
+    const newProfile = { ...oldProfile, id: "22222222-2222-4222-8222-222222222222", modelId: "new-model" };
+    expect(await service().saveProfile({ profile: newProfile, apiKey: "new-secret" })).toMatchObject({ ok: false });
+    expect(new SettingsRepository(appDatabase.connection).getProfile(newProfile.id)).toBeUndefined();
+    expect(new CredentialStore(appDatabase.connection, protector).status(newProfile.id).hasCredential).toBe(false);
+    expect(appDatabase.connection.prepare("SELECT * FROM model_routes").all()).toEqual([]);
+    await expectOldPair();
+  });
 
   it("leaves the old endpoint and secret unchanged when replacement encryption fails", async () => {
     protector.failEncryption = true;

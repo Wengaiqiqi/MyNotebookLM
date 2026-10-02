@@ -234,8 +234,8 @@ export default function ModelForm({ capability, existing, existingProfiles, init
         setError(t(result?.error.messageKey ?? "errors.internal"));
         return;
       }
-      // Onboarding needs a text model for the default chat route.
-      if (!savedProfile || selection.outputKind === "text") savedProfile = result.value;
+      // Text selections are saved first; keep the first model for onboarding.
+      savedProfile ??= result.value;
     }
     // Preserve existing profiles until all new selections have saved successfully.
     const removedProfiles = allExistingProfiles.filter((profile) => !modelSelections.some((selection) => selection.modelId === profile.modelId && (capability !== "generation" || selection.outputKind === modelOutputKind(profile))));

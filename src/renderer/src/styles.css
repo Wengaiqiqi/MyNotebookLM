@@ -1064,7 +1064,7 @@ button:disabled { cursor: not-allowed; opacity: .5; }
 .quiz-tab > [role="tab"] {
   border: 0; border-radius: 0; background: transparent;
   padding: 6px 14px; font-size: 13px; font-weight: 500;
-  color: var(--ink-2); cursor: pointer; max-width: 220px;
+  color: var(--ink-2); cursor: pointer; max-width: 80px;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   transition: color .15s ease;
 }

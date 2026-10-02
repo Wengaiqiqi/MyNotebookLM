@@ -352,7 +352,7 @@ export default function Settings({ projectId, language, theme, initialModelProfi
                 existingProfiles={editorOpen.existingGroup?.profiles}
                 {...(editorOpen.capability === "embedding" ? { builtIn: builtIns[0], initialProvider: "local" as const } : {})}
                 onCancel={() => setEditorOpen(undefined)}
-                onSaved={() => { setEditorOpen(undefined); void reload(); }}
+                onSaved={() => { setEditorOpen(undefined); void reload(); onRoutesChanged(); }}
               />
             )}
           </div>

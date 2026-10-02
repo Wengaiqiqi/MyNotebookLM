@@ -58,6 +58,7 @@ class FakeSettingsRepository {
   readonly profiles = new Map<string, ModelProfileDto>();
   readonly routes = new Map<ModelTaskKind, ModelRouteDto[]>();
   readonly events: string[] = [];
+  readonly initializeGenerationRoutes = vi.fn();
 
   transaction<T>(work: () => T): T {
     return work();

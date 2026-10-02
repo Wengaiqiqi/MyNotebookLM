@@ -110,7 +110,7 @@ test(`selects ${speechModel} voices in the scrollable conversion card, generates
     await page.getByRole("button", { name: "返回", exact: true }).click();
     await page.getByRole("tab", { name: "转换", exact: true }).click();
     await page.getByRole("button", { name: "规则", exact: true }).click();
-    await page.getByRole("option", { name: "双人播客", exact: true }).click();
+    await page.getByRole("option", { name: "播客", exact: true }).click();
     const runCard = page.getByRole("region", { name: "运行转换", exact: true });
     await runCard.getByRole("button", { name: `主持人 A 音色 · ${speechModel}`, exact: true }).click();
     await runCard.getByRole("option", { name: availableVoices[2]!, exact: true }).click();
@@ -128,7 +128,7 @@ test(`selects ${speechModel} voices in the scrollable conversion card, generates
     await page.getByRole("tab", { name: "笔记", exact: true }).click();
     await page.getByRole("tab", { name: "转换", exact: true }).click();
     await page.getByRole("button", { name: "规则", exact: true }).click();
-    await page.getByRole("option", { name: "双人播客", exact: true }).click();
+    await page.getByRole("option", { name: "播客", exact: true }).click();
     await expect(runCard.getByRole("button", { name: `主持人 A 音色 · ${speechModel}`, exact: true })).toHaveText(availableVoices[2]!);
     await page.getByRole("button", { name: "来源", exact: true }).click();
     await page.getByRole("option", { name: "podcast-source.txt", exact: true }).click();
@@ -152,7 +152,7 @@ test(`selects ${speechModel} voices in the scrollable conversion card, generates
     await page.getByRole("option", { name: "podcast-source.txt", exact: true }).click();
     await page.getByRole("button", { name: "来源", exact: true }).click();
     await page.getByRole("button", { name: "规则", exact: true }).click();
-    await page.getByRole("option", { name: "双人播客", exact: true }).click();
+    await page.getByRole("option", { name: "播客", exact: true }).click();
     await page.getByRole("button", { name: "运行转换", exact: true }).click();
     await expect(page.getByText("合成双人语音", { exact: true })).toBeVisible();
     await page.getByRole("button", { name: "取消", exact: true }).click();
@@ -175,7 +175,7 @@ test(`selects ${speechModel} voices in the scrollable conversion card, generates
     desktop = await launchWithUserData(root); app = desktop.app;
     await desktop.page.getByRole("tab", { name: "转换", exact: true }).click();
     await desktop.page.getByRole("button", { name: "规则", exact: true }).click();
-    await desktop.page.getByRole("option", { name: "双人播客", exact: true }).click();
+    await desktop.page.getByRole("option", { name: "播客", exact: true }).click();
     await expect(desktop.page.getByRole("button", { name: `主持人 A 音色 · ${speechModel}`, exact: true })).toHaveText(availableVoices[2]!);
     await desktop.page.getByRole("button", { name: "查看详细", exact: true }).click();
     await expect(desktop.page.getByRole("dialog").getByText(`writer · ${speechModel} ·`, { exact: false })).toBeVisible();

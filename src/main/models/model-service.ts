@@ -371,6 +371,7 @@ export class ModelService {
               tested.value.generationLimits ?? null
             );
           }
+          if (!existing) this.settings.initializeGenerationRoutes(profile.id);
           return this.settings.getProfile(profile.id)!;
         });
         return { ok: true, value: saved };
@@ -392,6 +393,7 @@ export class ModelService {
         } else if (existingPrepared) {
           this.credentials.storePrepared(profile.id, existingPrepared);
         }
+        if (!existing) this.settings.initializeGenerationRoutes(profile.id);
         return this.settings.getProfile(profile.id)!;
       });
       return { ok: true, value: saved };

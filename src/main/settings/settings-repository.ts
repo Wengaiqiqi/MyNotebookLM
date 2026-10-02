@@ -243,6 +243,24 @@ export class SettingsRepository {
     `).all(parsedTask) as RouteRow[]).map(toRoute);
   }
 
+  initializeGenerationRoutes(profileId: string): void {
+    this.transaction(() => {
+      const profile = this.getProfile(profileId);
+      if (!profile?.enabled || profile.capability !== "generation") return;
+      const outputKind = modelOutputKind(profile);
+      const tasks: ModelTaskKind[] = outputKind === "text" ? [...defaultGenerationTasks, "podcast"] : ["podcast"];
+      const insert = this.db.prepare("INSERT INTO model_routes(task_kind, position, profile_id) VALUES (?, ?, ?)");
+      for (const task of tasks) {
+        const route = this.getRoute(task);
+        // Podcast defaults fill each output kind independently until both exist.
+        if (task === "podcast"
+          ? route.some((step) => modelOutputKind(this.getProfile(step.profileId)!) === outputKind)
+          : route.length > 0) continue;
+        insert.run(task, (route.at(-1)?.position ?? -1) + 1, profile.id);
+      }
+    });
+  }
+
   listRouteAttempts(input: { projectId: string; operationId?: string; taskKind?: ModelTaskKind; limit?: number; offset?: number }): ModelRouteAttemptDto[] {
     const limit = Math.min(100, Math.max(1, input.limit ?? 50));
     const offset = Math.max(0, input.offset ?? 0);

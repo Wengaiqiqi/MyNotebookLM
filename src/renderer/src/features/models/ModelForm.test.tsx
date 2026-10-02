@@ -59,7 +59,7 @@ describe("ModelForm", () => {
     expect(saveProfile.mock.calls.map(([input]) => input.profile.modelId)).toEqual(["model-a", "model-b", "custom-voice"]);
     expect(saveProfile.mock.calls.map(([input]) => input.profile.outputKind)).toEqual(["text", "text", "speech"]);
     expect(saveProfile.mock.calls[2]![0].profile.speechVoices).toBeUndefined();
-    expect(onSaved).toHaveBeenCalledWith(expect.objectContaining({ modelId: "model-b", outputKind: "text" }));
+    expect(onSaved).toHaveBeenCalledWith(expect.objectContaining({ modelId: "model-a", outputKind: "text" }));
   });
 
   it("preserves voices selected in the conversion pane when editing credentials", async () => {
