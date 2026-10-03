@@ -83,6 +83,140 @@ afterEach(() => {
 });
 
 describe("useChatStream", () => {
+  it("keeps receiving a stream while the chat view is unmounted and resumes it on remount", async () => {
+    const h = createApi();
+    h.send.mockResolvedValue(makeOk(REQUEST_ID, MESSAGE_ID));
+    const first = renderHook(() => useChatStream(h.api.chat, PROJECT_ID, CONVERSATION_ID));
+    await act(async () => { await first.result.current.send("q"); });
+    await emitAsync(h, REQUEST_ID, { type: "text-delta", requestId: REQUEST_ID, messageId: MESSAGE_ID, text: "before " });
+
+    first.unmount();
+    expect(h.removeListener).not.toHaveBeenCalled();
+    expect(h.stop).not.toHaveBeenCalled();
+    await emitAsync(h, REQUEST_ID, { type: "text-delta", requestId: REQUEST_ID, messageId: MESSAGE_ID, text: "after" });
+
+    const resumed = renderHook(() => useChatStream(h.api.chat, PROJECT_ID, CONVERSATION_ID));
+    expect(resumed.result.current.messages.at(-1)?.content).toBe("before after");
+    expect(resumed.result.current.state).toBe("streaming");
+    expect(resumed.result.current.canSend).toBe(false);
+    expect(h.subscribe).toHaveBeenCalledTimes(1);
+    await act(async () => { await resumed.result.current.stop(); });
+    expect(h.stop).toHaveBeenCalledWith({ projectId: PROJECT_ID, requestId: REQUEST_ID });
+  });
+
+  it.each(["completed", "failed", "cancelled"] as const)("reconciles %s while unmounted and releases the IPC subscription", async (type) => {
+    const h = createApi();
+    h.send.mockResolvedValue(makeOk(REQUEST_ID, MESSAGE_ID));
+    const first = renderHook(() => useChatStream(h.api.chat, PROJECT_ID, CONVERSATION_ID));
+    await act(async () => { await first.result.current.send("q"); });
+    first.unmount();
+    const message = makeMessage({ state: type, content: "background answer", replyToMessageId: "persisted-user", errorCode: type === "failed" ? "NETWORK" : null });
+    await emitAsync(h, REQUEST_ID, type === "failed"
+      ? { type, requestId: REQUEST_ID, messageId: MESSAGE_ID, message, error: { code: "NETWORK", messageKey: "errors.network", recoverable: true } }
+      : { type, requestId: REQUEST_ID, messageId: MESSAGE_ID, message });
+
+    const resumed = renderHook(() => useChatStream(h.api.chat, PROJECT_ID, CONVERSATION_ID));
+    expect(resumed.result.current.messages.at(-1)).toMatchObject(message);
+    expect(resumed.result.current.messages[0]).toMatchObject({ id: "persisted-user", content: "q" });
+    expect(resumed.result.current.canSend).toBe(true);
+    expect(resumed.result.current.state).toBe(type === "failed" ? "failed" : "idle");
+    expect(h.removeListener).toHaveBeenCalledTimes(1);
+  });
+
+  it("allows independent turns in another project or conversation and stops only the visible turn", async () => {
+    const h = createApi();
+    const requestIds = [REQUEST_ID, "44444444-4444-4444-8444-444444444444", "55555555-5555-4555-8555-555555555555"];
+    vi.stubGlobal("crypto", { randomUUID: vi.fn().mockImplementation(() => requestIds.shift()) });
+    h.send.mockImplementation(async (input) => makeOk(input.requestId, input.question));
+    const { result, rerender } = renderHook(
+      ({ projectId, conversationId }) => useChatStream(h.api.chat, projectId, conversationId),
+      { initialProps: { projectId: PROJECT_ID, conversationId: CONVERSATION_ID } }
+    );
+    await act(async () => { await result.current.send("first"); });
+    rerender({ projectId: PROJECT_ID, conversationId: "new-conversation" });
+    expect(result.current.canSend).toBe(true);
+    await act(async () => { expect(await result.current.send("second")).toBe(true); });
+    rerender({ projectId: "other-project", conversationId: CONVERSATION_ID });
+    expect(result.current.messages).toEqual([]);
+    await act(async () => { expect(await result.current.send("third")).toBe(true); });
+
+    const [first, second, third] = h.send.mock.calls.map(([input]) => input);
+    await emitAsync(h, first!.requestId, { type: "text-delta", requestId: first!.requestId, messageId: "first", text: "answer one" });
+    await emitAsync(h, second!.requestId, { type: "text-delta", requestId: second!.requestId, messageId: "second", text: "answer two" });
+    expect(result.current.messages.at(-1)?.content).toBe("");
+    await act(async () => { await result.current.stop(); });
+    expect(h.stop).toHaveBeenCalledExactlyOnceWith({ projectId: "other-project", requestId: third!.requestId });
+
+    rerender({ projectId: PROJECT_ID, conversationId: CONVERSATION_ID });
+    expect(result.current.messages.at(-1)?.content).toBe("answer one");
+    expect(result.current.state).toBe("streaming");
+    rerender({ projectId: PROJECT_ID, conversationId: "new-conversation" });
+    expect(result.current.messages.at(-1)?.content).toBe("answer two");
+    expect(result.current.state).toBe("streaming");
+  });
+
+  it("does not let a late invoke response replace a newer turn in the same conversation", async () => {
+    const h = createApi();
+    const nextRequestId = "44444444-4444-4444-8444-444444444444";
+    vi.stubGlobal("crypto", { randomUUID: vi.fn().mockReturnValueOnce(REQUEST_ID).mockReturnValueOnce(nextRequestId) });
+    let release!: (value: ReturnType<typeof makeOk>) => void;
+    h.send.mockReturnValueOnce(new Promise((resolve) => { release = resolve; })).mockResolvedValueOnce(makeOk(nextRequestId, "next-answer"));
+    const { result } = renderHook(() => useChatStream(h.api.chat, PROJECT_ID, CONVERSATION_ID));
+    let firstSend!: Promise<boolean>;
+    await act(async () => { firstSend = result.current.send("first"); });
+    await emitAsync(h, REQUEST_ID, { type: "completed", requestId: REQUEST_ID, messageId: MESSAGE_ID, message: makeMessage({ content: "first answer", replyToMessageId: "first-user" }) });
+    await act(async () => { await result.current.send("second"); });
+    await act(async () => { release(makeOk(REQUEST_ID, MESSAGE_ID)); await firstSend; });
+    expect(result.current.streamingMessageId).toBe("next-answer");
+    expect(result.current.state).toBe("streaming");
+    await emitAsync(h, nextRequestId, { type: "text-delta", requestId: nextRequestId, messageId: "next-answer", text: "second answer" });
+    expect(result.current.messages.at(-1)?.content).toBe("second answer");
+  });
+
+  it("keeps a completed background answer when a stale transcript read returns a streaming draft", async () => {
+    const h = createApi();
+    h.send.mockResolvedValue(makeOk(REQUEST_ID, MESSAGE_ID));
+    const first = renderHook(() => useChatStream(h.api.chat, PROJECT_ID, CONVERSATION_ID));
+    await act(async () => { await first.result.current.send("q"); });
+    first.unmount();
+    const completed = makeMessage({ content: "finished in background", replyToMessageId: "persisted-user" });
+    await emitAsync(h, REQUEST_ID, { type: "completed", requestId: REQUEST_ID, messageId: MESSAGE_ID, message: completed });
+    const { result, rerender } = renderHook(
+      ({ messages }) => useChatStream(h.api.chat, PROJECT_ID, CONVERSATION_ID, messages),
+      { initialProps: { messages: [] as MessageDto[] } }
+    );
+    rerender({ messages: [makeMessage({ ...completed, state: "streaming", content: "" })] });
+    expect(result.current.messages.at(-1)).toEqual(completed);
+    expect(result.current.state).toBe("idle");
+  });
+
+  it("preserves an interrupted continuation across unmount and repairs it through continue", async () => {
+    const h = createApi();
+    const continueRequest = vi.fn<DesktopApi["chat"]["continue"]>().mockImplementation(async (input) => makeOk(input.requestId, MESSAGE_ID));
+    h.api.chat.continue = continueRequest;
+    const message = makeMessage({ content: "original answer", generation: {
+      revision: 1, status: "idle", finishKind: "length", outputTokenLimit: 1024, canContinue: true,
+      blockedReason: null, lastError: null, usageComplete: true
+    } });
+    const first = renderHook(() => useChatStream(h.api.chat, PROJECT_ID, CONVERSATION_ID, [message]));
+    await act(async () => { await first.result.current.continueGeneration(MESSAGE_ID, 1); });
+    first.unmount();
+    await emitAsync(h, REQUEST_ID, { type: "text-delta", requestId: REQUEST_ID, messageId: MESSAGE_ID, text: " extra", offset: message.content.length });
+    // A duplicate fragment must not be appended during a view change.
+    await emitAsync(h, REQUEST_ID, { type: "text-delta", requestId: REQUEST_ID, messageId: MESSAGE_ID, text: " extra", offset: message.content.length });
+    const resumed = renderHook(() => useChatStream(h.api.chat, PROJECT_ID, CONVERSATION_ID));
+    expect(resumed.result.current.messages[0]?.content).toBe("original answer extra");
+    const interrupted = { ...message, content: "original answer extra", generation: {
+      ...message.generation!, revision: 2, status: "interrupted" as const, lastError: "errors.network"
+    } };
+    await emitAsync(h, REQUEST_ID, { type: "failed", operation: "continue", requestId: REQUEST_ID, messageId: MESSAGE_ID, message: interrupted, error: { code: "NETWORK", messageKey: "errors.network", recoverable: true } });
+    expect(resumed.result.current.repairableMessageId).toBeNull();
+    expect(resumed.result.current.continuableMessageId).toBe(MESSAGE_ID);
+    await act(async () => { await resumed.result.current.repair(); });
+    expect(continueRequest).toHaveBeenLastCalledWith(expect.objectContaining({ messageId: MESSAGE_ID, expectedRevision: 2 }));
+    expect(h.regenerate).not.toHaveBeenCalled();
+  });
+
   it("removes an optimistic question when the main process rejects it before starting", async () => {
     const h = createApi();
     h.send.mockResolvedValue({ ok: false, error: { code: "VALIDATION", messageKey: "errors.generationOutputLimit", recoverable: true, details: { limitTokens: 4096 } } });

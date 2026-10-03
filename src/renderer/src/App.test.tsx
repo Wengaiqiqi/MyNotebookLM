@@ -2,9 +2,10 @@
 
 import React from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import App from "./App";
-import type { DesktopApi } from "../../shared/ipc";
+import type { ChatRequestEvent, DesktopApi } from "../../shared/ipc";
+import type { MessageDto } from "../../shared/chat";
 import type { ProjectDto } from "../../shared/projects";
 
 const projectId = "1a1a1111-1111-4111-8111-111111111111";
@@ -143,6 +144,54 @@ describe("App shell", () => {
 
     fireEvent.click(screen.getByRole("tab", { name: "研究" }));
     expect(await screen.findByLabelText("针对这个项目提问")).toBeTruthy();
+  });
+
+  it.each(["笔记", "转换", "设置", "其他项目"])("keeps the answer streaming when navigating to %s", async (destination) => {
+    const api = mockApi();
+    const otherProject = { ...project, id: "7a7a7777-7777-4777-8777-777777777777", name: "其他项目" };
+    vi.mocked(api.projects.list).mockResolvedValue([project, otherProject]);
+    const conversationId = "3a3a3333-3333-4333-8333-333333333333";
+    vi.mocked(api.conversations.list).mockImplementation(async (input) => ({ ok: true, value: input.projectId === projectId ? [{
+      id: conversationId, projectId, title: "流式对话", createdAt: "", updatedAt: "", deletedAt: null, archivedAt: null
+    }] : [] }));
+    let sink!: (event: ChatRequestEvent) => void;
+    let requestId = "";
+    const unsubscribe = vi.fn();
+    vi.mocked(api.chat.subscribe).mockImplementation((id, listener) => { requestId = id; sink = listener; return unsubscribe; });
+    vi.mocked(api.chat.send).mockImplementation(async (input) => ({ ok: true, value: { requestId: input.requestId, assistantMessageId: "live-answer" } }));
+    (window as unknown as { myNotebook: DesktopApi }).myNotebook = api;
+    render(<App />);
+    await screen.findByRole("button", { name: /流式对话/ });
+    fireEvent.change(screen.getByLabelText("针对这个项目提问"), { target: { value: "持续回答" } });
+    fireEvent.click(screen.getByRole("button", { name: "发送" }));
+    await waitFor(() => expect(api.chat.send).toHaveBeenCalledTimes(1));
+    await act(async () => { sink({ type: "text-delta", requestId, messageId: "live-answer", text: "切换前，" }); });
+
+    if (destination === "设置") fireEvent.click(screen.getByRole("button", { name: "设置" }));
+    else if (destination === "其他项目") fireEvent.click(document.querySelectorAll<HTMLButtonElement>(".project-item-btn")[1]!);
+    else fireEvent.click(screen.getByRole("tab", { name: destination }));
+    expect(screen.queryByText("切换前，")).toBeNull();
+    expect(unsubscribe).not.toHaveBeenCalled();
+    expect(api.chat.stop).not.toHaveBeenCalled();
+    await act(async () => { sink({ type: "text-delta", requestId, messageId: "live-answer", text: "后台继续。" }); });
+
+    if (destination === "设置") fireEvent.click(screen.getByRole("button", { name: "返回" }));
+    else if (destination === "其他项目") fireEvent.click(document.querySelectorAll<HTMLButtonElement>(".project-item-btn")[0]!);
+    else fireEvent.click(screen.getByRole("tab", { name: "研究" }));
+    expect(await screen.findByText("切换前，后台继续。")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "停止" })).toBeTruthy();
+    expect(api.chat.subscribe).toHaveBeenCalledTimes(1);
+
+    const completed: MessageDto = {
+      id: "live-answer", conversationId, sequence: 2, role: "assistant", content: "切换前，后台继续。已完成。",
+      state: "completed", replyToMessageId: "saved-question", supersedesMessageId: null, superseded: false,
+      provider: "openai", profileId: null, model: "test", usage: null, errorCode: null, completionReason: "stop",
+      createdAt: "", updatedAt: "", citations: []
+    };
+    await act(async () => { sink({ type: "completed", requestId, messageId: completed.id, message: completed }); });
+    expect(screen.getByText(completed.content)).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "停止" })).toBeNull();
+    expect(unsubscribe).toHaveBeenCalledTimes(1);
   });
 
   it("persists the selected language and theme", async () => {
