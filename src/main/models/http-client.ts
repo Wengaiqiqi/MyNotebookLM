@@ -125,6 +125,7 @@ export class ProviderHttpClient {
   async *sse<T>(baseUrl: string, endpoint: string, options: HttpRequestOptions): AsyncIterable<T> {
     const requested = await this.request(baseUrl, endpoint, options);
     let pending = "";
+    let lastRecordAt = Date.now();
     for await (const chunk of this.readChunks(requested)) {
       pending += chunk;
       const records = pending.split(/\r?\n\r?\n/);
@@ -133,9 +134,11 @@ export class ProviderHttpClient {
       for (const record of records) {
         if (Buffer.byteLength(record, "utf8") > MAX_EVENT_BYTES) throw new ProviderRequestError(classifyProviderError({ responseTooLarge: true }));
         const data = record.split(/\r?\n/).filter((line) => line.startsWith("data:")).map((line) => line.slice(5).trim()).join("\n");
+        if (data) lastRecordAt = Date.now();
         if (!data || data === "[DONE]") continue;
         yield this.parseRecord<T>(data);
       }
+      this.assertRecordsFlowing(lastRecordAt);
     }
     if (pending.trim()) {
       if (Buffer.byteLength(pending, "utf8") > MAX_EVENT_BYTES) throw new ProviderRequestError(classifyProviderError({ responseTooLarge: true }));
@@ -147,6 +150,7 @@ export class ProviderHttpClient {
   async *ndjson<T>(baseUrl: string, endpoint: string, options: HttpRequestOptions): AsyncIterable<T> {
     const requested = await this.request(baseUrl, endpoint, options);
     let pending = "";
+    let lastRecordAt = Date.now();
     for await (const chunk of this.readChunks(requested)) {
       pending += chunk;
       const lines = pending.split(/\r?\n/);
@@ -154,8 +158,11 @@ export class ProviderHttpClient {
       if (Buffer.byteLength(pending, "utf8") > MAX_EVENT_BYTES) throw new ProviderRequestError(classifyProviderError({ responseTooLarge: true }));
       for (const line of lines) {
         if (Buffer.byteLength(line, "utf8") > MAX_EVENT_BYTES) throw new ProviderRequestError(classifyProviderError({ responseTooLarge: true }));
-        if (line.trim()) yield this.parseRecord<T>(line);
+        if (!line.trim()) continue;
+        lastRecordAt = Date.now();
+        yield this.parseRecord<T>(line);
       }
+      this.assertRecordsFlowing(lastRecordAt);
     }
     if (pending.trim()) {
       if (Buffer.byteLength(pending, "utf8") > MAX_EVENT_BYTES) throw new ProviderRequestError(classifyProviderError({ responseTooLarge: true }));
@@ -176,8 +183,21 @@ export class ProviderHttpClient {
     if (options.signal.aborted) propagateCancel();
     else options.signal.addEventListener("abort", propagateCancel);
     const { signal: _callerSignal, maxResponseBytes, ...init } = options;
+    // A fetch that never observes its signal (stuck proxy setup, a session
+    // fetch that ignores aborts) must still give up at the deadline.
+    let abandon: (() => void) | undefined;
+    const abandoned = new Promise<never>((_, reject) => {
+      abandon = () => reject(new DOMException("aborted", "AbortError"));
+      controller.signal.addEventListener("abort", abandon, { once: true });
+    });
+    abandoned.catch(() => undefined);
     try {
-      const response = await this.fetchImpl(joinUrl(baseUrl, endpoint), { ...init, signal: controller.signal });
+      const pending = this.fetchImpl(joinUrl(baseUrl, endpoint), { ...init, signal: controller.signal });
+      const response = await Promise.race([pending, abandoned]).catch((reason: unknown) => {
+        // A response that shows up after we gave up must not hold its socket.
+        if (controller.signal.aborted) void pending.then((late) => late.body?.cancel(), () => undefined).catch(() => undefined);
+        throw reason;
+      });
       if (!response.ok) {
         // Chunked/error responses commonly omit Content-Length. The reader is
         // already bounded to 16 KiB, so always inspect the body before classifying.
@@ -195,6 +215,7 @@ export class ProviderHttpClient {
     } finally {
       clearTimeout(timer);
       options.signal.removeEventListener("abort", propagateCancel);
+      if (abandon) controller.signal.removeEventListener("abort", abandon);
     }
   }
 
@@ -260,6 +281,16 @@ export class ProviderHttpClient {
       if (!completed) void reader.cancel().catch(() => undefined);
       reader.releaseLock();
     }
+  }
+
+  /**
+   * The byte-level idle watchdog cannot see a stream kept open by keep-alive
+   * comments or blank lines while the model itself has stalled (directly or
+   * behind a proxy). Records are what count as progress, so a stream that
+   * only delivers filler for a whole idle window fails as a timeout.
+   */
+  private assertRecordsFlowing(lastRecordAt: number): void {
+    if (Date.now() - lastRecordAt > this.idleTimeoutMs) throw new ProviderRequestError(classifyProviderError({ timeout: true }));
   }
 
   private parseRecord<T>(record: string): T {
