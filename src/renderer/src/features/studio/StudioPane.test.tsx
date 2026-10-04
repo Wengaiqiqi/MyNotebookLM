@@ -133,14 +133,14 @@ describe("StudioPane", () => {
     fireEvent.click(await screen.findByRole("option", { name: "论文.pdf" }));
     fireEvent.click(screen.getByRole("button", { name: "生成思维导图" }));
     await screen.findByRole("button", { name: "取消" });
-    const percent = screen.getByRole("status").querySelector(".task-card-percent")!.textContent;
+    expect(screen.getByText("第 2/4 步")).toBeTruthy();
     first.unmount();
     const failed: TaskDto = { ...active, state: "failed", stage: "verifying", progress: 900,
       error: { code: "PROVIDER", messageKey: "errors.mindMapInvalidReferences", recoverable: true }, updatedAt: "2026-01-02T00:00:00.000Z" };
     vi.mocked(api.tasks!.list).mockResolvedValue([{ ...taskDto(), id: "unrelated", state: "running", progress: 200, updatedAt: "2026-01-03T00:00:00.000Z" }, failed]);
     const second = render(<StudioPane projectId={projectId} />);
     await screen.findByRole("alert");
-    expect(screen.getByRole("status").querySelector(".task-card-percent")!.textContent).toBe(percent);
+    expect(screen.getByText("第 3/4 步")).toBeTruthy();
     expect(screen.getByRole("button", { name: "规则" }).textContent).toContain("思维导图");
     expect(screen.getByRole("button", { name: "来源" }).textContent).toContain("已选 1 项");
     expect(screen.getByRole("alert").textContent).toContain("资料中不存在的引用编号");
@@ -148,7 +148,7 @@ describe("StudioPane", () => {
     second.unmount();
     render(<StudioPane projectId={projectId} />);
     await screen.findByRole("alert");
-    expect(screen.getByRole("status").querySelector(".task-card-percent")!.textContent).toBe(percent);
+    expect(screen.getByText("第 3/4 步")).toBeTruthy();
     expect(screen.getByRole("button", { name: "重试" })).toBeTruthy();
   });
 
@@ -219,25 +219,23 @@ describe("StudioPane", () => {
     expect(screen.queryByRole("status")).toBeNull();
   });
 
-  it("restores the running percentage and elapsed time after leaving the pane", async () => {
+  it("restores the running step and elapsed time after leaving the pane", async () => {
     vi.useFakeTimers();
     try {
       const api = mockApi();
-      const active: TaskDto = { ...taskDto(), id: "restored-progress", state: "running", progress: 400 };
+      const active: TaskDto = { ...taskDto(), id: "restored-progress", state: "running", stage: "generating", progress: 400 };
       vi.mocked(api.tasks!.list).mockResolvedValue([active]);
       const first = render(<StudioPane projectId={projectId} />);
       await act(async () => { await vi.advanceTimersByTimeAsync(0); });
       await act(async () => { vi.advanceTimersByTime(3_000); });
-      const percent = (): number => Number(screen.getByRole("status").querySelector(".task-card-percent")!.textContent!.replace("%", ""));
-      const before = percent();
+      expect(screen.getByText("第 3/4 步")).toBeTruthy();
       first.unmount();
       await act(async () => { vi.advanceTimersByTime(2_000); });
       render(<StudioPane projectId={projectId} />);
       await act(async () => { await vi.advanceTimersByTimeAsync(0); });
-      expect(percent()).toBe(before);
+      expect(screen.getByText("第 3/4 步")).toBeTruthy();
+      expect(screen.getByText("正在生成内容")).toBeTruthy();
       expect(screen.getByText("已用 5 秒")).toBeTruthy();
-      await act(async () => { vi.advanceTimersByTime(100); });
-      expect(percent()).toBeGreaterThanOrEqual(before);
     } finally { vi.useRealTimers(); }
   });
 
@@ -261,56 +259,55 @@ describe("StudioPane", () => {
     } finally { vi.useRealTimers(); }
   });
 
-  it("animates all four map stages at quiz speeds and preserves the displayed progress across navigation", async () => {
+  it("shows the actual map stage, measures only preparation, and never fakes generation progress", async () => {
     vi.useFakeTimers();
     try {
       const api = mockApi();
       let emit!: (task: TaskDto) => void;
       api.tasks!.subscribe = vi.fn((_id, listener) => { emit = listener; return () => undefined; });
-      const active: TaskDto = { ...taskDto(), id: "mindmap-progress", state: "running", stage: "preparing", progress: 150, transformationKind: "mind-map" };
+      const active: TaskDto = { ...taskDto(), id: "mindmap-progress", state: "running", stage: "preparing", progress: 225, transformationKind: "mind-map" };
       vi.mocked(api.tasks!.list).mockResolvedValue([active]);
       const first = render(<StudioPane projectId={projectId} />);
       await act(async () => { await vi.advanceTimersByTimeAsync(0); });
       const header = () => screen.getByRole("status").querySelector(".task-card-status strong")!.textContent;
+      const fill = () => (screen.getByRole("status").querySelector(".progress i") as HTMLElement).style.width;
+      const pulse = () => screen.getByRole("status").querySelector(".progress-step-pulse") as HTMLElement | null;
       expect(header()).toBe("准备导图资料");
-      expect(screen.getByText("0%")).toBeTruthy();
+      expect(screen.getByText("第 1/4 步")).toBeTruthy();
       expect(screen.getByRole("list", { name: "思维导图生成进度" })).toBeTruthy();
-      await act(async () => { vi.advanceTimersByTime(2000); });
-      expect(screen.getByText("10%")).toBeTruthy();
-      await act(async () => { emit({ ...active, stage: "generating", progress: 550 }); vi.advanceTimersByTime(2000); });
+      expect(screen.getByRole("status").querySelector(".task-card-percent")).toBeNull();
+      // Preparation reports a real fraction: half of the first quarter.
+      expect(fill()).toBe("12.5%");
+      expect(pulse()).toBeNull();
+      await act(async () => { emit({ ...active, stage: "generating", progress: 550 }); });
       expect(header()).toBe("生成节点与层级");
-      expect(screen.getByText("20%")).toBeTruthy();
-      await act(async () => { vi.advanceTimersByTime(1000); });
-      expect(screen.getByText("50%")).toBeTruthy();
-      await act(async () => { vi.advanceTimersByTime(1000); });
-      expect(screen.getByText("56%")).toBeTruthy();
-      await act(async () => { vi.advanceTimersByTime(60_000); });
-      expect(screen.getByText("80%")).toBeTruthy();
+      expect(screen.getByText("第 2/4 步")).toBeTruthy();
+      expect(fill()).toBe("25%");
+      expect(pulse()!.style.left).toBe("25%");
+      expect(pulse()!.style.width).toBe("25%");
+      // Waiting on the model does not move the bar toward later steps.
+      await act(async () => { vi.advanceTimersByTime(120_000); });
+      expect(fill()).toBe("25%");
       expect(header()).toBe("生成节点与层级");
       first.unmount();
       vi.mocked(api.tasks!.list).mockResolvedValue([{ ...active, stage: "generating", progress: 550 }]);
       render(<StudioPane projectId={projectId} />);
       await act(async () => { await vi.advanceTimersByTimeAsync(0); });
-      expect(screen.getByText("80%")).toBeTruthy();
+      expect(screen.getByText("第 2/4 步")).toBeTruthy();
       await act(async () => { emit({ ...active, stage: "verifying", progress: 900 }); });
       expect(header()).toBe("校验结构与引用");
-      await act(async () => { vi.advanceTimersByTime(1000); });
-      expect(screen.getByText("81%")).toBeTruthy();
-      await act(async () => { vi.advanceTimersByTime(60_000); });
-      expect(screen.getByText("95%")).toBeTruthy();
-      expect(header()).toBe("校验结构与引用");
+      expect(fill()).toBe("50%");
       await act(async () => { emit({ ...active, stage: "saving", progress: 980 }); });
       expect(header()).toBe("保存思维导图");
-      await act(async () => { vi.advanceTimersByTime(1000); });
-      expect(screen.getByText("96%")).toBeTruthy();
-      await act(async () => { vi.advanceTimersByTime(60_000); });
-      expect(screen.getByText("99%")).toBeTruthy();
+      expect(fill()).toBe("75%");
       await act(async () => { emit({ ...active, stage: "saving", state: "completed", progress: 1000 }); });
       expect(screen.getByText("100%")).toBeTruthy();
+      expect(fill()).toBe("100%");
+      expect(pulse()).toBeNull();
     } finally { vi.useRealTimers(); }
   });
 
-  it("freezes a failed map at its animated percentage and restarts retry preparation from zero", async () => {
+  it("keeps a failed map on the step that failed and restarts retry from preparation", async () => {
     vi.useFakeTimers();
     try {
       const api = mockApi();
@@ -320,23 +317,20 @@ describe("StudioPane", () => {
       vi.mocked(api.tasks!.list).mockResolvedValue([active]);
       const first = render(<StudioPane projectId={projectId} />);
       await act(async () => { await vi.advanceTimersByTimeAsync(0); });
-      await act(async () => { vi.advanceTimersByTime(6000); });
-      expect(screen.getByText("28%")).toBeTruthy();
       const failed: TaskDto = { ...active, state: "failed", stage: "verifying", progress: 900, attempt: 1,
         error: { code: "PROVIDER", messageKey: "errors.mindMapInvalidReferences", recoverable: true }, updatedAt: "2026-01-02T00:00:00.000Z" };
       await act(async () => { emit(failed); });
-      await act(async () => { vi.advanceTimersByTime(10_000); });
-      expect(screen.getByText("28%")).toBeTruthy();
+      expect(screen.getByText("第 3/4 步")).toBeTruthy();
+      expect(screen.getByRole("status").querySelector(".progress-step-pulse")).toBeNull();
       first.unmount();
       vi.mocked(api.tasks!.list).mockResolvedValue([failed]);
       render(<StudioPane projectId={projectId} />);
       await act(async () => { await vi.advanceTimersByTimeAsync(0); });
-      expect(screen.getByText("28%")).toBeTruthy();
+      expect(screen.getByText("第 3/4 步")).toBeTruthy();
       vi.mocked(api.transformations!.retry).mockResolvedValue({ ok: true, value: { ...active, stage: "preparing", progress: 100, attempt: 1, updatedAt: "2026-01-03T00:00:00.000Z" } });
       await act(async () => { fireEvent.click(screen.getByRole("button", { name: "重试" })); });
-      expect(screen.getByText("0%")).toBeTruthy();
-      await act(async () => { vi.advanceTimersByTime(2000); });
-      expect(screen.getByText("10%")).toBeTruthy();
+      expect(screen.getByText("第 1/4 步")).toBeTruthy();
+      expect(screen.getByRole("status").querySelector(".task-card-status strong")!.textContent).toBe("准备导图资料");
     } finally { vi.useRealTimers(); }
   });
 
@@ -500,7 +494,7 @@ describe("StudioPane", () => {
     expect(progressFill.style.width).toBe("100%");
   });
 
-  it("climbs the percentage continuously and replaces the milestone label", async () => {
+  it("follows the reported text steps instead of a timed climb", async () => {
     vi.useFakeTimers();
     try {
       const api = mockApi();
@@ -508,53 +502,35 @@ describe("StudioPane", () => {
       api.tasks!.subscribe = vi.fn((_id, listener) => { emit = listener; return () => undefined; });
       vi.mocked(api.tasks!.list).mockResolvedValue([{ ...taskDto(), state: "running", stage: "preparing", progress: 0 }]);
       render(<StudioPane projectId={projectId} />);
-      // Flush the initial task list before touching the card.
       await act(async () => { await vi.advanceTimersByTimeAsync(0); });
       const fill = (): HTMLElement => screen.getByRole("status").querySelector(".progress i") as HTMLElement;
-      const percent = (): number => Number((screen.getByRole("status").querySelector(".task-card-percent") as HTMLElement).textContent!.replace("%", ""));
 
       expect(screen.getByText("准备资料")).toBeTruthy();
-      // Preparing takes 4s of visible climb toward 20%, even before the main
-      // process reports the first milestone.
-      await act(async () => { vi.advanceTimersByTime(4_000); });
-      expect(percent()).toBe(20);
-      expect(fill().style.width).toBe("20%");
-      // The copy replaces in place once the number reaches the milestone.
-      expect(screen.queryByText("准备资料")).toBeNull();
-      expect(screen.getByText("模型响应中")).toBeTruthy();
+      expect(screen.getByText("第 1/4 步")).toBeTruthy();
+      await act(async () => { vi.advanceTimersByTime(60_000); });
+      expect(screen.getByText("准备资料")).toBeTruthy();
+      expect(fill().style.width).toBe("0%");
 
-      // Model response in progress advances at 4% per second.
       await act(async () => { emit({ ...taskDto(), state: "running", stage: "generating", progress: 200, updatedAt: "2026-01-01T00:00:01.500Z" }); });
-      expect(percent()).toBe(20);
       expect(screen.getByText("模型响应中")).toBeTruthy();
-      await act(async () => { vi.advanceTimersByTime(2_500); });
-      expect(percent()).toBe(30);
+      expect(fill().style.width).toBe("25%");
 
-      // A real response changes the label immediately and catches up to 50%.
       await act(async () => { emit({ ...taskDto(), state: "running", stage: "generating", progress: 400, updatedAt: "2026-01-01T00:00:02.000Z" }); });
       expect(screen.getByText("正在生成内容")).toBeTruthy();
-      await act(async () => { vi.advanceTimersByTime(600); });
-      expect(percent()).toBe(48);
-      await act(async () => { vi.advanceTimersByTime(100); });
-      expect(percent()).toBe(50);
+      // A long generation stays on its step; it is not relabelled as saving.
+      await act(async () => { vi.advanceTimersByTime(120_000); });
+      expect(screen.getByText("正在生成内容")).toBeTruthy();
+      expect(screen.getByText("第 3/4 步")).toBeTruthy();
+      expect(fill().style.width).toBe("50%");
 
-      // At the visible 80%, the label and rate change without a backend update.
-      await act(async () => { vi.advanceTimersByTime(5_000); });
-      expect(percent()).toBe(80);
-      expect(screen.getByText("正在整理结果")).toBeTruthy();
-      await act(async () => { vi.advanceTimersByTime(1_000); });
-      expect(percent()).toBe(81);
-      await act(async () => { vi.advanceTimersByTime(18_000); });
-      expect(percent()).toBe(99);
-      await act(async () => { vi.advanceTimersByTime(60_000); });
-      expect(percent()).toBe(99);
       await act(async () => { emit({ ...taskDto(), state: "running", stage: "saving", progress: 800, updatedAt: "2026-01-01T00:00:03.000Z" }); });
-      expect(percent()).toBe(99);
       expect(screen.getByText("正在整理结果")).toBeTruthy();
+      expect(fill().style.width).toBe("75%");
       expect(fill().parentElement?.className).toContain("running");
 
       await act(async () => { emit({ ...taskDto(), state: "completed", progress: 1000, updatedAt: "2026-01-01T00:00:04.000Z" }); });
-      expect(percent()).toBe(100);
+      expect(screen.getByText("100%")).toBeTruthy();
+      expect(fill().style.width).toBe("100%");
     } finally {
       vi.useRealTimers();
     }

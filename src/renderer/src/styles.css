@@ -578,6 +578,9 @@ button:disabled { cursor: not-allowed; opacity: .5; }
   font-size: 11.5px; color: var(--ink-3); font-variant-numeric: tabular-nums;
 }
 .task-card-meta .task-card-percent { margin-left: 0; }
+.task-card-step {
+  font-size: 12px; font-weight: 600; font-variant-numeric: tabular-nums; color: var(--ink-2);
+}
 .task-card.is-completed .task-card-percent {
   color: var(--ok);
 }
@@ -619,6 +622,23 @@ button:disabled { cursor: not-allowed; opacity: .5; }
   0% { transform: translateX(-110%); }
   60% { transform: translateX(170%); }
   100% { transform: translateX(290%); }
+}
+/* Stepped bar: one segment per reported step, with gaps between segments.
+   The current step pulses when its own progress cannot be measured. */
+.progress.stepped.running::after {
+  content: ""; position: absolute; inset: 0; pointer-events: none;
+  background: repeating-linear-gradient(90deg, transparent 0 calc(100% / var(--steps) - 3px), var(--surface-2) calc(100% / var(--steps) - 3px) calc(100% / var(--steps)));
+}
+.progress-step-pulse {
+  position: absolute; top: 0; bottom: 0; border-radius: 999px;
+  background: var(--accent); animation: progress-step-pulse 1.6s ease-in-out infinite;
+}
+@keyframes progress-step-pulse {
+  0%, 100% { opacity: .18; }
+  50% { opacity: .55; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .progress-step-pulse { animation: none; opacity: .35; }
 }
 .progress.ok > i { background: var(--ok); }
 .progress.danger > i { background: var(--danger); }

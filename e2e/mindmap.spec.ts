@@ -130,7 +130,7 @@ test("generates a mind map, focuses nodes and preserves independent streaming ch
     await expect(page.getByRole("list", { name: "思维导图生成进度" })).toBeVisible();
     await expect(page.getByRole("alert")).toContainText("模型达到输出上限，转换尚未完成", { timeout: 15_000 });
     await expect(page.getByRole("alert")).toBeInViewport();
-    await expect(page.locator(".task-card-percent")).not.toHaveText("99%");
+    await expect(page.locator(".task-card-percent")).toHaveCount(0);
     await page.screenshot({ path: path.join(artifactDir, "map-output-limit.png") });
     await page.getByRole("tab", { name: "笔记", exact: true }).click();
     await page.getByRole("tab", { name: "转换", exact: true }).click();
@@ -139,17 +139,17 @@ test("generates a mind map, focuses nodes and preserves independent streaming ch
     await expect(page.getByRole("button", { name: "来源", exact: true })).toContainText("已选 2 项");
     await page.getByRole("button", { name: "重试", exact: true }).click();
     await expect(page.locator(".task-card-status strong")).toHaveText("生成节点与层级");
-    await expect(page.locator(".task-card-percent")).toHaveText("50%", { timeout: 15_000 });
+    await expect(page.locator(".task-card-step")).toHaveText("第 2/4 步", { timeout: 15_000 });
     await page.locator(".task-card").evaluate(async (el) => { await Promise.all(el.getAnimations().map((animation) => animation.finished)); });
     await page.screenshot({ path: path.join(artifactDir, "map-progress.png") });
     await page.getByRole("tab", { name: "笔记", exact: true }).click();
     await page.getByRole("tab", { name: "转换", exact: true }).click();
-    await expect(page.locator(".task-card-percent")).toHaveText("50%");
+    await expect(page.locator(".task-card-step")).toHaveText("第 2/4 步");
     await page.getByRole("button", { name: "设置", exact: true }).click();
     await page.getByRole("button", { name: "返回", exact: true }).click();
     await expect(page.getByRole("button", { name: "规则", exact: true })).toContainText("思维导图");
     await expect(page.getByRole("button", { name: "来源", exact: true })).toContainText("已选 2 项");
-    await expect(page.locator(".task-card-percent")).toHaveText("50%");
+    await expect(page.locator(".task-card-step")).toHaveText("第 2/4 步");
     await createProject(page, "其他项目");
     await page.getByRole("tab", { name: "转换", exact: true }).click();
     await expect(page.getByRole("button", { name: "规则", exact: true })).toContainText("摘要");
@@ -157,20 +157,20 @@ test("generates a mind map, focuses nodes and preserves independent streaming ch
     await page.locator(".project-item-btn").filter({ hasText: "导图功能验证" }).click();
     await page.getByRole("tab", { name: "转换", exact: true }).click();
     await expect(page.getByRole("button", { name: "来源", exact: true })).toContainText("已选 2 项");
-    await expect(page.locator(".task-card-percent")).toHaveText("50%");
+    await expect(page.locator(".task-card-step")).toHaveText("第 2/4 步");
     // A conversion started elsewhere must not take over this form's progress.
     const unrelated = await page.evaluate(async ({ projectId, revision }) =>
       (await (window as any).myNotebook.transformations.run({ projectId, sourceRevisionIds: [revision], builtinKey: "summary", language: "zh-CN", force: true })).value.id,
     { projectId, revision: revisions[0]! });
     await expect.poll(() => page.evaluate(async ({ projectId, id }) =>
       (await (window as any).myNotebook.tasks.list({ projectId })).find((task: any) => task.id === id)?.state, { projectId, id: unrelated })).toBe("completed");
-    await expect(page.locator(".task-card-percent")).toHaveText("50%");
+    await expect(page.locator(".task-card-step")).toHaveText("第 2/4 步");
     releaseMap();
     await expect(page.locator(".task-card-status strong")).toHaveText("校验结构与引用", { timeout: 10_000 });
-    await expect(page.locator(".task-card-percent")).toHaveText("95%", { timeout: 20_000 });
+    await expect(page.locator(".task-card-step")).toHaveText("第 3/4 步", { timeout: 20_000 });
     await page.getByRole("tab", { name: "研究", exact: true }).click();
     await page.getByRole("tab", { name: "转换", exact: true }).click();
-    await expect(page.locator(".task-card-percent")).toHaveText("95%");
+    await expect(page.locator(".task-card-step")).toHaveText("第 3/4 步");
     await page.screenshot({ path: path.join(artifactDir, "map-validation-repair.png") });
     releaseRepair();
     const open = page.getByRole("button", { name: "打开导图", exact: true });
