@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, Menu } from "electron";
+import { app, BrowserWindow, ipcMain, Menu, session } from "electron";
 import { randomUUID } from "node:crypto";
 import { mkdir } from "node:fs/promises";
 import path from "node:path";
@@ -40,6 +40,7 @@ import { createLocalModelManager, managedActiveDirectory, managedStagingDirector
 import { LocalEmbeddingProvider, canonicalLocalModelPath, createLocalDirectoryEmbeddingProvider, createTransformersEmbeddingRuntime, isAuthoritativeLocalCapability } from "./vector/local-embedding-provider";
 import { LOCAL_MODEL_MANIFEST } from "./vector/local-model-manifest";
 import { createModelProvider } from "./models/model-service";
+import { createProxyAwareFetch, installModelFetch, modelFetch } from "./network/model-fetch";
 import { BUILT_IN_LOCAL_EMBEDDING_PROFILE, isBuiltInLocalEmbeddingProfile } from "./models/local-embedding-profile";
 import { createEmbeddingProvider } from "./vector/embedding-provider";
 import { RetrievalService } from "./retrieval/retrieval-service";
@@ -117,6 +118,15 @@ app.whenReady().then(async () => {
     purgeOrphanProjectTrash(appPaths.files, liveProjects);
   } catch { /* fail closed; deletion recovery remains authoritative */ }
   const settingsRepository = new SettingsRepository(appDatabase.connection);
+  // Model requests use Chromium's network stack so they can honour the OS
+  // proxy; the URL importer keeps its own pinned-address client (SSRF guard).
+  const directSession = session.fromPartition("model-direct");
+  const directReady = directSession.setProxy({ mode: "direct" });
+  installModelFetch(createProxyAwareFetch({
+    getSettings: () => settingsRepository.getSettings(),
+    proxied: session.fromPartition("model-proxy"),
+    direct: async (input, init) => { await directReady; return directSession.fetch(input, init); }
+  }));
   const credentialStore = new CredentialStore(appDatabase.connection, new SafeStorageAdapter());
   const modelService = new ModelService(settingsRepository, credentialStore);
   taskFanout = createTaskUpdateFanout(() => BrowserWindow.getAllWindows() as any);
@@ -160,7 +170,7 @@ app.whenReady().then(async () => {
   await spaceService.recoverInterrupted();
   const localRuntime = createTransformersEmbeddingRuntime(appPaths.models, managedActiveDirectory(appPaths.models, LOCAL_MODEL_MANIFEST));
   const stagingRuntime = createTransformersEmbeddingRuntime(appPaths.models, managedStagingDirectory(appPaths.models, LOCAL_MODEL_MANIFEST));
-  const localManager = createLocalModelManager(appPaths.models, async (directory, signal) => localRuntime(directory, [], signal), fetch, async (directory, signal) => stagingRuntime(directory, [], signal));
+  const localManager = createLocalModelManager(appPaths.models, async (directory, signal) => localRuntime(directory, [], signal), modelFetch, async (directory, signal) => stagingRuntime(directory, [], signal));
   const localEmbeddingProvider = new LocalEmbeddingProvider(localManager, localRuntime);
   const createProviderForSpace = async (row: { provider: string; model_id: string; model_revision: string; dimension?: number; distance?: string; pooling?: string; preprocess_version?: string; chunking_version?: string; fingerprint?: string }, space: { id: string; dimension: number }) => {
     const profile = row.provider === "local"

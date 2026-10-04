@@ -46,7 +46,10 @@ describe("SettingsRepository", () => {
     expect(repository.getSettings()).toEqual({
       onboardingCompleted: false,
       locale: "zh-CN",
-      theme: "light"
+      theme: "light",
+      proxyMode: "system",
+      proxyUrl: "",
+      proxyBypass: ""
     });
 
     expect(repository.updateSettings({
@@ -54,6 +57,15 @@ describe("SettingsRepository", () => {
       locale: "en",
       theme: "dark"
     })).toMatchObject({ onboardingCompleted: true, locale: "en", theme: "dark" });
+  });
+
+  it("persists proxy settings and rejects manual mode without an address", () => {
+    expect(() => repository.updateSettings({ proxyMode: "manual" })).toThrow();
+    expect(() => repository.updateSettings({ proxyUrl: "127.0.0.1:7890" })).toThrow();
+    expect(repository.updateSettings({ proxyMode: "manual", proxyUrl: " socks5://127.0.0.1:7891 ", proxyBypass: "api.deepseek.com" }))
+      .toMatchObject({ proxyMode: "manual", proxyUrl: "socks5://127.0.0.1:7891", proxyBypass: "api.deepseek.com" });
+    expect(() => repository.updateSettings({ proxyUrl: "" })).toThrow();
+    expect(repository.updateSettings({ proxyMode: "direct" })).toMatchObject({ proxyMode: "direct", proxyUrl: "socks5://127.0.0.1:7891" });
   });
 
   it("creates, updates, lists, and deletes model profiles without duplicate IDs", () => {

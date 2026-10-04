@@ -145,6 +145,21 @@ const zhCN = {
     general: "通用",
     languageAppearance: "语言与外观",
     themeHint: "界面配色随主题即时切换",
+    network: {
+      title: "网络代理",
+      mode: "代理模式",
+      modes: { system: "跟随系统", direct: "直连", manual: "手动" },
+      modeHint: {
+        system: "使用系统代理设置；没设置代理时就是直连",
+        direct: "所有模型请求都不走代理",
+        manual: "所有模型请求走下面填写的代理"
+      },
+      proxyUrl: "代理地址",
+      proxyUrlHint: "例如 http://127.0.0.1:7890 或 socks5://127.0.0.1:7890",
+      proxyUrlInvalid: "请填写 http://、https://、socks4:// 或 socks5:// 开头的地址和端口",
+      bypass: "不走代理的地址",
+      bypassHint: "国内模型服务或局域网模型服务的域名，用逗号或换行分隔，支持 *.example.com。本机和局域网 IP 总是直连。"
+    },
     modelServices: "模型服务",
     dataIndex: "数据与索引",
     loadError: "无法加载模型设置，请检查应用连接后重试。"

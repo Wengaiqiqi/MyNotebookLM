@@ -5,6 +5,7 @@ import { ProviderHttpClient, ProviderRequestError } from "./http-client";
 import { classifyProviderError } from "./provider-errors";
 import { RoutedGenerationError } from "./routed-generation";
 import { discoverSpeechVoices } from "./speech-voices";
+import { modelFetch } from "../network/model-fetch";
 
 export const MAX_AUDIO_BYTES = 64 * 1024 * 1024;
 export const podcastScriptSchema = z.object({
@@ -74,7 +75,7 @@ export async function synthesizeSpeech(profile: Pick<ModelProfileInput, "provide
     if (choices.length < 2) throw new RoutedGenerationError({ code: "VALIDATION", messageKey: "errors.podcastVoicesRequired", recoverable: true });
     selectedVoices = { A: choices[0]!.id, B: choices[1]!.id };
   }
-  const client = new ProviderHttpClient(fetch, { timeoutMs: 120_000, idleTimeoutMs: 180_000, maxResponseBytes: MAX_AUDIO_BYTES });
+  const client = new ProviderHttpClient(modelFetch, { timeoutMs: 120_000, idleTimeoutMs: 180_000, maxResponseBytes: MAX_AUDIO_BYTES });
   const headers = new Headers({ "content-type": "application/json" });
   if (profile.provider === "gemini") {
     if (apiKey) headers.set("x-goog-api-key", apiKey);

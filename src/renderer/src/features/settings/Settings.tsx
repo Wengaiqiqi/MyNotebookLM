@@ -16,6 +16,7 @@ import RoundedSelect from "../../ui/RoundedSelect";
 import Modal, { DialogHead } from "../../ui/Modal";
 import { toast } from "../../ui/Toast";
 import IndexPanel from "./IndexPanel";
+import NetworkSettings from "./NetworkSettings";
 import type { AppLanguage, AppTheme } from "../../i18n";
 
 type Section = "general" | "models" | "routes" | "index";
@@ -176,6 +177,7 @@ export default function Settings({ projectId, language, theme, initialModelProfi
                     </div>
                   </div>
                 </div>
+                <NetworkSettings />
               </>
             )}
 

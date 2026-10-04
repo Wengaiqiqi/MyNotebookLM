@@ -145,6 +145,21 @@ const en = {
     general: "General",
     languageAppearance: "Language & appearance",
     themeHint: "The interface switches instantly with the theme",
+    network: {
+      title: "Network proxy",
+      mode: "Proxy mode",
+      modes: { system: "System", direct: "Direct", manual: "Manual" },
+      modeHint: {
+        system: "Use the system proxy settings; direct when none is set",
+        direct: "Model requests never use a proxy",
+        manual: "Model requests use the proxy below"
+      },
+      proxyUrl: "Proxy address",
+      proxyUrlHint: "For example http://127.0.0.1:7890 or socks5://127.0.0.1:7890",
+      proxyUrlInvalid: "Enter an http://, https://, socks4:// or socks5:// address with a port",
+      bypass: "Connect directly to",
+      bypassHint: "Domains of local-region or LAN model services, separated by commas or new lines; *.example.com works. Localhost and LAN IPs always connect directly."
+    },
     modelServices: "Model services",
     dataIndex: "Data & index",
     loadError: "Unable to load model settings. Check the app connection and retry."

@@ -53,7 +53,10 @@ class FakeSettingsRepository {
   settings: AppSettingsDto = {
     onboardingCompleted: false,
     locale: "zh-CN",
-    theme: "light"
+    theme: "light",
+    proxyMode: "system",
+    proxyUrl: "",
+    proxyBypass: ""
   };
   readonly profiles = new Map<string, ModelProfileDto>();
   readonly routes = new Map<ModelTaskKind, ModelRouteDto[]>();
@@ -72,7 +75,10 @@ class FakeSettingsRepository {
     this.settings = {
       onboardingCompleted: input.onboardingCompleted ?? this.settings.onboardingCompleted,
       locale: input.locale ?? this.settings.locale,
-      theme: input.theme ?? this.settings.theme
+      theme: input.theme ?? this.settings.theme,
+      proxyMode: input.proxyMode ?? this.settings.proxyMode,
+      proxyUrl: input.proxyUrl ?? this.settings.proxyUrl,
+      proxyBypass: input.proxyBypass ?? this.settings.proxyBypass
     };
     return this.settings;
   }
@@ -359,11 +365,11 @@ describe("ModelService", () => {
 
     await expect(service.getSettings()).resolves.toEqual({
       ok: true,
-      value: { onboardingCompleted: false, locale: "zh-CN", theme: "light" }
+      value: { onboardingCompleted: false, locale: "zh-CN", theme: "light", proxyMode: "system", proxyUrl: "", proxyBypass: "" }
     });
     await expect(service.updateSettings({ locale: "en", theme: "dark" })).resolves.toEqual({
       ok: true,
-      value: { onboardingCompleted: false, locale: "en", theme: "dark" }
+      value: { onboardingCompleted: false, locale: "en", theme: "dark", proxyMode: "system", proxyUrl: "", proxyBypass: "" }
     });
   });
 

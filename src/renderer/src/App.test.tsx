@@ -27,8 +27,8 @@ function mockApi(overrides: {
   const ok = <T,>(value: T) => ({ ok: true as const, value });
   return {
     settings: {
-      get: vi.fn(async () => ok({ onboardingCompleted: overrides.onboardingCompleted ?? true, locale: "zh-CN", theme: "light" })),
-      update: vi.fn(async () => ok({ onboardingCompleted: true, locale: "zh-CN", theme: "light" }))
+      get: vi.fn(async () => ok({ onboardingCompleted: overrides.onboardingCompleted ?? true, locale: "zh-CN", theme: "light", proxyMode: "system", proxyUrl: "", proxyBypass: "" })),
+      update: vi.fn(async () => ok({ onboardingCompleted: true, locale: "zh-CN", theme: "light", proxyMode: "system", proxyUrl: "", proxyBypass: "" }))
     },
     projects: {
       list: vi.fn(async () => [project]),

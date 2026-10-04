@@ -1,6 +1,7 @@
 import { speechVoiceDescriptorSchema, type ModelProfileInput, type SpeechVoiceDescriptor } from "../../shared/models";
 import { ProviderHttpClient, ProviderRequestError } from "./http-client";
 import { classifyProviderError } from "./provider-errors";
+import { modelFetch } from "../network/model-fetch";
 
 type VoicePage = { voices?: unknown; next_page_token?: string; nextPageToken?: string };
 
@@ -29,7 +30,7 @@ function readVoices(response: unknown): SpeechVoiceDescriptor[] {
 
 /** Fetch catalogs using the configured connection; never send credentials to documentation sites. */
 export async function discoverSpeechVoices(profile: Pick<ModelProfileInput, "provider" | "baseUrl" | "modelId">, apiKey: string | undefined, signal: AbortSignal): Promise<SpeechVoiceDescriptor[]> {
-  const client = new ProviderHttpClient(fetch, { timeoutMs: 10_000, idleTimeoutMs: 10_000, maxResponseBytes: 2 * 1024 * 1024 });
+  const client = new ProviderHttpClient(modelFetch, { timeoutMs: 10_000, idleTimeoutMs: 10_000, maxResponseBytes: 2 * 1024 * 1024 });
   const headers = new Headers();
   if (apiKey) headers.set(profile.provider === "gemini" ? "x-goog-api-key" : "authorization", profile.provider === "gemini" ? apiKey : `Bearer ${apiKey}`);
   if (profile.provider === "gemini") {

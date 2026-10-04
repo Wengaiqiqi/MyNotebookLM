@@ -30,6 +30,9 @@ type SettingsRow = {
   onboarding_completed: 0 | 1;
   locale: string;
   theme: string;
+  proxy_mode: string;
+  proxy_url: string;
+  proxy_bypass: string;
 };
 
 type ProfileRow = {
@@ -69,7 +72,10 @@ function toSettings(row: SettingsRow): AppSettingsDto {
   return appSettingsDtoSchema.parse({
     onboardingCompleted: row.onboarding_completed === 1,
     locale: row.locale,
-    theme: row.theme
+    theme: row.theme,
+    proxyMode: row.proxy_mode,
+    proxyUrl: row.proxy_url,
+    proxyBypass: row.proxy_bypass
   });
 }
 
@@ -126,7 +132,7 @@ export class SettingsRepository {
 
   getSettings(): AppSettingsDto {
     const row = this.db.prepare(`
-      SELECT onboarding_completed, locale, theme
+      SELECT onboarding_completed, locale, theme, proxy_mode, proxy_url, proxy_bypass
       FROM app_settings
       WHERE id = 1
     `).get() as SettingsRow;
@@ -135,16 +141,20 @@ export class SettingsRepository {
 
   updateSettings(input: UpdateAppSettingsInput): AppSettingsDto {
     const parsed = updateAppSettingsInputSchema.parse(input);
-    const current = this.getSettings();
+    const next = appSettingsDtoSchema.parse({ ...this.getSettings(), ...parsed });
     this.db.prepare(`
       UPDATE app_settings
       SET onboarding_completed = ?, locale = ?, theme = ?,
+          proxy_mode = ?, proxy_url = ?, proxy_bypass = ?,
           updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
       WHERE id = 1
     `).run(
-      (parsed.onboardingCompleted ?? current.onboardingCompleted) ? 1 : 0,
-      parsed.locale ?? current.locale,
-      parsed.theme ?? current.theme
+      next.onboardingCompleted ? 1 : 0,
+      next.locale,
+      next.theme,
+      next.proxyMode,
+      next.proxyUrl,
+      next.proxyBypass
     );
     return this.getSettings();
   }
