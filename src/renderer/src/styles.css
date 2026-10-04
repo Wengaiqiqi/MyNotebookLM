@@ -1659,10 +1659,10 @@ button:disabled { cursor: not-allowed; opacity: .5; }
 .mindmap-canvas .map-container me-parent { padding-top: 3px; padding-bottom: 3px; }
 .mindmap-canvas .map-container me-tpc { max-width: 260px; white-space: normal; line-height: 1.55; border: 1px solid var(--line); border-radius: 10px; background: var(--surface-2); padding: 8px 18px; font-family: var(--font-ui); transition: opacity .18s; cursor: pointer; }
 .mindmap-canvas .map-container me-root me-tpc { border: 0; padding: 14px 24px; box-shadow: var(--shadow-1); max-width: 275px; background: var(--accent); color: var(--accent-ink); }
-.mindmap-canvas .map-container me-main > me-wrapper > me-parent > me-tpc { border-color: color-mix(in srgb, var(--accent) 28%, var(--line)); padding: 10px 24px; }
+.mindmap-canvas .map-container me-main > me-wrapper > me-parent > me-tpc { border-color: color-mix(in srgb, var(--accent) 28%, var(--line)); padding: 10px 24px; background: var(--accent-soft); color: var(--accent); }
 .mindmap-canvas .map-container me-tpc.mm-dim { opacity: .28; }
-.mindmap-canvas .map-container me-tpc.mm-active { outline: 2px solid var(--accent); outline-offset: 1px; background: var(--accent-soft); }
-.mindmap-canvas .map-container me-root me-tpc.mm-active { background: var(--accent); }
+.mindmap-canvas .map-container me-tpc.mm-active { outline: 2px solid var(--accent); outline-offset: 1px; background: var(--accent-soft); color: var(--accent); }
+.mindmap-canvas .map-container me-root me-tpc.mm-active { background: var(--accent); color: var(--accent-ink); }
 .mindmap-canvas .map-container me-tpc:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
 .mindmap-focus { position: absolute; left: 16px; top: 16px; max-width: calc(100% - 32px); display: flex; align-items: center; gap: 8px; padding: 8px 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); box-shadow: var(--shadow-1); color: var(--accent); font-size: 12px; }
 .mindmap-focus span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
