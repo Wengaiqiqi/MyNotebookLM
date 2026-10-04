@@ -28,6 +28,16 @@ describe("mind map model output", () => {
     expect(map.root.refs).toEqual(["chunk-a"]);
     expect(() => normalizeMindMapOutput('{"root":{"title":"A"}}\n{"root":{"title":"B"}}', new Set())).toThrow(/exactly one/);
   });
+  it("repairs the JSON mistakes models make when copying Word text", () => {
+    const raw = '<think>先看{资料}</think>\n{"root":{"title":"项目"概览"","summary":"第一行\n第二行\t表格单元",' +
+      '"keyPoints":["要点一",],"refs":["chunk-a"],"children":[{\u201ctitle\u201d:\u201c风险\u201d,"refs":[],}],}}';
+    const map = normalizeMindMapOutput(raw, new Set(["chunk-a"]));
+    expect(map.root).toMatchObject({ title: '项目"概览"', summary: "第一行\n第二行\t表格单元", keyPoints: ["要点一"], refs: ["chunk-a"] });
+    expect(map.root.children[0]!.title).toBe("风险");
+  });
+  it("never completes a truncated map", () => {
+    expect(() => normalizeMindMapOutput('{"root":{"title":"A","children":[{"title":"B"', new Set())).toThrow(/exactly one/);
+  });
   it("normalizes nullable optional fields, an unwrapped tree and verified UUID casing", () => {
     const id = "abcdefab-abcd-4abc-8abc-abcdefabcdef";
     const map = normalizeMindMapOutput(JSON.stringify({ title: "Topic", summary: null, keyPoints: null, children: null,
