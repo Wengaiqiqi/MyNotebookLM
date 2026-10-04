@@ -133,11 +133,35 @@ function modelJson(raw: string): unknown {
   throw new MindMapOutputError("json", "Return exactly one complete, valid JSON object, without commentary or multiple maps.");
 }
 
+/**
+ * Build the tree from a flat outline list ("1", "1.2", "1.2.1"). Models lose
+ * count of closing brackets in long nested JSON, but keep a flat list valid.
+ * A node whose parent is missing hangs under its nearest listed ancestor.
+ */
+function outlineTree(items: readonly unknown[]): unknown {
+  const byId = new Map<string, { children: unknown[] }>();
+  let root: { children: unknown[] } | undefined;
+  for (const item of items) {
+    if (!item || typeof item !== "object" || Array.isArray(item)) throw new MindMapOutputError("structure", "Every item in nodes must be a node object.");
+    const { id, ...fields } = item as Record<string, unknown>;
+    const node = { ...fields, children: [] as unknown[] };
+    const path = String(id ?? "").trim().replace(/\.$/, "");
+    let parent = path;
+    do parent = parent.replace(/\.?[^.]*$/, ""); while (parent && !byId.has(parent));
+    if (parent) byId.get(parent)!.children.push(node);
+    else if (root) root.children.push(node);
+    else root = node;
+    if (path) byId.set(path, node);
+  }
+  return root;
+}
+
 /** Validate model JSON and assign stable, application-owned IDs. Never accept HTML/styles/URLs. */
 export function normalizeMindMapOutput(raw: string, allowedRefs: ReadonlySet<string>): MindMapDocument {
   const parsed = modelJson(raw);
+  const flat = z.object({ nodes: z.array(z.unknown()).min(1) }).safeParse(parsed);
   const envelope = z.object({ root: z.unknown() }).safeParse(parsed);
-  const root = envelope.success && envelope.data.root !== undefined ? envelope.data.root : parsed;
+  const root = flat.success ? outlineTree(flat.data.nodes) : envelope.success && envelope.data.root !== undefined ? envelope.data.root : parsed;
   const uuidRefs = new Map([...allowedRefs].filter((ref) => /^[0-9a-f-]{36}$/i.test(ref)).map((ref) => [ref.toLowerCase(), ref]));
   let count = 0;
   const visit = (value: unknown, id: string, depth: number): MindMapNode => {

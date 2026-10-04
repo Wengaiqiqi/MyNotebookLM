@@ -35,6 +35,15 @@ describe("mind map model output", () => {
     expect(map.root).toMatchObject({ title: '项目"概览"', summary: "第一行\n第二行\t表格单元", keyPoints: ["要点一"], refs: ["chunk-a"] });
     expect(map.root.children[0]!.title).toBe("风险");
   });
+  it("builds the tree from a flat outline list, hanging orphans under their nearest ancestor", () => {
+    const map = normalizeMindMapOutput(JSON.stringify({ nodes: [
+      { id: "1", title: "简历", refs: ["chunk-a-0"] }, { id: "1.1", title: "教育", children: [{ title: "ignored" }] },
+      { id: "1.1.1", title: "课程" }, { id: "1.2", title: "实习" }, { id: "1.3.1", title: "孤儿" }, { id: "2", title: "荣誉" }
+    ] }), new Set(["chunk-a-0"]));
+    expect(map.root).toMatchObject({ title: "简历", refs: ["chunk-a-0"] });
+    expect(map.root.children.map((node) => node.title)).toEqual(["教育", "实习", "孤儿", "荣誉"]);
+    expect(map.root.children[0]!.children.map((node) => node.title)).toEqual(["课程"]);
+  });
   it("never completes a truncated map", () => {
     expect(() => normalizeMindMapOutput('{"root":{"title":"A","children":[{"title":"B"', new Set())).toThrow(/exactly one/);
   });
