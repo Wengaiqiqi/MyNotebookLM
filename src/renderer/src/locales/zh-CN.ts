@@ -205,6 +205,7 @@ const zhCN = {
     states: { healthy: "索引正常", unavailable: "索引不可用", corrupt: "索引需要修复", building: "正在建立索引", failed: "索引建立失败" }
   },
   errors: {
+    mindMapInvalid: "生成的思维导图格式不正确或引用无法核实，请重试或更换模型。",
     podcastRouteMissing: "请在设置 → 任务路由 → 播客中添加至少一个文字生成模型和一个 TTS 模型。",
     podcastScriptInvalid: "生成的播客对话稿格式不正确或不包含两位说话者，请重试或更换文字模型。",
     podcastSpeechUnsupported: "此提供商暂不支持播客语音合成，请使用 OpenAI、OpenAI 兼容或 Gemini 的 TTS 模型。",
@@ -251,6 +252,8 @@ const zhCN = {
     continueConflict: "这条回答已被其他请求更新，请刷新后重试。",
     continueSourceUnavailable: "原回答引用的资料版本已不可恢复，请重新生成。",
     contextBudgetExceeded: "当前上下文配置无法容纳系统指令和问题，请降低输出上限或提高上下文容量。",
+    transformationReductionFailed: "模型未能将全部资料提炼到上下文容量内。请提高上下文容量或更换模型后重试。",
+    transformationOutputIncomplete: "模型达到输出上限，转换尚未完成。请提高最大输出长度后重试。",
     generationOutputRejected: "服务商拒绝了本次输出长度设置，请降低最大输出长度后重试。",
     outputLimitReached: "已达到本次输出上限（{{limitTokens}} tokens），回答可能未完成。可继续生成、重新生成，或在编辑模型配置中提高最大输出长度。",
     modelRouteInconsistent: "已保存的模型路由不一致，请重新打开设置并保存两个模型。",
@@ -397,6 +400,15 @@ const zhCN = {
     research: "研究",
     studio: "转换",
     subtitle: "导入来源、提问并沉淀笔记"
+  },
+  mindmap: {
+    title: "思维导图", generate: "生成思维导图", open: "打开导图", nodeCount: "{{count}} 个节点",
+    metadata: "{{sources}} 个来源 · {{nodes}} 个节点", fit: "适应画布", collapseAll: "全部折叠", expandAll: "全部展开",
+    export: "导出", exportFailed: "导出失败，请重试。", focused: "已聚焦：{{name}}", exitFocus: "退出聚焦",
+    zoomIn: "放大", zoomOut: "缩小", resizePanel: "调整节点面板宽度", nodeDetails: "节点详情", nodeChat: "此节点问答",
+    description: "节点说明", noDescription: "此节点暂无补充说明。", keyPoints: "要点", evidence: "来源与原文片段",
+    referenceCount: "{{sources}} 个来源 · {{count}} 段引用", noReferences: "此节点暂无来源引用。", viewOriginal: "查看原文",
+    askNode: "围绕此节点提问", chatEmpty: "围绕选中的节点，继续探索你的问题。", chatPlaceholder: "围绕此节点提问，Enter 发送，Shift+Enter 换行…"
   },
   transformations: {
     podcastSynthetic: "AI 生成的双人对谈音频",

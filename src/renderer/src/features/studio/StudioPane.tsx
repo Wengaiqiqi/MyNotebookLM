@@ -13,6 +13,8 @@ import SafeMarkdown from "../../chat/SafeMarkdown";
 import QuizPanel from "./QuizPanel";
 import PodcastPlayer from "./PodcastPlayer";
 import PodcastVoices from "./PodcastVoices";
+import MindMapViewer, { downloadMindMap } from "./MindMapViewer";
+import { flattenMindMap, mindMapDocumentSchema } from "../../../../shared/mindmaps";
 import { advancePercent, advancePodcastPercent, progressCeiling, progressPhase } from "./progress-motion";
 import { useTaskFeed } from "../../hooks/useTaskFeed";
 import { errorText, formatDateTime, sourceReady } from "../../lib/format";
@@ -48,6 +50,8 @@ export default function StudioPane({ projectId }: { projectId: string }) {
   const [running, setRunning] = useState(false);
   const [voicesReady, setVoicesReady] = useState(false);
   const [detailInsight, setDetailInsight] = useState<InsightDto | null>(null);
+  const [mapInsightId, setMapInsightId] = useState<string | null>(null);
+  const closeMap = useCallback(() => setMapInsightId(null), []);
   const [submittedTasks, setSubmittedTasks] = useState<TaskDto[]>([]);
 
   const feedTasks = useTaskFeed(projectId, window.myNotebook.tasks?.subscribe, window.myNotebook.tasks?.list);
@@ -140,7 +144,7 @@ export default function StudioPane({ projectId }: { projectId: string }) {
         : target;
       const input = chosenRule
         ? { projectId, transformationId: chosenRule.id, force: true, ...payload }
-        : { projectId, builtinKey: ruleKey as "summary" | "key-points" | "qa" | "podcast", language, force: true, ...payload };
+        : { projectId, builtinKey: ruleKey as "summary" | "key-points" | "qa" | "podcast" | "mind-map", language, force: true, ...payload };
       return api.run(input).catch(() => undefined);
     }));
     const started = results.flatMap((result) => result?.ok ? [result.value] : []);
@@ -198,6 +202,7 @@ export default function StudioPane({ projectId }: { projectId: string }) {
     const result = await getApi().transformations.deleteInsight({ projectId, insightId });
     if (!result.ok) { toast.error(errorText(result, t)); return false; }
     setInsights((current) => current.filter((item) => item.id !== insightId));
+    if (mapInsightId === insightId) setMapInsightId(null);
     return true;
   }
 
@@ -343,7 +348,7 @@ export default function StudioPane({ projectId }: { projectId: string }) {
               disabled={Object.values(targetSelections).every((ids) => ids.length === 0) || running || retrying || (ruleKey === "podcast" && !voicesReady) || transformTask?.state === "running" || transformTask?.state === "queued" || (!chosenBuiltin && !chosenRule)}
             >
               {running ? <span className="spinner light" aria-hidden="true" /> : <Icon name="sparkle" />}
-              {t("transformations.run")}
+              {t(ruleKey === "mind-map" ? "mindmap.generate" : "transformations.run")}
             </button>
             {transformTask?.state === "failed" && (
               <button type="button" className="btn" disabled={retrying || running} onClick={() => void retryTask()}>
@@ -410,31 +415,42 @@ export default function StudioPane({ projectId }: { projectId: string }) {
               <span className="glyph" aria-hidden="true"><Icon name="sparkle" /></span>
               <p>{t("transformations.noInsights")}</p>
             </div>
-          ) : insights.filter((item) => item.builtinKey !== "qa").map((insight) => (
+          ) : insights.filter((item) => item.builtinKey !== "qa").map((insight) => {
+            const isMap = insight.builtinKey === "mind-map";
+            const parsed = isMap ? (() => { try { return mindMapDocumentSchema.safeParse(JSON.parse(insight.content)); } catch { return null; } })() : null;
+            const mapDocument = parsed?.success ? parsed.data : null;
+            const title = mapDocument?.root.title ?? insight.content.split("\n")[0]?.slice(0, 32) ?? t("transformations.insights");
+            return (
             <div className="insight-item" key={insight.id}>
               <div className="insight-item-head">
+                {isMap && <span className="badge mindmap-badge"><Icon name="mindmap" />{t("mindmap.title")}</span>}
                 {insight.model && <span className="badge neutral">{insight.model}</span>}
                 <small style={{ color: "var(--ink-3)" }}>{formatDateTime(insight.createdAt, language)}</small>
                 <span className="spacer" />
               </div>
-              <p>{insight.content}</p>
+              {isMap ? <div className="mindmap-result"><h3>{mapDocument?.root.title ?? t("mindmap.title")}</h3>
+                {mapDocument && <small>{t("mindmap.nodeCount", { count: flattenMindMap(mapDocument.root).length })}</small>}
+              </div> : <p>{insight.content}</p>}
               <div className="foot">
-                <button type="button" className="btn ghost sm" onClick={() => setDetailInsight(insight)}>
-                  <Icon name="open" />{t("transformations.viewDetails")}
+                <button type="button" className="btn ghost sm" onClick={() => isMap ? setMapInsightId(insight.id) : setDetailInsight(insight)}>
+                  <Icon name="open" />{t(isMap ? "mindmap.open" : "transformations.viewDetails")}
                 </button>
+                {mapDocument && <button type="button" className="btn ghost sm" onClick={() => downloadMindMap(new Blob([JSON.stringify(mapDocument, null, 2)], { type: "application/json" }), title, "json")}><Icon name="download" />{t("mindmap.export")}</button>}
                 <button type="button" className="btn ghost sm" onClick={() => void convertToNote(insight)}>
                   <Icon name="notes" />{t("transformations.convert")}
                 </button>
-                <button type="button" className="btn danger-soft sm" aria-label={`${t("common.delete")}: ${insight.content.split("\n")[0]?.slice(0, 32) ?? t("transformations.insights")}`} onClick={() => void deleteInsight(insight.id)}>
+                <button type="button" className="btn danger-soft sm" aria-label={`${t("common.delete")}: ${title}`} onClick={() => void deleteInsight(insight.id)}>
                   <Icon name="trash" />{t("common.delete")}
                 </button>
               </div>
             </div>
-          ))}
+          ); })}
         </div>
       </section>
 
       <QuizPanel key={projectId} projectId={projectId} insights={insights.filter((item) => item.projectId === projectId)} onDelete={deleteInsight} />
+
+      {mapInsightId && <MindMapViewer projectId={projectId} insightId={mapInsightId} onClose={closeMap} />}
 
       <Modal open={detailInsight !== null} wide onClose={() => setDetailInsight(null)} labelledBy="insight-detail-title">
         {detailInsight && (

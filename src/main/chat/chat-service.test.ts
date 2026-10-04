@@ -14,6 +14,7 @@ import { SettingsRepository } from "../settings/settings-repository";
 import { ModelRouter } from "../models/model-router";
 import { ModelService } from "../models/model-service";
 import type { CredentialStore } from "../credentials/credential-store";
+import { MindMapService, normalizeMindMapOutput } from "../notes/mindmap-service";
 
 const PROJECT_ID = "11111111-1111-4111-8111-111111111111";
 const USER_ID = "44444444-4444-4444-8444-444444444444";
@@ -141,6 +142,44 @@ function expectOk(result: Result<{ requestId: string; assistantMessageId: string
       { role: "user", state: "completed" },
       { role: "assistant", state: "completed" }
     ]);
+  });
+
+  it("grounds a node chat in its own evidence and keeps other node history out of the request", async () => {
+    const db = world.database.connection;
+    const task = "map-task", insight = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+    const document = normalizeMindMapOutput(JSON.stringify({ root: { title: "System", children: [
+      { title: "Memory", summary: "Layered memory", refs: [world.chunkId] }, { title: "Sandbox", summary: "Unrelated sandbox detail" }
+    ] } }), new Set([world.chunkId]));
+    db.prepare("INSERT INTO tasks(id,project_id,kind,state,stage) VALUES(?,?,'transformation','completed','saving')").run(task, PROJECT_ID);
+    db.prepare("INSERT INTO transformation_task_snapshots(task_id,project_id,input_kind,input_snapshot_json,input_hash,rule_id,rule_version,rendered_prompt_version,rendered_prompt,route_snapshot_json,request_json,idempotency_key) VALUES(?,?,'source',?,'h','builtin:mind-map:en',1,'v','p','{}','{}','map-k')")
+      .run(task, PROJECT_ID, JSON.stringify({ content: "input", revisionIds: ["aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"] }));
+    db.prepare("INSERT INTO insights(id,project_id,task_id,content,idempotency_key) VALUES(?,?,?,?,?)").run(insight, PROJECT_ID, task, JSON.stringify(document), "map-k");
+    const maps = new MindMapService(db);
+    const conversation = maps.conversation({ projectId: PROJECT_ID, insightId: insight, nodeId: "node-0-0" });
+    const other = maps.conversation({ projectId: PROJECT_ID, insightId: insight, nodeId: "node-0-1" });
+    world.repository.appendUserMessage({ projectId: PROJECT_ID, conversationId: other.id, id: "other-user", content: "Other node secret history", createdAt: AT });
+    const retrieval = vi.fn(async () => []);
+    let captured: GenerateRequest | undefined;
+    let generationCalls = 0;
+    const deps = baseDeps({ retrieval, providerFactory: () => ({ ...fakeProvider(), async *generate(request: GenerateRequest) {
+      captured = request;
+      generationCalls++;
+      yield { type: "text-delta", text: "Memory answer" };
+      yield { type: "done", finishReason: generationCalls === 1 ? "length" : "stop" };
+    } }) });
+    const svc = new ChatService(deps);
+    const result = expectOk(await svc.send({ requestId: REQUEST_ID, projectId: PROJECT_ID, conversationId: conversation.id, question: "Explain this" }, () => {}));
+    const text = JSON.stringify(captured?.messages);
+    expect(text).toContain("Layered memory"); expect(text).toContain("Evidence");
+    expect(text).not.toContain("Unrelated sandbox detail"); expect(text).not.toContain("Other node secret history");
+    expect(captured?.messages[0]?.content).toContain("one selected mind map node");
+    expect(retrieval).not.toHaveBeenCalled();
+    expect(world.repository.getMessage(PROJECT_ID, result.assistantMessageId)?.citations).toEqual([]);
+    const message = world.repository.getMessage(PROJECT_ID, result.assistantMessageId)!;
+    expectOk(await svc.continue({ requestId: crypto.randomUUID(), projectId: PROJECT_ID, conversationId: conversation.id, messageId: message.id, expectedRevision: message.generation!.revision }, () => {}));
+    expect(JSON.stringify(captured?.messages)).toContain("Evidence");
+    expect(world.repository.getMessage(PROJECT_ID, message.id)?.citations).toEqual([]);
+    expect(world.repository.listConversations(PROJECT_ID).map((item) => item.id)).toEqual([world.conversationId]);
   });
 
   it("pins an unfinished citation across continuation and refuses insufficient space", async () => {

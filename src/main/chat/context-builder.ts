@@ -99,7 +99,7 @@ function positiveInteger(value: number | undefined, fallback: number): number {
   return Math.min(value, MAX_SAFE_TOKEN_INPUT);
 }
 
-function computeBudget(input: { contextTokens?: number; outputTokens?: number; limits?: EffectiveGenerationLimits }, fixedTokens: number): TokenBudget {
+export function computeBudget(input: { contextTokens?: number; outputTokens?: number; limits?: EffectiveGenerationLimits }, fixedTokens: number): TokenBudget {
   const limits = input.limits;
   const contextTokens = positiveInteger(limits?.contextTokens ?? input.contextTokens, DEFAULT_CONTEXT_TOKENS);
   const requestedOutput = positiveInteger(limits?.outputTokens ?? input.outputTokens, DEFAULT_OUTPUT_TOKENS);
@@ -153,9 +153,10 @@ export function historyLoadBudgetTokens(input: {
   contextTokens?: number;
   outputTokens?: number;
   locale?: PromptLocale;
+  systemPrompt?: string;
   additionalMessages?: ChatTurn[];
 }): number {
-  const systemPrompt = buildSystemPrompt(input.locale ?? "en");
+  const systemPrompt = input.systemPrompt ?? buildSystemPrompt(input.locale ?? "en");
   const fixedTokens = messageCost({ role: "system", content: systemPrompt })
     + messageCost({ role: "user", content: input.question })
     + (input.additionalMessages ?? []).reduce((sum, message) => sum + messageCost(message), 0)
@@ -257,6 +258,7 @@ export function assembleContext(input: {
   historyPairs?: HistoryPair[];
   priorTurns?: ChatTurn[];
   locale?: PromptLocale;
+  systemPrompt?: string;
   contextTokens?: number;
   outputTokens?: number;
   limits?: EffectiveGenerationLimits;
@@ -266,7 +268,7 @@ export function assembleContext(input: {
   /** Labels the model already cited; they are required, not optional. */
   requiredLabels?: readonly string[];
 }): AssembledContext {
-  const systemPrompt = buildSystemPrompt(input.locale ?? "en");
+  const systemPrompt = input.systemPrompt ?? buildSystemPrompt(input.locale ?? "en");
   const additionalMessages = input.additionalMessages ?? [];
   const previousEvidence = input.frozenEvidence ?? [];
   const frozen = previousEvidence.filter((item) => input.requiredLabels === undefined || input.requiredLabels.includes(item.label));

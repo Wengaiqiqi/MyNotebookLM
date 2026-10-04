@@ -1,4 +1,5 @@
 import { z } from "zod";
+import type { MindMapDto, MindMapView } from "./mindmaps";
 import { conversationSchema, messageSchema } from "./chat";
 import type { ConversationDto, MessageDto } from "./chat";
 import type { CreateProjectInput, ProjectDto, ProjectIdInput, RenameProjectInput } from "./projects";
@@ -232,6 +233,12 @@ export type ChatRequestEventType = keyof typeof chatRequestEventSchemas;
 export type ChatRequestEvent = z.infer<(typeof chatRequestEventSchemas)[ChatRequestEventType]>;
 
 export interface DesktopApi {
+  mindmaps?: {
+    get(input: { projectId: string; insightId: string }): Promise<Result<MindMapDto>>;
+    saveView(input: { projectId: string; insightId: string; view: MindMapView }): Promise<Result<void>>;
+    conversation(input: { projectId: string; insightId: string; nodeId: string }): Promise<Result<ConversationDto>>;
+    openReference(input: { projectId: string; insightId: string; nodeId: string; chunkId: string }): Promise<Result<{ opened: "document" | "url" }>>;
+  };
   vector: { getHealth(input: VectorTaskInput): Promise<Result<VectorHealthDto>>; startMigration(input: VectorProfileInput): Promise<Result<TaskDto>>; rebuild(input: VectorSpaceInput): Promise<Result<TaskDto>>; optimize(input: VectorSpaceInput): Promise<Result<TaskDto>>; cancelTask(input: VectorTaskIdInput): Promise<Result<TaskDto>>; subscribe(projectId: string, listener: (task: TaskDto) => void): () => void; };
   retrieval: { search(input: RetrievalSearchInput): Promise<Result<SearchHitDto[]>> };
   sources?: { chooseFiles(input: { projectId: string }): Promise<string[] | null>; importFile(input: { projectId: string; dialogToken: string }): Promise<Result<SourceDto>>; importUrl(input: { projectId: string; url: string }): Promise<Result<SourceDto>>; list(input: { projectId: string }): Promise<SourceDto[]>; open(input: { projectId: string; sourceId: string }): Promise<Result<{ opened: "document" | "url" }>>; remove(input: { projectId: string; sourceId: string }): Promise<Result<void>>; retry(input: { projectId: string; sourceId: string }): Promise<Result<TaskDto>>; };

@@ -12,6 +12,9 @@ import { ModelRouter } from "../models/model-router";
 import { RoutedGeneration, RoutedGenerationError } from "../models/routed-generation";
 import { ProviderRequestError } from "../models/http-client";
 import { classifyProviderError } from "../models/provider-errors";
+import { MindMapService, nodeChatContext } from "./mindmap-service";
+import { mindMapViewSchema } from "../../shared/mindmaps";
+import { ConversationRepository } from "../chat/conversation-repository";
 
 const PROJECT = "11111111-1111-4111-8111-111111111111";
 const SOURCE = "22222222-2222-4222-8222-222222222222";
@@ -60,6 +63,54 @@ describe("TransformationService", () => {
   });
 
   afterEach(() => { db.close(); rmSync(root, { recursive: true, force: true }); });
+
+  it("generates a verified map and persists isolated node chats and browsing state", async () => {
+    let requestText = "";
+    baseDeps.generation = { generateRouted: async function* (_kind: any, request: any) {
+      requestText = JSON.stringify(request);
+      yield* successful(JSON.stringify({ root: { title: "研究", summary: "总览", refs: [CHUNK], children: [
+        { title: "记忆", summary: "记忆分层", refs: [CHUNK] }, { title: "权限", summary: "权限控制", refs: [] }
+      ] } }));
+    } };
+    service = new TransformationService(baseDeps);
+    const insight = await service.run({ projectId: PROJECT, builtinKey: "mind-map", language: "zh-CN", sourceRevisionId: REVISION });
+    expect(requestText).toContain(`[CHUNK:${CHUNK}]`);
+    expect(service.listInsights({ projectId: PROJECT })[0]?.builtinKey).toBe("mind-map");
+    const maps = new MindMapService(db.connection);
+    const map = maps.get({ projectId: PROJECT, insightId: insight.id });
+    expect(map).toMatchObject({ nodeCount: 3, sourceCount: 1, references: [{ chunkId: CHUNK, text: "source text" }] });
+    const first = maps.conversation({ projectId: PROJECT, insightId: insight.id, nodeId: "node-0-0" });
+    const other = maps.conversation({ projectId: PROJECT, insightId: insight.id, nodeId: "node-0-1" });
+    expect(first.id).not.toBe(other.id);
+    expect(new MindMapService(db.connection).conversation({ projectId: PROJECT, insightId: insight.id, nodeId: "node-0-0" }).id).toBe(first.id);
+    expect(new ConversationRepository(db.connection).listConversations(PROJECT)).toEqual([]);
+    expect(nodeChatContext(db.connection, PROJECT, first.id)).toMatchObject({ questionPrefix: expect.stringContaining("记忆分层"), retrieved: [{ text: "source text" }] });
+    expect(nodeChatContext(db.connection, PROJECT, other.id)?.retrieved).toEqual([]);
+    expect(() => maps.reference({ projectId: PROJECT, insightId: insight.id, nodeId: "node-0-1", chunkId: CHUNK })).toThrow(/not found/i);
+    expect(() => maps.get({ projectId: SOURCE, insightId: insight.id })).toThrow(/not found/i);
+    expect(() => maps.conversation({ projectId: PROJECT, insightId: insight.id, nodeId: "absent" })).toThrow(/not found/i);
+    const view = mindMapViewSchema.parse({ selectedNodeId: "node-0-0", tab: "chat", focused: true, scale: 1.4, panX: -120, collapsedIds: ["node-0-1"], panelWidth: 450 });
+    maps.saveView({ projectId: PROJECT, insightId: insight.id, view });
+    expect(new MindMapService(db.connection).get({ projectId: PROJECT, insightId: insight.id }).view).toEqual(view);
+    const note = service.convertToNote({ projectId: PROJECT, insightId: insight.id });
+    expect(note.body).toContain("## 记忆");
+    service.deleteInsight({ projectId: PROJECT, insightId: insight.id });
+    expect(db.connection.prepare("SELECT deleted_at FROM conversations WHERE id=?").get(first.id)).toMatchObject({ deleted_at: expect.any(String) });
+    expect(db.connection.prepare("SELECT * FROM mind_map_conversations").all()).toEqual([]);
+  });
+
+  it("fails malformed maps without saving an insight and retries the same saved input", async () => {
+    baseDeps.generation = { generateRouted: async function* () { yield* successful('{"root":{"title":"图","refs":["invented-reference"]}}'); } };
+    service = new TransformationService(baseDeps);
+    await expect(service.run({ projectId: PROJECT, builtinKey: "mind-map", language: "en", sourceRevisionId: REVISION })).rejects.toThrow();
+    expect(service.listInsights({ projectId: PROJECT })).toEqual([]);
+    const failedRow = db.connection.prepare("SELECT id FROM tasks WHERE state='failed'").get() as { id: string };
+    const failed = baseDeps.taskRepository.findById(failedRow.id);
+    expect(failed?.error?.messageKey).toBe("errors.mindMapInvalid");
+    baseDeps.generation = { generateRouted: async function* () { yield* successful(JSON.stringify({ root: { title: "Valid map", refs: [CHUNK] } })); } };
+    await new TransformationService(baseDeps).retry(failed.id);
+    expect(service.listInsights({ projectId: PROJECT })).toHaveLength(1);
+  });
 
   it("identifies persisted Q&A sets by the saved rule rather than content", async () => {
     const qa = await service.run({ projectId: PROJECT, builtinKey: "qa", language: "zh-CN", sourceRevisionId: REVISION });
@@ -197,14 +248,15 @@ describe("TransformationService", () => {
     expect(db.connection.prepare("SELECT state, attempt FROM tasks WHERE id = ?").get(task.id)).toEqual({ state: "queued", attempt: 0 });
   });
 
-  it("accepts note input and includes a visible budget marker", async () => {
-    db.connection.prepare("INSERT INTO notes(id, project_id, title, body) VALUES (?, ?, 'Note', ?)").run(NOTE, PROJECT, "word ".repeat(30_000));
+  it("keeps the entire long note in its durable snapshot without a truncation marker", async () => {
+    const body = "word ".repeat(30_000) + "important tail";
+    db.connection.prepare("INSERT INTO notes(id, project_id, title, body) VALUES (?, ?, 'Note', ?)").run(NOTE, PROJECT, body);
     const ruleId = "abababab-abab-4aba-8aba-abababababab";
     new TransformationRepository(db.connection).create({ id: ruleId, projectId: PROJECT, name: "Note rule", appliesTo: "note", prompt: "{{content}}" });
     const insight = await service.run({ projectId: PROJECT, transformationId: ruleId, language: "en", noteId: NOTE });
     const snapshot = db.connection.prepare("SELECT input_kind, input_snapshot_json FROM transformation_task_snapshots WHERE task_id = ?").get(insight.taskId) as { input_kind: string; input_snapshot_json: string };
     expect(snapshot.input_kind).toBe("note");
-    expect(JSON.parse(snapshot.input_snapshot_json).content).toContain("Content truncated");
+    expect(JSON.parse(snapshot.input_snapshot_json)).toMatchObject({ content: body, truncated: false });
   });
 
   it("keeps one durable task for a failed run and retries it", async () => {

@@ -1,9 +1,15 @@
 import { describe, expect, it } from "vitest";
 import { BUILTIN_TRANSFORMATIONS, listBuiltinTransformations } from "./builtin-transformations";
+import { transformationPromptSchema } from "../../shared/transformations";
 
 describe("built-in transformations", () => {
+  it("provides valid bilingual mind map templates with source provenance", () => {
+    const maps = listBuiltinTransformations().filter((rule) => rule.key === "mind-map");
+    expect(maps.map((rule) => rule.language)).toEqual(["zh-CN", "en"]);
+    for (const map of maps) { expect(transformationPromptSchema.safeParse(map.prompt).success).toBe(true); expect(map.prompt).toContain("[CHUNK:"); }
+  });
   it("contains immutable bilingual summary, key-points and Q&A descriptors", () => {
-    expect(listBuiltinTransformations().filter((rule) => rule.key !== "podcast")).toMatchInlineSnapshot(`
+    expect(listBuiltinTransformations().filter((rule) => rule.key !== "podcast" && rule.key !== "mind-map")).toMatchInlineSnapshot(`
       [
         {
           "appliesTo": "source",

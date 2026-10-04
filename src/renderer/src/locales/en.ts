@@ -205,6 +205,7 @@ const en = {
     states: { healthy: "Index healthy", unavailable: "Index unavailable", corrupt: "Index needs repair", building: "Building index", failed: "Index build failed" }
   },
   errors: {
+    mindMapInvalid: "The generated mind map is invalid or contains unverified references. Retry or choose another model.",
     podcastRouteMissing: "Add at least one text model and one TTS model in Settings → Task routing → Podcast.",
     podcastScriptInvalid: "The podcast script is invalid or does not include two speakers. Retry or choose another text model.",
     podcastSpeechUnsupported: "This provider does not support podcast speech synthesis. Use an OpenAI, OpenAI-compatible or Gemini TTS model.",
@@ -251,6 +252,8 @@ const en = {
     continueConflict: "This answer was updated by another request. Refresh and try again.",
     continueSourceUnavailable: "A source version used by the original answer is no longer recoverable. Please regenerate it.",
     contextBudgetExceeded: "The current context settings cannot fit the system instructions and question. Lower the output limit or increase context capacity.",
+    transformationReductionFailed: "The model could not condense all source material into its context capacity. Increase context capacity or choose another model and retry.",
+    transformationOutputIncomplete: "The model reached its output limit before completing the transformation. Increase the maximum output length and retry.",
     generationOutputRejected: "The provider rejected this output length. Lower the maximum output and retry.",
     outputLimitReached: "This answer reached the output limit ({{limitTokens}} tokens) and may be incomplete. Continue, regenerate, or raise the maximum output in Edit model configuration.",
     modelRouteInconsistent: "The saved model routes are inconsistent. Reopen settings and save both models.",
@@ -397,6 +400,15 @@ const en = {
     research: "Research",
     studio: "Studio",
     subtitle: "Import sources, ask questions, capture notes"
+  },
+  mindmap: {
+    title: "Mind map", generate: "Generate mind map", open: "Open map", nodeCount: "{{count}} nodes",
+    metadata: "{{sources}} sources · {{nodes}} nodes", fit: "Fit canvas", collapseAll: "Collapse all", expandAll: "Expand all",
+    export: "Export", exportFailed: "Export failed. Please retry.", focused: "Focused: {{name}}", exitFocus: "Exit focus",
+    zoomIn: "Zoom in", zoomOut: "Zoom out", resizePanel: "Resize node panel", nodeDetails: "Node details", nodeChat: "Node chat",
+    description: "Description", noDescription: "No additional description for this node.", keyPoints: "Key points", evidence: "Sources and excerpts",
+    referenceCount: "{{sources}} sources · {{count}} excerpts", noReferences: "No source references for this node.", viewOriginal: "View original",
+    askNode: "Ask about this node", chatEmpty: "Explore your questions about the selected node.", chatPlaceholder: "Ask about this node. Enter to send, Shift+Enter for a new line…"
   },
   transformations: {
     podcastSynthetic: "AI-generated two-person audio",

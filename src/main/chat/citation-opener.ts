@@ -38,6 +38,16 @@ export class CitationOpener {
 
   private readonly shell: ShellLike;
 
+  async openChunk(input: { projectId: string; chunkId: string }): Promise<Result<{ opened: "document" | "url" }>> {
+    try {
+      const row = this.db.prepare(`SELECT sr.source_id,sc.locator_json FROM source_chunks sc
+        JOIN source_revisions sr ON sr.id=sc.revision_id JOIN sources s ON s.id=sr.source_id
+        WHERE sc.id=? AND s.project_id=? AND s.status='active'`).get(input.chunkId, input.projectId) as CitationRow | undefined;
+      if (!row) return this.failure("NOT_FOUND", "errors.notFound");
+      return await this.openRow(row, input.projectId);
+    } catch { return this.failure("INTERNAL", "errors.citationOpenFailed"); }
+  }
+
   async openCitation(input: { projectId: string; citationId: string }): Promise<Result<{ opened: "document" | "url" }>> {
     try {
       const row = this.rowFor(input.citationId, input.projectId);

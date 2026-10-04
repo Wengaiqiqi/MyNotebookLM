@@ -12,13 +12,15 @@ import { NoteNotFoundError, type NoteRepository } from "./note-repository";
 import { listBuiltinTransformations, type BuiltinTransformationDescriptor } from "./builtin-transformations";
 import { renderTransformationPrompt } from "./template-renderer";
 import type { TransformationRepository } from "./transformation-repository";
-import { estimateTokens } from "../../workers/ingestion/chunker";
 import { PodcastService, validatePodcastRoute } from "./podcast-service";
 import type { ModelProfileDto } from "../../shared/models";
+import { resolveGenerationLimits } from "../models/generation-limits";
+import { checkTransformationFinish, prepareTransformationRequest, type TransformationInput } from "./transformation-input";
+import { MindMapService, normalizeMindMapOutput } from "./mindmap-service";
+import { mindMapDocumentSchema, mindMapMarkdown } from "../../shared/mindmaps";
 
-const INPUT_TOKEN_BUDGET = 12_000;
 const OUTPUT_BYTE_LIMIT = 2 * 1024 * 1024;
-const RENDERED_PROMPT_VERSION = "transformation-prompt-v1";
+const RENDERED_PROMPT_VERSION = "transformation-prompt-full-input-v2";
 
 type InputKind = "source" | "sources" | "message" | "answer" | "note";
 type Rule = BuiltinTransformationDescriptor | { transformationId: string };
@@ -27,7 +29,7 @@ export type TransformationRunRequest = Readonly<{
   projectId: string;
   rule?: Rule;
   transformationId?: string;
-  builtinKey?: "summary" | "key-points" | "qa" | "podcast";
+  builtinKey?: "summary" | "key-points" | "qa" | "podcast" | "mind-map";
   language?: "zh-CN" | "en";
   projectTarget?: true;
   sourceRevisionId?: string;
@@ -98,31 +100,19 @@ function outputText(text: string): string {
   return normalized;
 }
 
-function truncateContent(content: string, language: string): { content: string; truncated: boolean } {
-  if (estimateTokens(content) <= INPUT_TOKEN_BUDGET) return { content, truncated: false };
-  const marker = language === "zh-CN" ? "\n[内容已截断]" : "\n[Content truncated]";
-  const points = Array.from(content);
-  let low = 0; let high = points.length;
-  while (low < high) {
-    const mid = Math.ceil((low + high) / 2);
-    if (estimateTokens(points.slice(0, mid).join("") + marker) <= INPUT_TOKEN_BUDGET) low = mid;
-    else high = mid - 1;
-  }
-  return { content: points.slice(0, low).join("") + marker, truncated: true };
-}
-
-function sourceSnapshot(db: Database.Database, projectId: string, revisionIds: readonly string[]): { content: string; hashes: string[]; title: string } {
+function sourceSnapshot(db: Database.Database, projectId: string, revisionIds: readonly string[], annotate = false): { content: string; hashes: string[]; title: string } {
   const rows: any[] = [];
   for (const revisionId of revisionIds) {
     const revision = db.prepare(`SELECT sr.id, sr.source_id, sr.source_hash, s.display_name FROM source_revisions sr JOIN sources s ON s.id = sr.source_id WHERE sr.id = ? AND s.project_id = ? AND s.status = 'active' AND sr.state = 'ready'`).get(revisionId, projectId) as any;
     if (!revision) throw new Error("Source revision not found");
-    const chunks = db.prepare("SELECT content_hash, text FROM source_chunks WHERE revision_id = ? ORDER BY ordinal").all(revisionId) as Array<{ content_hash: string; text: string }>;
-    rows.push({ id: revision.id, title: revision.display_name, sourceHash: revision.source_hash, chunks: chunks.map((chunk) => ({ hash: chunk.content_hash, text: chunk.text })) });
+    const chunks = db.prepare("SELECT id, content_hash, text FROM source_chunks WHERE revision_id = ? ORDER BY ordinal").all(revisionId) as Array<{ id: string; content_hash: string; text: string }>;
+    rows.push({ id: revision.id, title: revision.display_name, sourceHash: revision.source_hash, chunks: chunks.map((chunk) => ({ hash: chunk.content_hash, text: annotate ? `[CHUNK:${chunk.id}]\n${chunk.text}` : chunk.text })) });
   }
   return { content: rows.map((row) => `## ${row.title}\n\n${row.chunks.map((chunk: any) => chunk.text).join("\n\n")}`).join("\n\n"), hashes: rows.map((row) => sha256(stable(row))), title: rows.map((row) => row.title).join(", ") };
 }
 
 function targetSnapshot(db: Database.Database, input: TransformationRunRequest): { kind: InputKind; content: string; hashes: string[]; title: string; target: Record<string, unknown> } {
+  const annotate = input.builtinKey === "mind-map" || (input.rule && "key" in input.rule && input.rule.key === "mind-map");
   const revisionIds = input.sourceRevisionIds ?? (input.sourceRevisionId ? [input.sourceRevisionId] : []);
   const selectedInputs = [input.projectTarget === true, revisionIds.length > 0, input.messageId !== undefined, input.answerMessageId !== undefined, input.answer !== undefined, input.noteId !== undefined].filter(Boolean).length;
   if (selectedInputs !== 1) throw new Error("Exactly one transformation input is required");
@@ -135,11 +125,11 @@ function targetSnapshot(db: Database.Database, input: TransformationRunRequest):
     `).all(input.projectId) as Array<{ id: string }>;
     if (rows.length === 0) throw new Error("Project has no ready sources");
     const projectRevisionIds = rows.map((row) => row.id);
-    const result = sourceSnapshot(db, input.projectId, projectRevisionIds);
+    const result = sourceSnapshot(db, input.projectId, projectRevisionIds, Boolean(annotate));
     return { kind: "sources", ...result, target: { projectId: input.projectId, revisionIds: projectRevisionIds } };
   }
   if (revisionIds.length > 0) {
-    const result = sourceSnapshot(db, input.projectId, revisionIds);
+    const result = sourceSnapshot(db, input.projectId, revisionIds, Boolean(annotate));
     return { kind: revisionIds.length === 1 ? "source" : "sources", ...result, target: { revisionIds: [...revisionIds] } };
   }
   const messageId = input.answerMessageId ?? input.messageId;
@@ -167,7 +157,7 @@ function resolveRule(input: TransformationRunRequest, deps: TransformationServic
     if (!custom || !custom.enabled) throw new Error("Transformation rule not found or disabled");
     return { id: custom.id, version: custom.version, prompt: custom.prompt, transformationId: custom.id, name: custom.name, appliesTo: custom.appliesTo, taskKind: "custom-transformation" };
   }
-  return { id: `builtin:${rule.key}:${rule.language}`, version: 1, prompt: rule.prompt, transformationId: null, name: rule.name, appliesTo: rule.appliesTo, language: rule.language, taskKind: rule.key };
+  return { id: `builtin:${rule.key}:${rule.language}`, version: 1, prompt: rule.prompt, transformationId: null, name: rule.name, appliesTo: rule.appliesTo, language: rule.language, taskKind: rule.key === "mind-map" ? "custom-transformation" : rule.key };
 }
 
 export class TransformationService {
@@ -188,6 +178,7 @@ export class TransformationService {
       WHEN s.rule_id LIKE 'builtin:summary:%' THEN 'summary'
       WHEN s.rule_id LIKE 'builtin:key-points:%' THEN 'key-points'
       WHEN s.rule_id LIKE 'builtin:podcast:%' THEN 'podcast'
+      WHEN s.rule_id LIKE 'builtin:mind-map:%' THEN 'mind-map'
       END AS builtin_key, EXISTS(SELECT 1 FROM podcast_audio pa WHERE pa.insight_id=i.id) AS has_audio,
       (SELECT a.model FROM model_route_attempts a WHERE a.operation_id=i.task_id AND a.project_id=i.project_id
         AND a.task_kind='podcast' AND a.state='completed' ORDER BY a.attempt_order DESC LIMIT 1) AS speech_model
@@ -282,15 +273,16 @@ export class TransformationService {
     const rule = resolveRule(input, this.deps);
     const target = targetSnapshot(this.deps.db, input);
     const language = input.language ?? rule.language ?? "en";
-    const bounded = truncateContent(target.content, language);
-    const rendered = renderTransformationPrompt(rule.prompt, { content: bounded.content, sourceTitle: target.title, language, projectName: (this.deps.db.prepare("SELECT name FROM projects WHERE id = ?").get(input.projectId) as any)?.name ?? "" });
+    const preparation = { template: rule.prompt, values: { sourceTitle: target.title, language, projectName: (this.deps.db.prepare("SELECT name FROM projects WHERE id = ?").get(input.projectId) as any)?.name ?? "" } };
+    const rendered = renderTransformationPrompt(rule.prompt, { ...preparation.values, content: target.content });
     if (rule.transformationId && rule.appliesTo !== target.kind) throw new Error(`Transformation rule appliesTo ${rule.appliesTo} does not match ${target.kind}`);
     const profiles = this.deps.router.resolve(rule.taskKind, input.profileId);
     if (rule.taskKind === "podcast") validatePodcastRoute(profiles);
     const routes = profiles.map((profile) => ({ profileId: profile.id, provider: profile.provider, model: profile.modelId }));
     if (routes.length === 0) throw new RoutedGenerationError({ code: "VALIDATION", messageKey: "errors.generationProfileMissing", recoverable: false });
     const inputHash = sha256(stable({ kind: target.kind, target: target.target, hashes: target.hashes }));
-    const baseKey = sha256(stable({ inputHash, ruleId: rule.id, ruleVersion: rule.version, renderedPromptVersion: RENDERED_PROMPT_VERSION, routes }));
+    const limits = profiles.map(resolveGenerationLimits);
+    const baseKey = sha256(stable({ inputHash, ruleId: rule.id, ruleVersion: rule.version, renderedPromptVersion: RENDERED_PROMPT_VERSION, routes, limits }));
     const idempotencyKey = input.force ? sha256(`${baseKey}:force:${randomUUID()}`) : baseKey;
     const existing = this.deps.taskRepository.findByIdempotencyKey(idempotencyKey);
     if (existing?.state === "completed") {
@@ -323,7 +315,7 @@ export class TransformationService {
     const request: RoutedGenerateRequest = { projectId: input.projectId, operationId: task.id, model: "transformation", messages: [{ role: "user", content: rendered }] };
     const snapshotExists = this.deps.db.prepare("SELECT 1 FROM transformation_task_snapshots WHERE task_id = ?").get(task.id);
     if (!snapshotExists) this.deps.db.prepare(`INSERT INTO transformation_task_snapshots(task_id, project_id, input_kind, input_snapshot_json, input_hash, rule_id, transformation_id, rule_version, rendered_prompt_version, rendered_prompt, route_snapshot_json, request_json, idempotency_key, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-      .run(task.id, input.projectId, target.kind, JSON.stringify({ ...target.target, content: bounded.content, truncated: bounded.truncated, hashes: target.hashes }), inputHash, rule.id, rule.transformationId, rule.version, RENDERED_PROMPT_VERSION, rendered, JSON.stringify({ taskKind: rule.taskKind, profileId: input.profileId ?? null, routes, ...(rule.taskKind === "podcast" ? { podcastProfiles: profiles } : {}) }), JSON.stringify(request), idempotencyKey, now, now);
+      .run(task.id, input.projectId, target.kind, JSON.stringify({ ...target.target, content: target.content, truncated: false, hashes: target.hashes, preparation }), inputHash, rule.id, rule.transformationId, rule.version, RENDERED_PROMPT_VERSION, rendered, JSON.stringify({ taskKind: rule.taskKind, profileId: input.profileId ?? null, routes, ...(rule.taskKind === "podcast" ? { podcastProfiles: profiles } : {}) }), JSON.stringify(request), idempotencyKey, now, now);
     let claimed: ReturnType<TransformationService["claim"]>;
     try { claimed = this.claim(task.id, "preparing"); }
     catch (error) {
@@ -348,7 +340,15 @@ export class TransformationService {
         throw new RoutedGenerationError({ code: "CANCELLED", messageKey: "errors.cancelled", recoverable: false });
       }
       notifyTaskOwnership(task.id, true);
-      for await (const event of this.deps.generation.generateRouted(rule.taskKind, request, input.profileId, input.signal)) {
+      const preparedRequest = this.fullInputRequest(request, { content: target.content, preparation }, input.signal, (event) => {
+        if (!acknowledged && event.type !== "attempt-started" && event.type !== "fallback") {
+          acknowledged = true;
+          this.deps.tasks.advance(task.id, "generating", 400);
+        }
+        if (event.type === "usage") { usage.inputTokens += event.inputTokens ?? 0; usage.outputTokens += event.outputTokens ?? 0; usage.totalTokens += (event.inputTokens ?? 0) + (event.outputTokens ?? 0); }
+      });
+      for await (const event of this.deps.generation.generateRouted(rule.taskKind, preparedRequest, input.profileId, input.signal)) {
+        checkTransformationFinish(event);
         // attempt-started/fallback are local bookkeeping; only a real provider
         // response may advance the milestone, so a stalled dial stays at 20%.
         if (!acknowledged && event.type !== "attempt-started" && event.type !== "fallback") {
@@ -387,6 +387,14 @@ export class TransformationService {
     }
   }
 
+  private fullInputRequest(request: RoutedGenerateRequest, input: TransformationInput, signal: AbortSignal | undefined, onPreparationEvent: (event: RoutedGenerationEvent) => void): RoutedGenerateRequest {
+    return prepareTransformationRequest({ request, input, generation: this.deps.generation, ...(signal === undefined ? {} : { signal }), onPreparationEvent, checkActive: () => {
+      if (signal?.aborted || this.deps.taskRepository.findById(request.operationId)?.state !== "running") {
+        throw new RoutedGenerationError({ code: "CANCELLED", messageKey: "errors.cancelled", recoverable: false });
+      }
+    } });
+  }
+
   convertToNote(input: { projectId: string; insightId: string }): ReturnType<NoteRepository["create"]>;
   convertToNote(projectId: string, insightId: string): ReturnType<NoteRepository["create"]>;
   convertToNote(projectOrInput: string | { projectId: string; insightId: string }, insightIdArg?: string): ReturnType<NoteRepository["create"]> {
@@ -394,7 +402,8 @@ export class TransformationService {
     const insightId = typeof projectOrInput === "string" ? insightIdArg! : projectOrInput.insightId;
     const row = this.deps.db.prepare("SELECT * FROM insights WHERE id = ? AND project_id = ?").get(insightId, projectId) as any;
     if (!row) throw new TransformationInsightNotFoundError(insightId);
-    const content = outputText(row.content);
+    const ruleRow = this.deps.db.prepare("SELECT rule_id FROM transformation_task_snapshots WHERE task_id=?").get(row.task_id) as { rule_id: string } | undefined;
+    const content = ruleRow?.rule_id.startsWith("builtin:mind-map:") ? mindMapMarkdown(mindMapDocumentSchema.parse(JSON.parse(row.content))) : outputText(row.content);
     const title = content.split("\n")[0]?.replace(/^#+\s*/, "").trim() || "Transformation result";
     return this.deps.notes.create({ id: this.deps.id?.() ?? randomUUID(), projectId, title: title.slice(0, 200), body: content });
   }
@@ -412,6 +421,16 @@ export class TransformationService {
 
   private async prepareOutput(kind: string, content: string, projectId: string, taskId: string, profiles: readonly ModelProfileDto[], signal?: AbortSignal): Promise<{ content: string; wav?: Buffer }> {
     if (signal?.aborted || this.deps.taskRepository.findById(taskId)?.state !== "running") throw new RoutedGenerationError({ code: "CANCELLED", messageKey: "errors.cancelled", recoverable: false });
+    const snapshot = this.deps.db.prepare("SELECT rule_id,input_snapshot_json FROM transformation_task_snapshots WHERE task_id=? AND project_id=?").get(taskId, projectId) as { rule_id: string; input_snapshot_json: string };
+    if (snapshot.rule_id.startsWith("builtin:mind-map:")) {
+      try {
+        const input = JSON.parse(snapshot.input_snapshot_json) as { revisionIds?: string[] };
+        const references = new MindMapService(this.deps.db).references(projectId, input.revisionIds ?? []);
+        return { content: JSON.stringify(normalizeMindMapOutput(outputText(content), new Set(references.map((ref) => ref.chunkId)))) };
+      } catch {
+        throw new RoutedGenerationError({ code: "PROVIDER", messageKey: "errors.mindMapInvalid", recoverable: true });
+      }
+    }
     if (kind !== "podcast") return { content: outputText(content) };
     if (!this.deps.podcasts) throw new RoutedGenerationError({ code: "VALIDATION", messageKey: "errors.podcastRouteMissing", recoverable: true });
     this.deps.tasks.advance(taskId, "generating", 450);
@@ -475,7 +494,17 @@ export class TransformationService {
       let content = "";
       let usage: InsightUsage = { inputTokens: 0, outputTokens: 0, totalTokens: 0 };
       let actual: { provider: any; model: string; profileId: string | null } | undefined;
-      for await (const event of this.deps.generation.generateRouted(taskKind, request, persistedRouteProfileId, signal)) {
+      const savedInput = JSON.parse(snapshot.input_snapshot_json) as TransformationInput;
+      // Older snapshots already contain their historical rendered input.
+      const preparedRequest = savedInput.preparation ? this.fullInputRequest(request, savedInput, signal, (event) => {
+        if (!acknowledged && event.type !== "attempt-started" && event.type !== "fallback") {
+          acknowledged = true;
+          this.deps.tasks.advance(taskId, "generating", 400);
+        }
+        if (event.type === "usage") { usage.inputTokens += event.inputTokens ?? 0; usage.outputTokens += event.outputTokens ?? 0; usage.totalTokens += (event.inputTokens ?? 0) + (event.outputTokens ?? 0); }
+      }) : request;
+      for await (const event of this.deps.generation.generateRouted(taskKind, preparedRequest, persistedRouteProfileId, signal)) {
+        checkTransformationFinish(event);
         if (!acknowledged && event.type !== "attempt-started" && event.type !== "fallback") {
           acknowledged = true;
           this.deps.tasks.advance(taskId, "generating", 400);
@@ -512,4 +541,4 @@ export class TransformationService {
   }
 }
 
-export { INPUT_TOKEN_BUDGET, OUTPUT_BYTE_LIMIT, RENDERED_PROMPT_VERSION };
+export { OUTPUT_BYTE_LIMIT, RENDERED_PROMPT_VERSION };

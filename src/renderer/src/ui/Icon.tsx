@@ -8,9 +8,14 @@ export type IconName =
   | "sun" | "moon" | "alert" | "check" | "info" | "globe" | "brain" | "database"
   | "key" | "eye" | "eye-off" | "arrow-up" | "arrow-down" | "x" | "layers"
   | "upload" | "cpu" | "route" | "sliders" | "file"
-  | "chevrons-left" | "chevrons-right";
+  | "chevrons-left" | "chevrons-right" | "mindmap" | "expand" | "download" | "target" | "minus";
 
 const paths: Record<IconName, React.ReactNode> = {
+  mindmap: <><rect x="2" y="9" width="6" height="6" rx="1.5" /><path d="M8 12h5M13 5v14M13 5h3M13 12h3M13 19h3" /><rect x="16" y="3" width="6" height="4" rx="1" /><rect x="16" y="10" width="6" height="4" rx="1" /><rect x="16" y="17" width="6" height="4" rx="1" /></>,
+  expand: <path d="M9 3H3v6M15 3h6v6M21 15v6h-6M3 15v6h6" />,
+  download: <><path d="M12 3v12M7 10l5 5 5-5" /><path d="M4 16v5h16v-5" /></>,
+  target: <><circle cx="12" cy="12" r="7" /><circle cx="12" cy="12" r="2" /><path d="M12 2v3M12 19v3M2 12h3M19 12h3" /></>,
+  minus: <path d="M5 12h14" />,
   book: <><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" /><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" /></>,
   plus: <><path d="M12 5v14" /><path d="M5 12h14" /></>,
   search: <><circle cx="11" cy="11" r="7" /><path d="m21 21-4.3-4.3" /></>,

@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { MINDMAP_CHANNELS, mindMapDtoSchema, mindMapInputSchema, mindMapNodeInputSchema, mindMapReferenceInputSchema, mindMapSaveViewInputSchema } from "../shared/mindmaps";
 import {
   internalFailure,
   resultSchema,
@@ -386,6 +387,12 @@ export function createDesktopApi(ipc: IpcInvoker): DesktopApi {
       listLinks: (input) => invokeResult(ipc, NOTE_CHANNELS.listLinks, noteIdInputSchema, noteLinksResultSchema, input),
       deleteLink: (input) => invokeResult(ipc, NOTE_CHANNELS.deleteLink, deleteNoteLinkInputSchema, voidResultSchema, input),
       generateTitle: (input) => invokeResult(ipc, NOTE_CHANNELS.generateTitle, generateNoteTitleInputSchema, noteResultSchema, input)
+    },
+    mindmaps: {
+      get: (input) => invokeResult(ipc, MINDMAP_CHANNELS.get, mindMapInputSchema, resultSchema(mindMapDtoSchema), input),
+      saveView: (input) => invokeResult(ipc, MINDMAP_CHANNELS.saveView, mindMapSaveViewInputSchema, voidResultSchema, input),
+      conversation: (input) => invokeResult(ipc, MINDMAP_CHANNELS.conversation, mindMapNodeInputSchema, resultSchema(conversationSchema), input),
+      openReference: (input) => invokeResult(ipc, MINDMAP_CHANNELS.openReference, mindMapReferenceInputSchema, resultSchema(chatOpenedResultValueSchema), input)
     },
     transformations: {
       listRules: (input) => invokeResult(ipc, TRANSFORMATION_CHANNELS.listRules, transformationRulesInputSchema, transformationsResultSchema, input),

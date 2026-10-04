@@ -43,9 +43,9 @@ export type RoutedGenerationDeps = Readonly<{
   id?: () => string;
 }>;
 
-/** Safe error carrying only the already-classified application error. */
+/** Classified application error plus main-process fallback eligibility. */
 export class RoutedGenerationError extends Error {
-  constructor(readonly error: AppErrorDto) {
+  constructor(readonly error: AppErrorDto, readonly fallbackEligible = false) {
     super(error.messageKey);
     this.name = "RoutedGenerationError";
   }
@@ -208,7 +208,7 @@ export async function* generateRouted(
         yield { type: "fallback", attempted: current, next, errorCode: failure.error.code };
         continue;
       }
-      throw new RoutedGenerationError(lastError);
+      throw new RoutedGenerationError(lastError, !emittedText && canFallback);
     } finally {
       // Consumer return()/break closes this generator without entering catch.
       completeAttempt("cancelled", "CANCELLED");

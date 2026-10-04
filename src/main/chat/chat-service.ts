@@ -13,6 +13,7 @@ import { buildCitationRows, persistParsedCitations } from "./citation-persist";
 import { assembleContext, estimateHistoryPairTokens, historyLoadBudgetTokens, type FrozenEvidence, type HistoryPair } from "./context-builder";
 import { ConversationRepository } from "./conversation-repository";
 import { ChatSessionRegistry, type SessionOwner } from "./chat-session-registry";
+import { nodeChatContext } from "../notes/mindmap-service";
 
 const CHECKPOINT_INTERVAL_MS = 1_000;
 const CHECKPOINT_INTERVAL_BYTES = 2_048;
@@ -321,7 +322,9 @@ export class ChatService {
         thinking?: "off" | "low" | "medium" | "high";
       };
       const originalQuestion = repo.getMessage(input.projectId, message.replyToMessageId ?? "");
-      if (!originalQuestion || originalQuestion.content !== snapshot.question || (snapshot.questionMessageId && snapshot.questionMessageId !== originalQuestion.id)) {
+      const continuationNodeContext = nodeChatContext(this.deps.db, input.projectId, input.conversationId);
+      const originalContextQuestion = originalQuestion && continuationNodeContext ? continuationNodeContext.questionPrefix + originalQuestion.content : originalQuestion?.content;
+      if (!originalQuestion || originalContextQuestion !== snapshot.question || (snapshot.questionMessageId && snapshot.questionMessageId !== originalQuestion.id)) {
         return { ok: false, error: appError("CONFLICT", "errors.continueUnavailable", true) };
       }
       for (const source of Object.values(snapshot.retrievals ?? {})) {
@@ -334,7 +337,7 @@ export class ChatService {
       }
       const configurationError = generationSettingsError(profile);
       if (configurationError) return { ok: false, error: configurationError };
-      const retrieved = Object.values(snapshot.retrievals ?? {}).filter((item): item is RetrievableChunk =>
+      const retrieved = continuationNodeContext?.retrieved ?? Object.values(snapshot.retrievals ?? {}).filter((item): item is RetrievableChunk =>
         typeof item.text === "string" && typeof item.locatorSummary === "string"
       );
       const parsedAnswer = finalizeCitations(message.content, snapshot.retrievals ?? {});
@@ -342,7 +345,7 @@ export class ChatService {
       // Replay exactly what the model already saw: previously sent slices are
       // frozen (never re-truncated) and already-cited labels are required.
       const frozenEvidence: FrozenEvidence[] = (snapshot.evidence ?? []).flatMap((item) => {
-        const chunk = snapshot.retrievals?.[item.label];
+        const chunk = snapshot.retrievals?.[item.label] ?? continuationNodeContext?.retrieved.find((candidate) => candidate.chunkId === item.chunkId);
         if (!chunk || typeof chunk.text !== "string" || typeof item.sentText !== "string") return [];
         return [{
           label: item.label,
@@ -368,6 +371,7 @@ export class ChatService {
         ? snapshot.contextMessages.slice(1, -2)
         : []);
       const continuationContext = assembleContext({
+        ...(continuationNodeContext ? { systemPrompt: continuationNodeContext.systemPrompt } : {}),
         question: snapshot.question ?? "",
         retrieved,
         ...(historyPairs !== undefined ? { historyPairs } : {}),
@@ -385,7 +389,7 @@ export class ChatService {
         return { ok: false, error: appError("VALIDATION", "errors.contextBudgetExceeded", true) };
       }
       if (this.inFlightConversations.has(input.conversationId)) return { ok: false, error: appError("CONFLICT", "errors.chatSendInFlight", true) };
-      const continuationRetrievals = mapContextCitations(continuationContext.citations, retrieved);
+      const continuationRetrievals = continuationNodeContext ? {} : mapContextCitations(continuationContext.citations, retrieved);
       // Claim and prepared snapshot are one unit: preparation-write failure
       // must not strand the previously completed answer in streaming state.
       const claimTransaction = this.deps.db.transaction(() => {
@@ -487,6 +491,9 @@ export class ChatService {
       emit({ type: "started", requestId, messageId: assistant.id });
 
       const limits = resolveGenerationLimits(profile);
+      const nodeContext = nodeChatContext(this.deps.db, turn.projectId, turn.conversationId);
+      const contextQuestion = nodeContext ? nodeContext.questionPrefix + userMessage.content : userMessage.content;
+      const scopedPrompt = nodeContext ? { systemPrompt: nodeContext.systemPrompt } : {};
       const historyPairs: HistoryPair[] = [];
       let historyCursor = userMessage.sequence;
       let loadedHistoryTokens = 0;
@@ -507,20 +514,20 @@ export class ChatService {
         if (page.length < 32) historyExhausted = true;
       }
       };
-      loadHistory(historyLoadBudgetTokens({ question: userMessage.content, limits, locale: "en" }));
+      loadHistory(historyLoadBudgetTokens({ question: contextQuestion, limits, locale: "en", ...scopedPrompt }));
       // Version identity is cheap metadata, never the body of the whole project.
       const sourceVersion = (): string => JSON.stringify(this.deps.db.prepare("SELECT id,current_revision_id,status FROM sources WHERE project_id=? ORDER BY id").all(turn.projectId));
       const initialSourceVersion = sourceVersion();
       const embeddingVersion = (): string => JSON.stringify(this.deps.db.prepare("SELECT space_id FROM project_embedding_spaces WHERE project_id=?").all(turn.projectId));
       const initialEmbeddingVersion = embeddingVersion();
-      let retrievalBudget = historyLoadBudgetTokens({ question: userMessage.content, limits, locale: "en" });
+      let retrievalBudget = historyLoadBudgetTokens({ question: contextQuestion, limits, locale: "en", ...scopedPrompt });
 
       let retrieved: RetrievableChunk[];
       let retrievalDiagnostics: ChatRetrievalDiagnostics | undefined;
       try {
         // Same effective output reserve and fixed-input allowance as assembly.
         const evidenceTokenBudget = retrievalBudget;
-        const retrievalResult = await this.deps.retrieval({ projectId: turn.projectId, question: userMessage.content, evidenceTokenBudget, signal });
+        const retrievalResult: RetrievalResult = nodeContext ? nodeContext.retrieved : await this.deps.retrieval({ projectId: turn.projectId, question: userMessage.content, evidenceTokenBudget, signal });
         retrieved = retrievalResult;
         retrievalDiagnostics = retrievalResult.diagnostics;
       } catch {
@@ -541,11 +548,11 @@ export class ChatService {
       }
 
       const retrievalsByLabel: Record<string, RetrievedCitation> = {};
-      const context = assembleContext({ question: userMessage.content, retrieved, historyPairs, limits, locale: "en" });
+      const context = assembleContext({ question: contextQuestion, retrieved, historyPairs, limits, locale: "en", ...scopedPrompt });
       // Context builder owns deterministic S-labels; align the citation map to what it issued.
       for (const c of context.citations) {
         const match = retrieved.find((r) => r.chunkId === c.chunkId);
-        if (match) retrievalsByLabel[c.label] = match;
+        if (match && !nodeContext) retrievalsByLabel[c.label] = match;
       }
 
       repo.createGenerationContext({
@@ -557,7 +564,7 @@ export class ChatService {
           projectId: turn.projectId,
           conversationId: turn.conversationId,
           questionMessageId: userMessage.id,
-          question: userMessage.content,
+          question: contextQuestion,
           historyPairs,
           ...(retrievalDiagnostics ? { retrievalDiagnostics } : {}),
           profile: { id: profile.id, provider: profile.provider, modelId: profile.modelId, baseUrl: profile.baseUrl },
@@ -612,12 +619,12 @@ export class ChatService {
         prepareRequest: async (candidate) => {
           const configurationError = generationSettingsError(candidate);
           if (configurationError) throw new ProviderRequestError({ error: configurationError, fallbackEligible: false });
-          const candidateBudget = historyLoadBudgetTokens({ question: userMessage.content, limits: resolveGenerationLimits(candidate), locale: "en" });
+          const candidateBudget = historyLoadBudgetTokens({ question: contextQuestion, limits: resolveGenerationLimits(candidate), locale: "en", ...scopedPrompt });
           if (candidateBudget > retrievalBudget) {
             if (sourceVersion() !== initialSourceVersion || embeddingVersion() !== initialEmbeddingVersion) throw new ProviderRequestError({ error: appError("CONFLICT", "errors.continueSourceUnavailable", true), fallbackEligible: false });
             loadHistory(candidateBudget);
             try {
-              const expanded = await this.deps.retrieval({ projectId: turn.projectId, question: userMessage.content, evidenceTokenBudget: candidateBudget, signal });
+              const expanded: RetrievalResult = nodeContext ? nodeContext.retrieved : await this.deps.retrieval({ projectId: turn.projectId, question: userMessage.content, evidenceTokenBudget: candidateBudget, signal });
               retrieved = expanded;
               retrievalDiagnostics = expanded.diagnostics;
               retrievalBudget = candidateBudget;
@@ -628,7 +635,7 @@ export class ChatService {
           if (sourceVersion() !== initialSourceVersion || embeddingVersion() !== initialEmbeddingVersion || !evidenceIsCurrent(this.deps.db, turn.projectId, retrieved)) {
             throw new ProviderRequestError({ error: appError("CONFLICT", "errors.continueSourceUnavailable", true), fallbackEligible: false });
           }
-          const candidateContext = assembleContext({ question: userMessage.content, retrieved, historyPairs, limits: resolveGenerationLimits(candidate), locale: "en" });
+          const candidateContext = assembleContext({ question: contextQuestion, retrieved, historyPairs, limits: resolveGenerationLimits(candidate), locale: "en", ...scopedPrompt });
           // Each actual attempt is checked against its own window before the
           // provider is called; an over-budget request must never be sent.
           if (candidateContext.fixedOverflow || candidateContext.diagnostics.reasons.includes("context-budget")) {
@@ -644,7 +651,7 @@ export class ChatService {
             historyPairs,
             historyMessageIds: candidateContext.historyMessageIds,
             diagnostics: candidateContext.diagnostics,
-            retrievals: mapContextCitations(candidateContext.citations, retrieved)
+            retrievals: nodeContext ? {} : mapContextCitations(candidateContext.citations, retrieved)
           };
         }
       });

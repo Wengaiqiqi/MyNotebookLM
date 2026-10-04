@@ -12,6 +12,8 @@ import { registerVectorHandlers } from "./ipc/register-vector-handlers";
 import { registerChatHandlers } from "./ipc/register-chat-handlers";
 import { registerNoteHandlers } from "./ipc/register-note-handlers";
 import { registerTransformationHandlers } from "./ipc/register-transformation-handlers";
+import { registerMindMapHandlers } from "./ipc/register-mindmap-handlers";
+import { MindMapService } from "./notes/mindmap-service";
 import { ChatService, recoverInterruptedStreams, type RetrievableChunk, type RetrievalResult } from "./chat/chat-service";
 import { CitationOpener } from "./chat/citation-opener";
 import { ModelService } from "./models/model-service";
@@ -62,6 +64,7 @@ let cleanupVectorHandlers: (() => void) | undefined;
 let cleanupChatHandlers: (() => void) | undefined;
 let cleanupNoteHandlers: (() => void) | undefined;
 let cleanupTransformationHandlers: (() => void) | undefined;
+let cleanupMindMapHandlers: (() => void) | undefined;
 let workerPool: WorkerPool | undefined;
 let taskFanout: ReturnType<typeof createTaskUpdateFanout> | undefined;
 const taskRevisions = new Map<string, string>();
@@ -359,6 +362,7 @@ app.whenReady().then(async () => {
   void Promise.resolve(transformationService.recoverStale(60 * 60 * 1000)).catch(() => { /* stale recovery must not block startup */ });
   cleanupNoteHandlers = registerNoteHandlers(ipcMain, noteService);
   cleanupTransformationHandlers = registerTransformationHandlers(ipcMain, transformationService);
+  cleanupMindMapHandlers = registerMindMapHandlers(ipcMain, new MindMapService(appDatabase.connection), new CitationOpener(appDatabase.connection));
   const chatService = new ChatService({
     db: appDatabase.connection,
     // Resolve the immutable route snapshot per turn so route changes apply live.
@@ -437,6 +441,8 @@ app.on("before-quit", (event) => {
         cleanupChatHandlers?.();
         cleanupChatHandlers = undefined;
         cleanupTransformationHandlers?.();
+        cleanupMindMapHandlers?.();
+        cleanupMindMapHandlers = undefined;
         cleanupTransformationHandlers = undefined;
         cleanupNoteHandlers?.();
         cleanupNoteHandlers = undefined;

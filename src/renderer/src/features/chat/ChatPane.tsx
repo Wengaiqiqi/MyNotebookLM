@@ -8,6 +8,7 @@ import type { SourceDto } from "../../../../shared/sources";
 import SafeMarkdown, { canonicalizeCitationTargets } from "../../chat/SafeMarkdown";
 import { useChatStream } from "../../chat/useChatStream";
 import SourcePreview from "./SourcePreview";
+import ChatComposer from "./ChatComposer";
 import Icon from "../../ui/Icon";
 import Modal, { DialogHead } from "../../ui/Modal";
 import { toast } from "../../ui/Toast";
@@ -16,10 +17,6 @@ import { errorText, formatDateTime, sourceReady } from "../../lib/format";
 type ConversationsApi = typeof window.myNotebook.conversations;
 type ChatApi = typeof window.myNotebook.chat;
 const SELECTED_MODEL_STORAGE_KEY = "mynotebooklm.selectedGenerationProfileId";
-
-function profileDisplayName(name: string): string {
-  return name.replace(/\s+\/\s+\d+$/, "").trim() || name;
-}
 
 const assistantErrorMessageKeys: Record<string, string> = {
   VALIDATION: "errors.validation",
@@ -59,27 +56,16 @@ export default function ChatPane({ projectId, generationProfileId, sources, onOp
   const [convMenuOpen, setConvMenuOpen] = useState(false);
   const [editingTitle, setEditingTitle] = useState(false);
   const [titleDraft, setTitleDraft] = useState("");
-  const [modelMenuOpen, setModelMenuOpen] = useState(false);
   const [thinking, setThinking] = useState<"off" | "low" | "medium" | "high">(() => {
     const stored = localStorage.getItem("mynotebooklm.thinking");
     return stored === "low" || stored === "medium" || stored === "high" ? stored : "off";
   });
-  const [thinkingMenuOpen, setThinkingMenuOpen] = useState(false);
-  const [dismissedErrorIds, setDismissedErrorIds] = useState<Set<string>>(() => new Set());
-  useEffect(() => {
-    if (!thinkingMenuOpen) return;
-    const close = (event: MouseEvent): void => {
-      if (!(event.target as HTMLElement).closest(".thinking-picker")) setThinkingMenuOpen(false);
-    };
-    document.addEventListener("mousedown", close);
-    return () => document.removeEventListener("mousedown", close);
-  }, [thinkingMenuOpen]);
   const [question, setQuestion] = useState("");
+  const [dismissedErrorIds, setDismissedErrorIds] = useState<Set<string>>(() => new Set());
   const [editingMessageId, setEditingMessageId] = useState("");
   const [editDraft, setEditDraft] = useState("");
   const [activeCitation, setActiveCitation] = useState<CitationDto | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
-  const composerRef = useRef<HTMLTextAreaElement>(null);
   const followRef = useRef(true);
   const conversationIdRef = useRef("");
 
@@ -166,23 +152,6 @@ export default function ChatPane({ projectId, generationProfileId, sources, onOp
     if (list && followRef.current) list.scrollTop = list.scrollHeight;
   }, [messages]);
 
-  // Auto-grow composer up to a sane ceiling; starts as a single line.
-  useEffect(() => {
-    const el = composerRef.current;
-    if (!el) return;
-    el.style.height = "auto";
-    el.style.height = `${Math.min(el.scrollHeight, 132)}px`;
-  }, [question]);
-
-  // Close the model menu on any outside click.
-  useEffect(() => {
-    if (!modelMenuOpen) return;
-    const close = (event: MouseEvent): void => {
-      if (!(event.target as HTMLElement).closest(".model-picker")) setModelMenuOpen(false);
-    };
-    document.addEventListener("mousedown", close);
-    return () => document.removeEventListener("mousedown", close);
-  }, [modelMenuOpen]);
   useEffect(() => {
     conversationIdRef.current = conversationId;
     followRef.current = true;
@@ -192,7 +161,6 @@ export default function ChatPane({ projectId, generationProfileId, sources, onOp
   function chooseThinking(level: "off" | "low" | "medium" | "high"): void {
     setThinking(level);
     localStorage.setItem("mynotebooklm.thinking", level);
-    setThinkingMenuOpen(false);
   }
 
   function retryFailedMessage(messageId: string, retry: () => Promise<boolean>): void {
@@ -519,106 +487,10 @@ export default function ChatPane({ projectId, generationProfileId, sources, onOp
         )}
       </div>
 
-      <div className="composer-wrap">
-        <div className="composer">
-          <textarea
-            ref={composerRef}
-            value={question}
-            onChange={(event) => setQuestion(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); void send(); }
-            }}
-            placeholder={t("chat.ui.askPlaceholder")}
-            aria-label={t("research.ask")}
-            rows={1}
-          />
-          <div className="composer-bar">
-            <div className="model-picker thinking-picker">
-              <button
-                type="button"
-                className="model-pill"
-                aria-haspopup="menu"
-                aria-expanded={thinkingMenuOpen}
-                title={t("chat.thinkingHint")}
-                onClick={() => setThinkingMenuOpen((value) => !value)}
-              >
-                <Icon name="brain" />
-                <span className="model-pill-name">{t(`chat.thinkingLevel.${thinking}`)}</span>
-                <Icon name={thinkingMenuOpen ? "chevron-up" : "chevron-down"} className="conv-caret" />
-              </button>
-              {thinkingMenuOpen && (
-                <div className="model-menu" role="menu" aria-label={t("chat.thinking")}>
-                  {([["off", "chat.thinkingLevel.off"], ["low", "chat.thinkingLevel.low"], ["medium", "chat.thinkingLevel.medium"], ["high", "chat.thinkingLevel.high"]] as const).map(([level, labelKey]) => (
-                    <button
-                      key={level}
-                      type="button"
-                      role="menuitem"
-                      className={`model-option${thinking === level ? " selected" : ""}`}
-                      onClick={() => chooseThinking(level)}
-                    >
-                      <span className="model-option-copy"><strong>{t(labelKey)}</strong></span>
-                      {thinking === level && <Icon name="check" />}
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
-            {profiles.length > 0 && (
-              <div className="model-picker">
-                <button
-                  type="button"
-                  className="model-pill"
-                  aria-haspopup="menu"
-                  aria-expanded={modelMenuOpen}
-                  aria-label={t("chat.ui.model")}
-                  onClick={() => setModelMenuOpen((value) => !value)}
-                >
-                  <span className="model-pill-name">
-                    {profiles.find((profile) => profile.id === selectedProfileId)?.modelId ?? t("chat.ui.noModel")}
-                  </span>
-                  <Icon name={modelMenuOpen ? "chevron-up" : "chevron-down"} className="conv-caret" />
-                </button>
-                {modelMenuOpen && (
-                  <div className="model-menu" role="menu" aria-label={t("chat.ui.model")}>
-                    {profiles.map((profile) => (
-                      <button
-                        key={profile.id}
-                        type="button"
-                        role="menuitem"
-                        className={`model-option${profile.id === selectedProfileId ? " selected" : ""}`}
-                        onClick={() => {
-                          setSelectedProfileId(profile.id);
-                          localStorage.setItem(SELECTED_MODEL_STORAGE_KEY, profile.id);
-                          setModelMenuOpen(false);
-                        }}
-                      >
-                        <span className="model-option-copy">
-                          <strong>{profile.modelId}</strong>
-                          <small>{profileDisplayName(profile.name)}</small>
-                        </span>
-                        {profile.id === selectedProfileId && <Icon name="check" />}
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </div>
-            )}
-            <span className="spacer" />
-            <span className="kbd" aria-hidden="true">Enter</span>
-            {stream.state === "streaming"
-              ? (
-                <button type="button" className="send-btn stop" aria-label={t("chat.ui.stop")} onClick={() => void stream.stop()}>
-                  <Icon name="stop" />
-                </button>
-              )
-              : (
-                <button type="button" className="send-btn" aria-label={t("chat.ui.send")} disabled={!question.trim() || !stream.canSend} onClick={() => void send()}>
-                  <Icon name="send" />
-                </button>
-              )}
-          </div>
-        </div>
-      </div>
+      <ChatComposer question={question} onQuestionChange={setQuestion} profiles={profiles} selectedProfileId={selectedProfileId}
+        onProfileChange={(id) => { setSelectedProfileId(id); localStorage.setItem(SELECTED_MODEL_STORAGE_KEY, id); }}
+        thinking={thinking} onThinkingChange={chooseThinking} streaming={stream.state === "streaming"}
+        canSend={stream.canSend} onSend={() => void send()} onStop={() => void stream.stop()} />
     </section>
     <CitationsPanel
       projectId={projectId}

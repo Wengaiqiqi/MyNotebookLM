@@ -69,7 +69,7 @@ describe("createDesktopApi", () => {
   it("preserves project commands while exposing only the named model settings groups", () => {
     const api = createDesktopApi({ invoke: vi.fn() });
 
-    expect(Object.keys(api)).toEqual(["vector", "retrieval", "sources", "tasks", "projects", "settings", "models", "credentials", "titleOverlay", "conversations", "chat", "citations", "notes", "transformations"]);
+    expect(Object.keys(api)).toEqual(["vector", "retrieval", "sources", "tasks", "projects", "settings", "models", "credentials", "titleOverlay", "conversations", "chat", "citations", "notes", "mindmaps", "transformations"]);
     expect(Object.keys(api.vector)).toEqual(["getHealth", "startMigration", "rebuild", "optimize", "cancelTask", "subscribe"]);
     expect(Object.keys(api.retrieval)).toEqual(["search"]);
     expect(Object.keys(api.projects)).toEqual(["list", "listArchived", "listDeleteFailed", "create", "rename", "archive", "remove", "restore", "undo", "retryDelete"]);

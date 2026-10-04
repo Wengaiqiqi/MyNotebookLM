@@ -39,7 +39,7 @@ export const updateTransformationInputSchema = createTransformationInputSchema.e
 }).strict();
 export const transformationIdInputSchema = z.object({ projectId: z.uuid(), id: z.uuid() }).strict();
 export const builtinTransformationDtoSchema = z.object({
-  key: z.enum(["summary", "key-points", "qa", "podcast"]), language: z.enum(["zh-CN", "en"]), name: z.string().trim().min(1).max(100),
+  key: z.enum(["summary", "key-points", "qa", "podcast", "mind-map"]), language: z.enum(["zh-CN", "en"]), name: z.string().trim().min(1).max(100),
   appliesTo: transformationAppliesToSchema, prompt: z.string().trim().min(1)
 }).strict();
 
@@ -49,7 +49,7 @@ export const insightUsageSchema = z.object({
   totalTokens: z.number().int().nonnegative()
 }).strict();
 export const insightDtoSchema = z.object({
-  builtinKey: z.enum(["summary", "key-points", "qa", "podcast"]).nullable().optional(),
+  builtinKey: z.enum(["summary", "key-points", "qa", "podcast", "mind-map"]).nullable().optional(),
   hasAudio: z.boolean().optional(),
   speechModel: z.string().trim().min(1).max(200).nullable().optional(),
   id: z.uuid(),
@@ -72,7 +72,7 @@ export const insightDtoSchema = z.object({
 export const transformationRunInputSchema = z.object({
   projectId: z.uuid(),
   transformationId: z.uuid().optional(),
-  builtinKey: z.enum(["summary", "key-points", "qa", "podcast"]).optional(),
+  builtinKey: z.enum(["summary", "key-points", "qa", "podcast", "mind-map"]).optional(),
   language: z.enum(["zh-CN", "en"]).optional(),
   projectTarget: z.literal(true).optional(),
   sourceRevisionId: z.uuid().optional(),

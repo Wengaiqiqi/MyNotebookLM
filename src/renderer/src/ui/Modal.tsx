@@ -19,6 +19,7 @@ export interface ModalProps {
   /** Render as an alert dialog (destructive confirmations). */
   alert?: boolean;
   wide?: boolean;
+  className?: string;
   children: React.ReactNode;
 }
 
@@ -26,7 +27,7 @@ export interface ModalProps {
  * Accessible dialog: focus is trapped inside, Escape closes, and the page
  * behind is inert. Focus returns to the previously focused element on close.
  */
-export default function Modal({ open, onClose, labelledBy, alert, wide, children }: ModalProps) {
+export default function Modal({ open, onClose, labelledBy, alert, wide, className, children }: ModalProps) {
   const cardRef = useRef<HTMLElement>(null);
   const openerRef = useRef<HTMLElement | null>(null);
 
@@ -76,7 +77,7 @@ export default function Modal({ open, onClose, labelledBy, alert, wide, children
     <div className="dialog-veil" role="presentation">
       <section
         ref={cardRef}
-        className={`dialog${wide ? " wide" : ""}`}
+        className={`dialog${wide ? " wide" : ""}${className ? ` ${className}` : ""}`}
         role={alert ? "alertdialog" : "dialog"}
         aria-modal="true"
         aria-labelledby={labelledBy}
