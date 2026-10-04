@@ -1,3 +1,5 @@
+import type { TaskStage } from "../../../../shared/tasks";
+
 /**
  * Displayed progress for a running transformation.
  *
@@ -43,6 +45,23 @@ export function advancePercent(current: number, ceiling: number, elapsedMs: numb
 /** Animate podcast preparation for three seconds, then use actual milestones. */
 export function advancePodcastPercent(current: number, backendPercent: number, elapsedMs: number): number {
   return Math.max(current, current < 20 ? Math.min(20, (Math.max(0, elapsedMs) * 20) / 3000) : backendPercent);
+}
+
+/** Reuse quiz speeds while keeping the map's four actual stages separate. */
+export function advanceMindMapPercent(current: number, backendPercent: number, stage: TaskStage, elapsedMs: number): number {
+  // A quick provider response must not skip the four-second preparation ramp.
+  if (current < 20) return Math.min(20, current + (5 * Math.max(0, elapsedMs)) / 1000);
+  if (stage === "generating") return advancePercent(current, backendPercent >= 55 ? 80 : 50, elapsedMs);
+  if (stage === "verifying") return advancePercent(current, 95, elapsedMs);
+  if (stage === "saving") return advancePercent(current, 99, elapsedMs);
+  return current;
+}
+
+export function mindMapProgressPhase(displayedPercent: number, stage: TaskStage): "preparing" | "generating" | "verifying" | "saving" {
+  if (displayedPercent < 20 || (stage !== "generating" && stage !== "verifying" && stage !== "saving")) return "preparing";
+  if (Math.round(displayedPercent) < 80 || stage === "generating") return "generating";
+  if (Math.round(displayedPercent) < 95 || stage === "verifying") return "verifying";
+  return "saving";
 }
 
 /**

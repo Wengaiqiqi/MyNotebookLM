@@ -95,7 +95,7 @@ const zhCN = {
     contextAutomaticHint: "自动值：{{value}}；容量未手动覆盖时使用此值。",
     contextInputOnlyHint: "服务商只提供输入上限：{{value}}；不代表总上下文窗口。",
     outputAutomaticHint: "自动值：{{value}}；回答不要求写满。",
-    contextDefaultHint: "保守默认值：{{value}}；服务商未提供该模型的上下文容量，可手动填写。",
+    contextDefaultHint: "默认值：{{value}}；尚未识别该模型的上下文容量，可手动填写。",
     outputDefaultHint: "保守默认值：{{value}}；服务商未提供该模型的输出上限，可手动填写。",
     restoreAutomatic: "恢复自动",
     showApiKey: "显示 API Key",
@@ -175,7 +175,7 @@ const zhCN = {
     nextPage: "下一页",
     page: "第 {{page}} 页",
     states: { started: "已开始", completed: "已完成", failed: "失败", cancelled: "已取消" },
-    tasks: { chat: "对话", "note-title": "笔记标题", summary: "摘要", "key-points": "要点", qa: "选择题测验", "custom-transformation": "自定义转换", podcast: "播客", embedding: "嵌入" }
+    tasks: { chat: "对话", "note-title": "笔记标题", summary: "摘要", "key-points": "要点", qa: "选择题测验", "mind-map": "思维导图", "custom-transformation": "自定义转换", podcast: "播客", embedding: "嵌入" }
   },
   vector: {
     eyebrow: "数据与索引",
@@ -206,6 +206,9 @@ const zhCN = {
   },
   errors: {
     mindMapInvalid: "生成的思维导图格式不正确或引用无法核实，请重试或更换模型。",
+    mindMapInvalidJson: "模型返回的导图 JSON 无法解析，自动修复后仍不正确，请重试或更换模型。",
+    mindMapInvalidStructure: "导图的节点字段或层级不符合要求，自动修复后仍不正确，请重试或更换模型。",
+    mindMapInvalidReferences: "导图包含资料中不存在的引用编号，自动修复后仍无法核实，请重试或更换模型。",
     podcastRouteMissing: "请在设置 → 任务路由 → 播客中添加至少一个文字生成模型和一个 TTS 模型。",
     podcastScriptInvalid: "生成的播客对话稿格式不正确或不包含两位说话者，请重试或更换文字模型。",
     podcastSpeechUnsupported: "此提供商暂不支持播客语音合成，请使用 OpenAI、OpenAI 兼容或 Gemini 的 TTS 模型。",
@@ -489,6 +492,8 @@ const zhCN = {
     elapsed: "已用 {{seconds}} 秒",
     phases: { preparing: "准备资料", connecting: "模型响应中", generating: "正在生成内容", saving: "正在整理结果" },
     podcastPhases: { preparing: "准备播客资料", script: "生成双人对话稿", speech: "合成双人语音", saving: "保存播客音频" },
+    mindMapProgress: "思维导图生成进度",
+    mindMapPhases: { preparing: "准备导图资料", generating: "生成节点与层级", verifying: "校验结构与引用", saving: "保存思维导图" },
     states: { queued: "排队中", running: "处理中", completed: "已完成", failed: "失败", cancelled: "已取消" }
   }
 } as const;

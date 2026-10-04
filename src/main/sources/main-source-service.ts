@@ -10,6 +10,7 @@ import type { TaskErrorSummaryDto } from "../../shared/tasks";
 import type { IngestionService } from "./ingestion-service";
 import type { TaskService } from "../tasks/task-service";
 import { isRetryableCode } from "../tasks/retry-policy";
+import { safeTaskMessageKey } from "../tasks/task-errors";
 import { removeProjectFiles, stageFile } from "./managed-files";
 import { parseSafeUrl } from "./url-policy";
 import { UnsupportedContentTypeError, type UrlSource, UrlFetchError } from "./url-source";
@@ -22,7 +23,6 @@ const ERROR_CODES = new Set<TaskErrorSummaryDto["code"]>([
   "RATE_LIMITED", "TIMEOUT", "NETWORK", "PROVIDER",
   "UNSUPPORTED_FORMAT", "UNSAFE_INPUT", "INDEX_UNAVAILABLE", "INTERNAL"
 ]);
-const MESSAGE_KEYS = new Set(["errors.interrupted", "errors.internal", "errors.validation", "errors.notFound", "errors.conflict", "errors.cancelled", "errors.auth", "errors.rateLimited", "errors.timeout", "errors.network", "errors.provider", "errors.unsupportedFormat", "errors.unsafeInput", "errors.indexUnavailable", "errors.modelCapability", "errors.embeddingProfileUnavailable", "errors.taskConflict", "errors.embeddingRejected"]);
 function taskError(error: unknown): TaskErrorSummaryDto {
   console.error("[ingest] task failed:", error);
   const candidate = error as { code?: unknown; message?: unknown };
@@ -31,7 +31,7 @@ function taskError(error: unknown): TaskErrorSummaryDto {
     ? candidate.code as TaskErrorSummaryDto["code"]
     : "INTERNAL";
   const supplied = typeof candidate.message === "string" ? candidate.message : "";
-  const messageKey = MESSAGE_KEYS.has(supplied) ? supplied : ({ UNSAFE_INPUT: "errors.unsafeInput", UNSUPPORTED_FORMAT: "errors.unsupportedFormat", RATE_LIMITED: "errors.rateLimited", INDEX_UNAVAILABLE: "errors.indexUnavailable", INTERNAL: "errors.internal" } as Record<string, string>)[code] ?? `errors.${code.toLowerCase()}`;
+  const messageKey = safeTaskMessageKey(code, supplied);
   return { code, messageKey, recoverable: recoverableHint || isRetryableCode(code) };
 }
 export class MainSourceService {
@@ -74,8 +74,9 @@ export class MainSourceService {
       id: String(row.id), projectId: String(row.project_id), sourceId: row.source_id ? String(row.source_id) : null,
       kind: row.kind as TaskDto["kind"], state: row.state as TaskDto["state"], stage: row.stage as TaskDto["stage"],
       ...(String(row.transformation_rule_id ?? "").startsWith("builtin:podcast:") ? { transformationKind: "podcast" as const } : {}),
+      ...(String(row.transformation_rule_id ?? "").startsWith("builtin:mind-map:") ? { transformationKind: "mind-map" as const } : {}),
       progress: Number(row.progress_1000), attempt: Number(row.attempt),
-      error: errorCode ? { code: errorCode, messageKey: MESSAGE_KEYS.has(String(row.error_message)) ? String(row.error_message) : ({ UNSAFE_INPUT: "errors.unsafeInput", UNSUPPORTED_FORMAT: "errors.unsupportedFormat", RATE_LIMITED: "errors.rateLimited", INTERNAL: "errors.internal" } as Record<string, string>)[errorCode] ?? `errors.${errorCode.toLowerCase()}`, recoverable: isRetryableCode(errorCode) } : null,
+      error: errorCode ? { code: errorCode, messageKey: safeTaskMessageKey(errorCode, row.error_message), recoverable: isRetryableCode(errorCode) } : null,
       idempotencyKey: row.idempotency_key ? String(row.idempotency_key) : null, createdAt: String(row.created_at), updatedAt: String(row.updated_at)
     };
   }

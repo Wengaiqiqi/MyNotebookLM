@@ -148,9 +148,9 @@ describe("assembleContext", () => {
     expect(result.tokenBudget.inputTokenTarget).toBe(1_024);
 
     const fallback = assembleContext({ question: QUESTION, retrieved: [] });
-    expect(fallback.tokenBudget.contextTokens).toBe(32_768);
+    expect(fallback.tokenBudget.contextTokens).toBe(1_000_000);
     expect(fallback.tokenBudget.outputTokenReserve).toBe(8_192);
-    expect(fallback.tokenBudget.inputTokenTarget).toBeLessThan(32_768);
+    expect(fallback.tokenBudget.inputTokenTarget).toBeLessThan(1_000_000);
   });
 
   it("counts history pairs in the budget and neutralizes stale citation labels", () => {

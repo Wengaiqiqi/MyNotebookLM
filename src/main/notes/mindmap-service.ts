@@ -77,20 +77,62 @@ export class MindMapService {
   }
 }
 
+export class MindMapOutputError extends Error {
+  constructor(readonly kind: "json" | "structure" | "references", message: string) {
+    super(message);
+    this.name = "MindMapOutputError";
+  }
+  get messageKey(): string {
+    return this.kind === "json" ? "errors.mindMapInvalidJson" : this.kind === "references" ? "errors.mindMapInvalidReferences" : "errors.mindMapInvalidStructure";
+  }
+}
+
+function modelJson(raw: string): unknown {
+  const cleaned = raw.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "");
+  try { return JSON.parse(cleaned); } catch { /* Accept one complete JSON object surrounded by commentary. */ }
+  const candidates: unknown[] = [];
+  let start = -1, depth = 0, quoted = false, escaped = false;
+  for (let index = 0; index < cleaned.length; index++) {
+    const char = cleaned[index];
+    if (start < 0) { if (char === "{") { start = index; depth = 1; } continue; }
+    if (quoted) {
+      if (escaped) escaped = false;
+      else if (char === "\\") escaped = true;
+      else if (char === '"') quoted = false;
+    } else if (char === '"') quoted = true;
+    else if (char === "{") depth++;
+    else if (char === "}" && --depth === 0) {
+      try { candidates.push(JSON.parse(cleaned.slice(start, index + 1))); } catch { /* Repair malformed JSON through the generation route. */ }
+      start = -1;
+    }
+  }
+  if (candidates.length === 1) return candidates[0];
+  throw new MindMapOutputError("json", "Return exactly one complete, valid JSON object, without commentary or multiple maps.");
+}
+
 /** Validate model JSON and assign stable, application-owned IDs. Never accept HTML/styles/URLs. */
 export function normalizeMindMapOutput(raw: string, allowedRefs: ReadonlySet<string>): MindMapDocument {
-  const cleaned = raw.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "");
-  const parsed = z.object({ title: z.string().optional(), root: z.unknown() }).parse(JSON.parse(cleaned));
+  const parsed = modelJson(raw);
+  const envelope = z.object({ root: z.unknown() }).safeParse(parsed);
+  const root = envelope.success && envelope.data.root !== undefined ? envelope.data.root : parsed;
+  const uuidRefs = new Map([...allowedRefs].filter((ref) => /^[0-9a-f-]{36}$/i.test(ref)).map((ref) => [ref.toLowerCase(), ref]));
   let count = 0;
   const visit = (value: unknown, id: string, depth: number): MindMapNode => {
-    if (++count > 2000 || depth > 16) throw new Error("Mind map structure is too large");
-    const node = z.object({ title: z.string().trim().min(1).max(200), summary: z.string().max(8000).default(""),
-      keyPoints: z.array(z.string().max(2000)).max(50).default([]), refs: z.array(z.string().max(128)).max(256).default([]),
-      children: z.array(z.unknown()).max(100).default([]) }).parse(value);
-    if (node.refs.some((ref) => !allowedRefs.has(ref))) throw new Error("Mind map references an unknown source block");
-    return { ...node, id, refs: [...new Set(node.refs)], children: node.children.map((child, index) => visit(child, `${id}-${index}`, depth + 1)) };
+    if (++count > 2000 || depth > 16) throw new MindMapOutputError("structure", "Mind map structure is too large: use at most 2000 nodes and 16 levels.");
+    const result = z.object({ title: z.string().trim().min(1).max(200), summary: z.string().max(8000).nullish(),
+      keyPoints: z.array(z.string().max(2000)).max(50).nullish(), refs: z.array(z.string().max(128)).max(256).nullish(),
+      children: z.array(z.unknown()).max(100).nullish() }).safeParse(value);
+    if (!result.success) throw new MindMapOutputError("structure", `${id}: invalid node fields (${result.error.issues.slice(0, 3).map((issue) => `${issue.path.join(".")}: ${issue.code}`).join(", ")}).`);
+    const node = result.data;
+    const refs = (node.refs ?? []).map((value) => {
+      const ref = value.trim().replace(/^\[CHUNK:\s*([^\]]+)\]$/i, "$1").replace(/^CHUNK:\s*/i, "").trim();
+      return allowedRefs.has(ref) ? ref : uuidRefs.get(ref.toLowerCase()) ?? ref;
+    });
+    if (refs.some((ref) => !allowedRefs.has(ref))) throw new MindMapOutputError("references", `${id}: mind map references an unknown source block. Use only exact identifiers from the supplied [CHUNK:identifier] labels.`);
+    return { title: node.title, summary: node.summary ?? "", keyPoints: node.keyPoints ?? [], id,
+      refs: [...new Set(refs)], children: (node.children ?? []).map((child, index) => visit(child, `${id}-${index}`, depth + 1)) };
   };
-  return mindMapDocumentSchema.parse({ version: 1, root: visit(parsed.root, "node-0", 0) });
+  return mindMapDocumentSchema.parse({ version: 1, root: visit(root, "node-0", 0) });
 }
 
 /** The conversation binding, node and evidence are resolved in main, never supplied by the renderer. */

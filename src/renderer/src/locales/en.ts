@@ -95,7 +95,7 @@ const en = {
     contextAutomaticHint: "Automatic value: {{value}}; used when no manual override is set.",
     contextInputOnlyHint: "The provider only reports an input limit: {{value}}; this is not a total context window.",
     outputAutomaticHint: "Automatic value: {{value}}; the answer does not need to fill it.",
-    contextDefaultHint: "Conservative default: {{value}}; the provider did not report this model's context capacity, so you may enter it manually.",
+    contextDefaultHint: "Default: {{value}}; this model's context capacity has not been identified, so you may enter it manually.",
     outputDefaultHint: "Conservative default: {{value}}; the provider did not report this model's output cap, so you may enter it manually.",
     restoreAutomatic: "Restore automatic",
     showApiKey: "Show API key",
@@ -175,7 +175,7 @@ const en = {
     nextPage: "Next",
     page: "Page {{page}}",
     states: { started: "Started", completed: "Completed", failed: "Failed", cancelled: "Cancelled" },
-    tasks: { chat: "Chat", "note-title": "Note title", summary: "Summary", "key-points": "Key points", qa: "Quiz", "custom-transformation": "Custom transformation", podcast: "Podcast", embedding: "Embedding" }
+    tasks: { chat: "Chat", "note-title": "Note title", summary: "Summary", "key-points": "Key points", qa: "Quiz", "mind-map": "Mind map", "custom-transformation": "Custom transformation", podcast: "Podcast", embedding: "Embedding" }
   },
   vector: {
     eyebrow: "Data & index",
@@ -206,6 +206,9 @@ const en = {
   },
   errors: {
     mindMapInvalid: "The generated mind map is invalid or contains unverified references. Retry or choose another model.",
+    mindMapInvalidJson: "The model returned unparseable mind map JSON and automatic repair failed. Retry or choose another model.",
+    mindMapInvalidStructure: "The map has invalid node fields or hierarchy and automatic repair failed. Retry or choose another model.",
+    mindMapInvalidReferences: "The map contains references absent from the source material and automatic repair could not verify them. Retry or choose another model.",
     podcastRouteMissing: "Add at least one text model and one TTS model in Settings → Task routing → Podcast.",
     podcastScriptInvalid: "The podcast script is invalid or does not include two speakers. Retry or choose another text model.",
     podcastSpeechUnsupported: "This provider does not support podcast speech synthesis. Use an OpenAI, OpenAI-compatible or Gemini TTS model.",
@@ -489,6 +492,8 @@ const en = {
     elapsed: "{{seconds}}s",
     phases: { preparing: "Preparing inputs", connecting: "Model responding", generating: "Generating content", saving: "Finalizing results" },
     podcastPhases: { preparing: "Preparing podcast sources", script: "Writing the dialogue", speech: "Synthesizing both voices", saving: "Saving podcast audio" },
+    mindMapProgress: "Mind map generation progress",
+    mindMapPhases: { preparing: "Preparing map sources", generating: "Generating nodes and hierarchy", verifying: "Checking structure and references", saving: "Saving mind map" },
     states: { queued: "Queued", running: "Processing", completed: "Completed", failed: "Failed", cancelled: "Cancelled" }
   }
 } as const;

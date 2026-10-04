@@ -22,4 +22,17 @@ describe("mind map model output", () => {
     const nested = (depth: number): unknown => ({ title: "A", children: depth ? [nested(depth - 1)] : [] });
     expect(() => normalizeMindMapOutput(JSON.stringify({ root: nested(17) }), new Set())).toThrow(/too large/);
   });
+  it("accepts one complete JSON map surrounded by commentary without treating braces inside strings as structure", () => {
+    const map = normalizeMindMapOutput('生成结果如下：\n```json\n' + JSON.stringify({ root: { title: 'Topic {x} "quoted"', refs: ["[CHUNK:chunk-a]"] } }) + '\n```\n已生成。', new Set(["chunk-a"]));
+    expect(map.root.title).toBe('Topic {x} "quoted"');
+    expect(map.root.refs).toEqual(["chunk-a"]);
+    expect(() => normalizeMindMapOutput('{"root":{"title":"A"}}\n{"root":{"title":"B"}}', new Set())).toThrow(/exactly one/);
+  });
+  it("normalizes nullable optional fields, an unwrapped tree and verified UUID casing", () => {
+    const id = "abcdefab-abcd-4abc-8abc-abcdefabcdef";
+    const map = normalizeMindMapOutput(JSON.stringify({ title: "Topic", summary: null, keyPoints: null, children: null,
+      refs: [`CHUNK:${id.toUpperCase()}`, id] }), new Set([id]));
+    expect(map.root).toMatchObject({ summary: "", children: [], keyPoints: [], refs: [id] });
+    expect(() => normalizeMindMapOutput('{"title":"Topic","refs":["[CHUNK:foreign]"]}', new Set([id]))).toThrow(/unknown source/);
+  });
 });

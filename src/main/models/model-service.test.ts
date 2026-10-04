@@ -114,6 +114,7 @@ class FakeSettingsRepository {
       "summary",
       "key-points",
       "qa",
+      "mind-map",
       "custom-transformation"
     ] as const) {
       this.routes.set(taskKind, [{ taskKind, profileId: generationProfileId, position: 0 }]);
@@ -274,6 +275,7 @@ describe("ModelService", () => {
       ["summary", [{ taskKind: "summary", profileId: PROFILE_ID, position: 0 }]],
       ["key-points", [{ taskKind: "key-points", profileId: PROFILE_ID, position: 0 }]],
       ["qa", [{ taskKind: "qa", profileId: PROFILE_ID, position: 0 }]],
+      ["mind-map", [{ taskKind: "mind-map", profileId: PROFILE_ID, position: 0 }]],
       ["custom-transformation", [{ taskKind: "custom-transformation", profileId: PROFILE_ID, position: 0 }]]
       , ["embedding", [{
         taskKind: "embedding",

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { ModelProfileDto } from "../../shared/models";
+import { providerKindSchema, type ModelProfileDto } from "../../shared/models";
 import { generationSettingsError, resolveGenerationLimits } from "./generation-limits";
 
 const base: ModelProfileDto = {
@@ -23,7 +23,7 @@ describe("resolveGenerationLimits", () => {
   });
 
   it("checks the default window but keeps independent input and output limits separate", () => {
-    expect(generationSettingsError({ ...base, maxOutputTokensOverride: 65536 })?.messageKey).toBe("errors.generationLimitsConflict");
+    expect(generationSettingsError({ ...base, maxOutputTokensOverride: 900_000 })?.messageKey).toBe("errors.generationLimitsConflict");
     expect(generationSettingsError({ ...base, contextTokensOverride: 131072, maxOutputTokensOverride: 65536 })).toBeNull();
     expect(generationSettingsError({ ...base, maxOutputTokensOverride: 8192, generationLimits: { windowKind: "input-only", inputTokenLimit: 4096, maxOutputTokens: 8192, source: "provider", observedAt: base.updatedAt, identity: { provider: base.provider, baseUrl: base.baseUrl, modelId: base.modelId } } })).toBeNull();
   });
@@ -72,5 +72,15 @@ describe("resolveGenerationLimits", () => {
     });
     expect(limits.contextTokens).toBe(16_000);
     expect(limits.inputTokenLimit).toBe(16_000);
+  });
+  it.each(providerKindSchema.options)("uses the 1M fallback for unidentified capacity (%s)", (provider) => {
+    const profile = { ...base, provider };
+    expect(resolveGenerationLimits(profile)).toMatchObject({ contextTokens: 1_000_000, source: "default", outputTokens: 8192 });
+  });
+  it("uses 1M if the provider only identifies the output limit and retains explicit smaller capacities", () => {
+    const metadata = { windowKind: "shared" as const, source: "provider" as const, observedAt: base.updatedAt, identity: { provider: base.provider, baseUrl: base.baseUrl, modelId: base.modelId } };
+    expect(resolveGenerationLimits({ ...base, generationLimits: { ...metadata, maxOutputTokens: 4096 } })).toMatchObject({ contextTokens: 1_000_000, outputTokens: 4096 });
+    expect(resolveGenerationLimits({ ...base, contextTokensOverride: 65536 }).contextTokens).toBe(65536);
+    expect(resolveGenerationLimits({ ...base, generationLimits: { ...metadata, contextWindowTokens: 131072 } }).contextTokens).toBe(131072);
   });
 });

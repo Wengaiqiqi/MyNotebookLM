@@ -46,7 +46,7 @@ export const taskDtoSchema = z.object({
   projectId: z.uuid(),
   sourceId: z.uuid().nullable(),
   kind: taskKindSchema,
-  transformationKind: z.literal("podcast").optional(),
+  transformationKind: z.enum(["podcast", "mind-map"]).optional(),
   state: taskStateSchema,
   stage: taskStageSchema,
   progress: taskProgressSchema,

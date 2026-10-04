@@ -20,7 +20,7 @@ import type { AppLanguage, AppTheme } from "../../i18n";
 
 type Section = "general" | "models" | "routes" | "index";
 
-const GENERATION_TASKS: ModelTaskKind[] = ["chat", "note-title", "summary", "qa", "custom-transformation"];
+const GENERATION_TASKS: ModelTaskKind[] = ["chat", "note-title", "summary", "qa", "mind-map", "custom-transformation"];
 const ALL_TASKS: ModelTaskKind[] = [...GENERATION_TASKS, "podcast", "embedding"];
 
 const providerLabel = (t: (key: string) => string, provider: ProviderKind): string =>
@@ -587,6 +587,7 @@ function RoutesPanel({ profiles, builtIns, projectId, onSaved }: {
     "note-title": t("routing.tasks.note-title"),
     summary: t("routing.tasks.summary"),
     qa: t("routing.tasks.qa"),
+    "mind-map": t("routing.tasks.mind-map"),
     podcast: t("routing.tasks.podcast"),
     "custom-transformation": t("routing.tasks.custom-transformation"),
     embedding: t("routing.tasks.embedding")

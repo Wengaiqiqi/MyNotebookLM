@@ -2,6 +2,7 @@ import type Database from "better-sqlite3";
 import type { AppErrorCode } from "../../shared/app-errors";
 import type { TaskDto, TaskErrorSummaryDto, TaskKind, TaskStage } from "../../shared/tasks";
 import { isRetryableCode } from "./retry-policy";
+import { safeTaskMessageKey } from "./task-errors";
 
 type TaskRow = {
   id: string;
@@ -25,7 +26,7 @@ function toTaskDto(row: TaskRow): TaskDto {
   const error = errorCode
     ? {
         code: errorCode,
-        messageKey: new Set(["errors.mindMapInvalid", "errors.interrupted", "errors.internal", "errors.validation", "errors.notFound", "errors.conflict", "errors.cancelled", "errors.auth", "errors.rateLimited", "errors.timeout", "errors.network", "errors.provider", "errors.unsupportedFormat", "errors.unsafeInput", "errors.indexUnavailable"]).has(row.error_message ?? "") ? row.error_message! : ({ UNSAFE_INPUT: "errors.unsafeInput", UNSUPPORTED_FORMAT: "errors.unsupportedFormat", RATE_LIMITED: "errors.rateLimited", INTERNAL: "errors.internal" } as Record<string, string>)[errorCode] ?? `errors.${errorCode.toLowerCase()}`,
+        messageKey: safeTaskMessageKey(errorCode, row.error_message),
         recoverable: isRetryableCode(errorCode)
       }
     : null;
@@ -35,6 +36,7 @@ function toTaskDto(row: TaskRow): TaskDto {
     sourceId: row.source_id,
     kind: row.kind,
     ...(row.transformation_rule_id?.startsWith("builtin:podcast:") ? { transformationKind: "podcast" as const } : {}),
+    ...(row.transformation_rule_id?.startsWith("builtin:mind-map:") ? { transformationKind: "mind-map" as const } : {}),
     state: row.state,
     stage: row.stage,
     progress: row.progress_1000,

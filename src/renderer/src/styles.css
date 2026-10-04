@@ -1981,3 +1981,11 @@ button:disabled { cursor: not-allowed; opacity: .5; }
   .settings-grid { grid-template-columns: 1fr; }
   .settings-nav { position: static; grid-auto-flow: column; overflow-x: auto; }
 }
+
+.mindmap-progress-steps { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; margin: 12px 0; padding: 0; list-style: none; }
+.mindmap-progress-steps li { display: flex; flex-direction: column; align-items: center; gap: 5px; color: var(--ink-3); font-size: 11px; text-align: center; line-height: 1.4; }
+.mindmap-progress-steps li > span { display: flex; align-items: center; justify-content: center; width: 22px; height: 22px; border: 1px solid var(--line); border-radius: 50%; font-size: 11px; }
+.mindmap-progress-steps li > span svg { width: 13px; height: 13px; }
+.mindmap-progress-steps li.active { color: var(--accent); font-weight: 600; }
+.mindmap-progress-steps li.active > span { background: var(--accent-soft); border-color: var(--accent); }
+.mindmap-progress-steps li.done > span { color: white; background: var(--accent); border-color: var(--accent); }

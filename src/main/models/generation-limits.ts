@@ -1,8 +1,8 @@
 import type { GenerationLimits, ModelProfileDto } from "../../shared/models";
 import type { AppErrorDto } from "../../shared/app-errors";
+import { DEFAULT_CONTEXT_TOKENS, DEFAULT_OUTPUT_TOKENS } from "../../shared/generation-defaults";
 
-export const DEFAULT_CONTEXT_TOKENS = 32_768;
-export const DEFAULT_OUTPUT_TOKENS = 8_192;
+export { DEFAULT_CONTEXT_TOKENS, DEFAULT_OUTPUT_TOKENS } from "../../shared/generation-defaults";
 export const MAX_SAFE_TOKEN_INPUT = 2_147_483_647;
 export const MIN_OUTPUT_TOKENS = 1;
 export const MIN_INPUT_RESERVE = 1_024;

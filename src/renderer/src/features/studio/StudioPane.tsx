@@ -15,14 +15,15 @@ import PodcastPlayer from "./PodcastPlayer";
 import PodcastVoices from "./PodcastVoices";
 import MindMapViewer, { downloadMindMap } from "./MindMapViewer";
 import { flattenMindMap, mindMapDocumentSchema } from "../../../../shared/mindmaps";
-import { advancePercent, advancePodcastPercent, progressCeiling, progressPhase } from "./progress-motion";
+import { advancePercent, advancePodcastPercent, advanceMindMapPercent, mindMapProgressPhase, progressCeiling, progressPhase } from "./progress-motion";
 import { useTaskFeed } from "../../hooks/useTaskFeed";
+import { updateStudioSession, useStudioSession } from "./studio-session";
 import { errorText, formatDateTime, sourceReady } from "../../lib/format";
 import { api as getApi } from "../../lib/api";
 import type { AppLanguage } from "../../i18n";
 
 type TransformApi = ReturnType<typeof getApi>["transformations"];
-// Retain one running display per project when tabs or settings unmount this pane.
+// Retain the current display, including its terminal state, across navigation.
 const progressByProject = new Map<string, { key: string; percent: number; startedAt: number; tickAt: number; state: TaskDto["state"] }>();
 
 function normalizeInsightMarkdown(text: string): string {
@@ -41,25 +42,36 @@ export default function StudioPane({ projectId }: { projectId: string }) {
   const [conversations, setConversations] = useState<ConversationDto[]>([]);
   const [messages, setMessages] = useState<MessageDto[]>([]);
 
-  const [ruleKey, setRuleKey] = useState("summary");
-  const [targetSelections, setTargetSelections] = useState<Record<"source" | "message" | "answer", string[]>>({ source: [], message: [], answer: [] });
+  const session = useStudioSession(projectId);
+  const { ruleKey, targetSelections, submittedTasks, running, retrying } = session;
+  const setRuleKey = (ruleKey: string) => updateStudioSession(projectId, (current) => ({ ...current, ruleKey }));
+  const setTargetSelections = (update: (current: typeof targetSelections) => typeof targetSelections) =>
+    updateStudioSession(projectId, (current) => ({ ...current, targetSelections: update(current.targetSelections) }));
+  const setSubmittedTasks = (update: (current: TaskDto[]) => TaskDto[]) =>
+    updateStudioSession(projectId, (current) => ({ ...current, submittedTasks: update(current.submittedTasks) }));
+  const setRetrying = (retrying: boolean) => updateStudioSession(projectId, (current) => ({ ...current, retrying }));
   const [openMenu, setOpenMenu] = useState<"source" | "message" | "answer" | null>(null);
   const targetMenuRef = useRef<HTMLDivElement>(null);
   const runFormRef = useRef<HTMLFormElement>(null);
   const [editorRule, setEditorRule] = useState<TransformationDto | null | undefined>(undefined); // undefined = closed
-  const [running, setRunning] = useState(false);
   const [voicesReady, setVoicesReady] = useState(false);
   const [detailInsight, setDetailInsight] = useState<InsightDto | null>(null);
   const [mapInsightId, setMapInsightId] = useState<string | null>(null);
   const closeMap = useCallback(() => setMapInsightId(null), []);
-  const [submittedTasks, setSubmittedTasks] = useState<TaskDto[]>([]);
 
   const feedTasks = useTaskFeed(projectId, window.myNotebook.tasks?.subscribe, window.myNotebook.tasks?.list);
-  const tasks = useMemo(() => [...submittedTasks, ...feedTasks]
+  const tasks = useMemo(() => [...feedTasks, ...submittedTasks]
+    .filter((task) => task.projectId === projectId)
     .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
-    .filter((task, index, all) => all.findIndex((item) => item.id === task.id) === index), [feedTasks, submittedTasks]);
-  const transformTask = tasks.find((task) => task.kind === "transformation" && (task.state === "queued" || task.state === "running"))
-    ?? tasks.find((task) => task.kind === "transformation");
+    .filter((task, index, all) => all.findIndex((item) => item.id === task.id) === index), [feedTasks, submittedTasks, projectId]);
+  const ownedTasks = tasks.filter((task) => task.kind === "transformation" && (session.taskIds === null || session.taskIds.includes(task.id)));
+  const transformTask = ownedTasks.find((task) => task.state === "queued" || task.state === "running")
+    ?? (session.taskIds !== null ? ownedTasks.find((task) => task.state === "failed") : undefined) ?? ownedTasks[0];
+  useEffect(() => {
+    if (session.taskIds === null && transformTask) {
+      updateStudioSession(projectId, (current) => current.taskIds === null ? { ...current, taskIds: [transformTask.id], submittedTasks: [transformTask] } : current);
+    }
+  }, [projectId, session.taskIds, transformTask?.id]);
   const completedTransformations = tasks.filter((task) => task.kind === "transformation" && task.state === "completed")
     .map((task) => `${task.id}:${task.updatedAt}`).sort().join("|");
   const insightRequest = useRef(0);
@@ -102,10 +114,15 @@ export default function StudioPane({ projectId }: { projectId: string }) {
   }, [completedTransformations, loadInsights]);
 
   useEffect(() => {
-    setSubmittedTasks((current) => current.filter((submitted) => !feedTasks.some((task) => task.id === submitted.id && task.updatedAt >= submitted.updatedAt)));
-  }, [feedTasks]);
-
-  useEffect(() => { setSubmittedTasks([]); }, [projectId]);
+    const updates = feedTasks.filter((task) => {
+      if (!session.taskIds?.includes(task.id)) return false;
+      const saved = submittedTasks.find((item) => item.id === task.id);
+      return !saved || (task.updatedAt >= saved.updatedAt && JSON.stringify(task) !== JSON.stringify(saved));
+    });
+    if (updates.length) {
+      setSubmittedTasks((current) => [...updates, ...current.filter((task) => !updates.some((item) => item.id === task.id))]);
+    }
+  }, [feedTasks, submittedTasks, session.taskIds, projectId]);
 
   const chosenBuiltin = builtins.find((item) => item.key === ruleKey);
   const chosenRule = rules.find((item) => item.id === ruleKey);
@@ -133,7 +150,7 @@ export default function StudioPane({ projectId }: { projectId: string }) {
     const api: TransformApi = getApi().transformations;
     const hasSelection = Object.values(targetSelections).some((ids) => ids.length > 0);
     if (!hasSelection || running || retrying || (ruleKey === "podcast" && !voicesReady) || transformTask?.state === "running" || transformTask?.state === "queued") return;
-    setRunning(true);
+    updateStudioSession(projectId, (current) => ({ ...current, running: true, taskIds: [], submittedTasks: [] }));
     const targets: Array<Record<string, string>> = [];
     if (targetSelections.source.length > 0) targets.push({ sourceRevisionIds: targetSelections.source.join(",") });
     for (const id of targetSelections.message) targets.push({ messageId: id });
@@ -145,11 +162,14 @@ export default function StudioPane({ projectId }: { projectId: string }) {
       const input = chosenRule
         ? { projectId, transformationId: chosenRule.id, force: true, ...payload }
         : { projectId, builtinKey: ruleKey as "summary" | "key-points" | "qa" | "podcast" | "mind-map", language, force: true, ...payload };
-      return api.run(input).catch(() => undefined);
+      return api.run(input).then((result) => {
+        if (result.ok) updateStudioSession(projectId, (current) => ({ ...current,
+          taskIds: [...new Set([...(current.taskIds ?? []), result.value.id])],
+          submittedTasks: [result.value, ...current.submittedTasks.filter((task) => task.id !== result.value.id)] }));
+        return result;
+      }).catch(() => undefined);
     }));
-    const started = results.flatMap((result) => result?.ok ? [result.value] : []);
-    if (started.length > 0) setSubmittedTasks((current) => [...started, ...current.filter((task) => !started.some((item) => item.id === task.id))]);
-    setRunning(false);
+    updateStudioSession(projectId, (current) => ({ ...current, running: false }));
     if (results.some((result) => !result?.ok)) {
       const failure = results.find((result) => result && !result.ok);
       toast.error(failure && !failure.ok ? errorText(failure, t) : t("errors.internal"));
@@ -165,7 +185,6 @@ export default function StudioPane({ projectId }: { projectId: string }) {
     else setSubmittedTasks((current) => [result.value, ...current.filter((task) => task.id !== result.value.id)]);
   }
 
-  const [retrying, setRetrying] = useState(false);
   async function retryTask(): Promise<void> {
     if (transformTask?.state !== "failed" || retrying || running) return;
     setRetrying(true);
@@ -209,11 +228,12 @@ export default function StudioPane({ projectId }: { projectId: string }) {
   const starting = running && transformTask?.state !== "queued" && transformTask?.state !== "running";
   const taskState = starting ? "queued" : transformTask?.state === "cancelled" ? undefined : transformTask?.state;
   const isPodcast = starting ? ruleKey === "podcast" : transformTask?.transformationKind === "podcast";
+  const isMindMap = starting ? ruleKey === "mind-map" : transformTask?.transformationKind === "mind-map";
   const reportedPercent = starting ? 0 : transformTask ? (transformTask.state === "completed" ? 100 : Math.round(transformTask.progress / 10)) : 0;
   const ceiling = progressCeiling(reportedPercent);
   const taskKey = `${transformTask?.id ?? ""}:${transformTask?.attempt ?? 0}`;
   useEffect(() => {
-    if ((taskState === "queued" || taskState === "running") && runFormRef.current) runFormRef.current.scrollTop = runFormRef.current.scrollHeight;
+    if ((taskState === "queued" || taskState === "running" || taskState === "failed") && runFormRef.current) runFormRef.current.scrollTop = runFormRef.current.scrollHeight;
   }, [taskKey, taskState]);
   const [displayedPercent, setDisplayedPercent] = useState(0);
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
@@ -237,25 +257,31 @@ export default function StudioPane({ projectId }: { projectId: string }) {
   useEffect(() => {
     const previous = previousState.current;
     previousState.current = taskState;
-    if (taskState === "completed") {
-      progressByProject.delete(projectId);
-      displayedRef.current = 100;
-      setDisplayedPercent(100);
+    if (!taskState || starting) {
+      if (starting) { displayedRef.current = 0; setDisplayedPercent(0); setElapsedSeconds(0); }
       return;
     }
-    if (!taskState || taskState === "failed") {
-      if (transformTask) progressByProject.delete(projectId);
-      return;
-    }
-    if (taskState !== "running") return;
     const cached = progressByProject.get(projectId);
-    if (previous !== "running" || runKey.current !== taskKey) {
+    if (runKey.current !== taskKey || (taskState === "running" && previous !== "running" && previous !== undefined)) {
       runKey.current = taskKey;
-      const restored = previous === undefined && cached?.key === taskKey && cached.state === "running" ? cached : undefined;
+      const sameRun = cached?.key === taskKey || (taskState === "failed" && cached?.state === "running" && cached.key.startsWith(`${transformTask?.id}:`));
+      const restored = sameRun && cached && (cached.state === taskState || (taskState !== "running" && cached.state === "running")) ? cached : undefined;
       runStartedAt.current = restored?.startedAt ?? Date.now();
-      displayedRef.current = restored?.percent ?? (previous === undefined && (!isPodcast || reportedPercent >= 45) ? reportedPercent : 0);
+      const initialMapPercent = transformTask?.stage === "saving" ? 95 : transformTask?.stage === "verifying" ? 80 : 0;
+      displayedRef.current = restored?.percent ?? (taskState === "running" && isMindMap ? initialMapPercent
+        : previous === undefined && taskState === "running" && isPodcast && reportedPercent < 45 ? 0 : reportedPercent);
       setDisplayedPercent(displayedRef.current);
       setElapsedSeconds(Math.floor((Date.now() - runStartedAt.current) / 1000));
+    }
+    if (taskState !== "running") {
+      if (taskState === "completed") displayedRef.current = 100;
+      const endedAt = Date.parse(transformTask?.updatedAt ?? "");
+      const tickAt = cached?.key === taskKey && cached.state === taskState ? cached.tickAt
+        : endedAt >= runStartedAt.current && endedAt <= Date.now() ? endedAt : Date.now();
+      setDisplayedPercent(displayedRef.current);
+      setElapsedSeconds(Math.max(0, Math.floor((tickAt - runStartedAt.current) / 1000)));
+      progressByProject.set(projectId, { key: taskKey, percent: displayedRef.current, startedAt: runStartedAt.current, tickAt, state: taskState });
+      return;
     }
     let last = cached?.key === taskKey && cached.state === "running" ? cached.tickAt : Date.now();
     const remember = (): void => {
@@ -267,7 +293,8 @@ export default function StudioPane({ projectId }: { projectId: string }) {
       const delta = now - last;
       last = now;
       const elapsed = now - runStartedAt.current;
-      const next = isPodcast ? advancePodcastPercent(displayedRef.current, reportedPercent, elapsed) : advancePercent(displayedRef.current, ceiling, delta);
+      const next = isMindMap ? advanceMindMapPercent(displayedRef.current, reportedPercent, transformTask?.stage ?? "preparing", delta)
+        : isPodcast ? advancePodcastPercent(displayedRef.current, reportedPercent, elapsed) : advancePercent(displayedRef.current, ceiling, delta);
       if (next !== displayedRef.current) {
         displayedRef.current = next;
         setDisplayedPercent(next);
@@ -276,13 +303,17 @@ export default function StudioPane({ projectId }: { projectId: string }) {
       remember();
     }, 100);
     return () => clearInterval(timer);
-  }, [taskState, taskKey, ceiling, isPodcast, reportedPercent, projectId]);
+  }, [taskState, taskKey, ceiling, isPodcast, isMindMap, reportedPercent, projectId, starting, transformTask?.stage]);
 
   const taskPercent = Math.round(shownPercent);
+  const mindMapPhase = taskState === "failed" ? transformTask?.stage ?? "preparing"
+    : mindMapProgressPhase(shownPercent, transformTask?.stage ?? "preparing");
   // Keep preparation visible during the opening animation; later podcast
   // phases follow actual script, speech and saving milestones.
   const taskLabel = taskState === "running"
-    ? isPodcast
+    ? isMindMap
+      ? t(`transformations.mindMapPhases.${mindMapPhase}`)
+      : isPodcast
       ? t(`transformations.podcastPhases.${shownPercent < 20 || reportedPercent < 20 ? "preparing" : reportedPercent >= 98 ? "saving" : reportedPercent >= 45 ? "speech" : "script"}`)
       : t(`transformations.phases.${progressPhase(shownPercent, reportedPercent)}`)
     : t(`transformations.states.${taskState}`, taskState ?? "");
@@ -381,6 +412,16 @@ export default function StudioPane({ projectId }: { projectId: string }) {
                   <span className="task-card-percent">{taskPercent}%</span>
                 </span>
               </div>
+              {isMindMap && (
+                <ol className="mindmap-progress-steps" aria-label={t("transformations.mindMapProgress")}>
+                  {(["preparing", "generating", "verifying", "saving"] as const).map((stage, index, stages) => {
+                    const current = stages.indexOf(mindMapPhase as typeof stage);
+                    const complete = taskState === "completed" || index < current;
+                    const active = taskState !== "completed" && index === Math.max(0, current);
+                    return <li key={stage} className={complete ? "done" : active ? "active" : ""} aria-current={active ? "step" : undefined}><span>{complete ? <Icon name="check" /> : index + 1}</span>{t(`transformations.mindMapPhases.${stage}`)}</li>;
+                  })}
+                </ol>
+              )}
               <div
                 className={`progress${
                   taskState === "failed"

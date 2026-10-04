@@ -840,7 +840,7 @@ function expectOk(result: Result<{ requestId: string; assistantMessageId: string
     const service = new ChatService(baseDeps({ generationProfile: profile }));
     const first = expectOk(await service.send({ requestId: REQUEST_ID, projectId: PROJECT_ID, conversationId: world.conversationId, question: "Original question" }, () => {}));
     const before = world.repository.listMessages(PROJECT_ID, world.conversationId);
-    profile.maxOutputTokensOverride = 65536;
+    profile.maxOutputTokensOverride = 900_000;
     expect(await service.regenerate({ requestId: crypto.randomUUID(), projectId: PROJECT_ID, conversationId: world.conversationId, messageId: first.assistantMessageId, question: "Replacement question" }, () => {})).toMatchObject({ ok: false, error: { messageKey: "errors.generationLimitsConflict" } });
     expect(await service.send({ requestId: crypto.randomUUID(), projectId: PROJECT_ID, conversationId: world.conversationId, question: "New question" }, () => {})).toMatchObject({ ok: false });
     expect(world.repository.listMessages(PROJECT_ID, world.conversationId)).toEqual(before);
@@ -866,7 +866,7 @@ function expectOk(result: Result<{ requestId: string; assistantMessageId: string
     const { createdAt: _created, updatedAt: _updated, ...profile } = makeProfile();
     settings.saveProfile(profile);
     const service = new ModelService(settings, {} as CredentialStore);
-    const rejected = await service.updateGenerationSettings({ profileId: profile.id, contextTokensOverride: null, maxOutputTokensOverride: 65536 });
+    const rejected = await service.updateGenerationSettings({ profileId: profile.id, contextTokensOverride: null, maxOutputTokensOverride: 900_000 });
     expect(rejected).toMatchObject({ ok: false, error: { messageKey: "errors.generationLimitsConflict" } });
     expect(settings.getProfile(profile.id)!.maxOutputTokensOverride).toBeNull();
     expect((await service.updateGenerationSettings({ profileId: profile.id, contextTokensOverride: 131072, maxOutputTokensOverride: 65536 })).ok).toBe(true);
@@ -887,7 +887,7 @@ function expectOk(result: Result<{ requestId: string; assistantMessageId: string
 
   it("rejects an invalid fallback configuration before the fallback provider is called", async () => {
     const primary = makeProfile();
-    const fallback = { ...primary, id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", maxOutputTokensOverride: 65536 };
+    const fallback = { ...primary, id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", maxOutputTokensOverride: 900_000 };
     const factory = vi.fn(() => ({ ...fakeProvider(), async *generate(): AsyncGenerator<GenerationEvent> { throw new ProviderRequestError({ error: { code: "PROVIDER", messageKey: "errors.providerFailure", recoverable: true }, fallbackEligible: true }); } }));
     const service = new ChatService(baseDeps({ router: { resolve: () => [primary, fallback] }, providerFactory: factory }));
     expect(await service.send({ requestId: REQUEST_ID, projectId: PROJECT_ID, conversationId: world.conversationId, question: "Hi" }, () => {})).toMatchObject({ ok: false, error: { messageKey: "errors.generationLimitsConflict" } });

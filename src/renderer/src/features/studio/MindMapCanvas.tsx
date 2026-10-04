@@ -108,6 +108,16 @@ const MindMapCanvas = forwardRef<MindMapCanvasHandle, {
     const theme = getComputedStyle(host.current);
     const me = new MindElixir({ el: host.current, direction: MindElixir.RIGHT, editable: false,
       contextMenu: false, toolBar: false, keypress: false, allowUndo: false, alignment: "nodes", scaleMin: 0.001, scaleMax: 3,
+      handleWheel: (event) => {
+        event.preventDefault();
+        const current = instance.current;
+        if (!current || !event.deltaY) return;
+        const pixels = event.deltaY * (event.deltaMode === WheelEvent.DOM_DELTA_LINE ? 40
+          : event.deltaMode === WheelEvent.DOM_DELTA_PAGE ? current.container.clientHeight : 1);
+        const factor = Math.exp(Math.max(-0.2, Math.min(0.2, -pixels * 0.001)));
+        current.scale(Math.min(current.scaleMax, Math.max(current.scaleMin, current.scaleVal * factor)),
+          { x: event.clientX, y: event.clientY });
+      },
       theme: { name: "MyNotebookLM", palette: [theme.getPropertyValue("--accent").trim()], cssVar: {
         "--bgcolor": "transparent", "--color": theme.getPropertyValue("--ink").trim(),
         "--main-color": theme.getPropertyValue("--accent").trim(), "--main-bgcolor": theme.getPropertyValue("--accent-soft").trim(),

@@ -75,6 +75,9 @@ describe("TransformationService", () => {
     service = new TransformationService(baseDeps);
     const insight = await service.run({ projectId: PROJECT, builtinKey: "mind-map", language: "zh-CN", sourceRevisionId: REVISION });
     expect(requestText).toContain(`[CHUNK:${CHUNK}]`);
+    expect(taskEvents).toContain("running:preparing");
+    expect(taskEvents).toContain("running:verifying");
+    expect(baseDeps.taskRepository.findById(insight.taskId)?.transformationKind).toBe("mind-map");
     expect(service.listInsights({ projectId: PROJECT })[0]?.builtinKey).toBe("mind-map");
     const maps = new MindMapService(db.connection);
     const map = maps.get({ projectId: PROJECT, insightId: insight.id });
@@ -106,10 +109,69 @@ describe("TransformationService", () => {
     expect(service.listInsights({ projectId: PROJECT })).toEqual([]);
     const failedRow = db.connection.prepare("SELECT id FROM tasks WHERE state='failed'").get() as { id: string };
     const failed = baseDeps.taskRepository.findById(failedRow.id);
-    expect(failed?.error?.messageKey).toBe("errors.mindMapInvalid");
+    expect(failed?.error?.messageKey).toBe("errors.mindMapInvalidReferences");
+    const historicalRoute = JSON.parse((db.connection.prepare("SELECT route_snapshot_json FROM transformation_task_snapshots WHERE task_id=?").get(failed.id) as any).route_snapshot_json);
+    historicalRoute.taskKind = "custom-transformation";
+    db.connection.prepare("UPDATE transformation_task_snapshots SET route_snapshot_json=? WHERE task_id=?").run(JSON.stringify(historicalRoute), failed.id);
+    const profile = baseDeps.router.resolve()[0];
+    baseDeps.router = { resolve: (kind: string) => { expect(kind).toBe("mind-map"); return [{ ...profile, modelId: "replacement-map-model" }]; } };
     baseDeps.generation = { generateRouted: async function* () { yield* successful(JSON.stringify({ root: { title: "Valid map", refs: [CHUNK] } })); } };
     await new TransformationService(baseDeps).retry(failed.id);
     expect(service.listInsights({ projectId: PROJECT })).toHaveLength(1);
+    const retriedRoute = JSON.parse((db.connection.prepare("SELECT route_snapshot_json FROM transformation_task_snapshots WHERE task_id=?").get(failed.id) as any).route_snapshot_json);
+    expect(retriedRoute).toMatchObject({ taskKind: "mind-map", routes: [{ model: "replacement-map-model" }] });
+  });
+
+  it("repairs invalid maps once from the complete saved source on the same model and counts its usage", async () => {
+    let attempts = 0;
+    baseDeps.generation = { generateRouted: async function* (kind: string, request: any, profileId: string) {
+      expect(kind).toBe("mind-map");
+      if (++attempts === 1) yield* successful('{"root":{"title":"Topic","refs":["S1"]}}');
+      else {
+        expect(profileId).toBe("router-profile");
+        expect(request.allowFallback).toBe(false);
+        expect(request.thinking).toBe("off");
+        const prepared = await request.prepareRequest(baseDeps.router.resolve()[0]);
+        expect(prepared.messages[0].content).toContain("Repair the rejected mind map");
+        expect(prepared.messages[0].content).toContain("source text");
+        expect(prepared.messages[0].content).toContain(`[CHUNK:${CHUNK}]`);
+        expect(prepared.messages[0].content).toContain("unknown source block");
+        expect(prepared.maxTokens).toBeGreaterThan(0);
+        yield* successful(JSON.stringify({ root: { title: "Topic", refs: [CHUNK] } }));
+      }
+    } };
+    const insight = await new TransformationService(baseDeps).run({ projectId: PROJECT, builtinKey: "mind-map", sourceRevisionId: REVISION });
+    expect(attempts).toBe(2);
+    expect(insight.usage?.totalTokens).toBe(28);
+    expect(JSON.parse(insight.content).root.refs).toEqual([CHUNK]);
+    expect(taskEvents.filter((event) => event === "running:verifying")).toHaveLength(1);
+    expect(taskEvents.at(-1)).toBe("completed:saving");
+  });
+
+  it.each([
+    ['{"root":', "errors.mindMapInvalidJson"],
+    ['{"root":{"title":"Topic","children":"wrong"}}', "errors.mindMapInvalidStructure"],
+    ['{"root":{"title":"Topic","refs":["foreign"]}}', "errors.mindMapInvalidReferences"]
+  ])("reports the precise remaining validation failure and never loops repair for %s", async (raw, messageKey) => {
+    let attempts = 0;
+    baseDeps.generation = { generateRouted: async function* () { attempts++; yield* successful(raw); } };
+    await expect(new TransformationService(baseDeps).run({ projectId: PROJECT, builtinKey: "mind-map", sourceRevisionId: REVISION })).rejects.toMatchObject({ error: { messageKey } });
+    expect(attempts).toBe(2);
+    const row = db.connection.prepare("SELECT id FROM tasks").get() as { id: string };
+    expect(baseDeps.taskRepository.findById(row.id)).toMatchObject({ state: "failed", stage: "verifying", progress: 900, error: { messageKey } });
+    expect(service.listInsights({ projectId: PROJECT })).toEqual([]);
+  });
+
+  it("does not save a map when cancellation arrives during automatic repair", async () => {
+    const controller = new AbortController();
+    let attempts = 0;
+    baseDeps.generation = { generateRouted: async function* () {
+      if (++attempts === 1) yield* successful('{"root":');
+      else { controller.abort(); yield* successful(JSON.stringify({ root: { title: "Topic", refs: [CHUNK] } })); }
+    } };
+    await expect(new TransformationService(baseDeps).run({ projectId: PROJECT, builtinKey: "mind-map", sourceRevisionId: REVISION, signal: controller.signal })).rejects.toMatchObject({ error: { code: "CANCELLED" } });
+    expect(service.listInsights({ projectId: PROJECT })).toEqual([]);
+    expect(db.connection.prepare("SELECT state FROM tasks").get()).toMatchObject({ state: "cancelled" });
   });
 
   it("identifies persisted Q&A sets by the saved rule rather than content", async () => {

@@ -113,4 +113,14 @@ describe("ModelRouter", () => {
       (original as { name: string }).name = "changed";
     }).toThrow();
   });
+
+  it("uses the independent map route and only inherits chat when no map route is set", () => {
+    const routes = new FakeRoutes();
+    const router = new ModelRouter(routes);
+    expect(router.resolve("mind-map").map((item) => item.id)).toEqual([FALLBACK_ID, PRIMARY_ID]);
+    routes.routes.set("mind-map", [{ taskKind: "mind-map", position: 0, profileId: PRIMARY_ID }]);
+    routes.routes.set("custom-transformation", [{ taskKind: "custom-transformation", position: 0, profileId: FALLBACK_ID }]);
+    expect(router.resolve("mind-map").map((item) => item.id)).toEqual([PRIMARY_ID]);
+    expect(router.resolve("custom-transformation").map((item) => item.id)).toEqual([FALLBACK_ID]);
+  });
 });

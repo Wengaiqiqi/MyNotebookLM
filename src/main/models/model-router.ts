@@ -12,6 +12,7 @@ const generationTasks = new Set<ModelTaskKind>([
   "summary",
   "key-points",
   "qa",
+  "mind-map",
   "custom-transformation",
   "podcast"
 ]);

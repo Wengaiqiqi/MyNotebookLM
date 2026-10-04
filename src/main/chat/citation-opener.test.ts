@@ -2,6 +2,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type Database from "better-sqlite3";
 import ExcelJS from "exceljs";
 import JSZip from "jszip";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import { openAppDatabase, type AppDatabase } from "../db/database";
 import { CitationOpener } from "./citation-opener";
 
@@ -25,8 +28,13 @@ describe("CitationOpener", () => {
   let openPath: ReturnType<typeof vi.fn<(path: string) => Promise<string>>>;
   let openExternal: ReturnType<typeof vi.fn<(url: string) => Promise<unknown>>>;
   let readManagedFile: ReturnType<typeof vi.fn<(path: string) => Promise<Uint8Array>>>;
+  let temporaryRoot: string;
+  let managedPath: string;
 
   beforeEach(() => {
+    temporaryRoot = mkdtempSync(path.join(tmpdir(), "mynotebooklm-citation-opener-test-"));
+    managedPath = path.join(temporaryRoot, "content");
+    writeFileSync(managedPath, Buffer.from("authoritative original"));
     world = openAppDatabase(":memory:", "src/main/db/migrations");
     openPath = vi.fn(async () => "");
     openExternal = vi.fn(async () => undefined);
@@ -35,7 +43,7 @@ describe("CitationOpener", () => {
     world.connection.prepare("INSERT INTO sources(id, project_id, kind, display_name) VALUES (?, ?, ?, ?)")
       .run(PDF_SOURCE_ID, PROJECT_ID, "pdf", "Research PDF");
     world.connection.prepare("INSERT INTO source_revisions(id, source_id, original_path, stored_path, source_hash, locator_kind, chunking_version) VALUES (?, ?, ?, ?, ?, ?, ?)")
-      .run(PDF_REVISION_ID, PDF_SOURCE_ID, "original.pdf", String.raw`C:\managed\content`, "sha256:test", "page", "v1");
+      .run(PDF_REVISION_ID, PDF_SOURCE_ID, "original.pdf", managedPath, "sha256:test", "page", "v1");
     world.connection.prepare("UPDATE source_revisions SET state = 'ready' WHERE id = ?").run(PDF_REVISION_ID);
     world.connection.prepare("INSERT INTO source_chunks(id, revision_id, ordinal, content_hash, text, locator_json) VALUES (?, ?, 0, ?, ?, ?)")
       .run(PDF_CHUNK_ID, PDF_REVISION_ID, "sha256:chunk", "完整的权威原文。\n\n第二段。", JSON.stringify({ kind: "page", page: 2 }));
@@ -64,15 +72,57 @@ describe("CitationOpener", () => {
     addCitation({ id: "c-pdf", sourceId: PDF_SOURCE_ID, locator: { kind: "page", page: 2 } });
     const result = await makeOpener().openCitation({ projectId: PROJECT_ID, citationId: "c-pdf" });
     expect(result).toMatchObject({ ok: true });
-    expect(openPath).toHaveBeenCalledWith(String.raw`C:\managed\content`);
+    const openedPath = openPath.mock.calls[0]![0];
+    expect(path.extname(openedPath)).toBe(".pdf");
+    expect(readFileSync(openedPath)).toEqual(readFileSync(managedPath));
     expect(openExternal).not.toHaveBeenCalled();
   });
 
   it("opens a stored source target only after project ownership validation", async () => {
     const result = await makeOpener().openSource({ projectId: PROJECT_ID, sourceId: PDF_SOURCE_ID });
     expect(result).toMatchObject({ ok: true, value: { opened: "document" } });
-    expect(openPath).toHaveBeenCalledWith(String.raw`C:\managed\content`);
+    expect(path.extname(openPath.mock.calls[0]![0])).toBe(".pdf");
     expect(await makeOpener().openSource({ projectId: "99999999-9999-4999-8999-999999999999", sourceId: PDF_SOURCE_ID })).toMatchObject({ ok: false, error: { code: "NOT_FOUND" } });
+    expect(openPath).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    ["docx", ".docx"], ["pdf", ".pdf"], ["pptx", ".pptx"], ["xlsx", ".xlsx"],
+    ["csv", ".csv"], ["markdown", ".md"], ["text", ".txt"]
+  ])("opens extensionless %s mind-map references with the correct file association", async (kind, extension) => {
+    world.connection.prepare("UPDATE sources SET kind = ? WHERE id = ?").run(kind, PDF_SOURCE_ID);
+    const result = await makeOpener().openChunk({ projectId: PROJECT_ID, chunkId: PDF_CHUNK_ID });
+    expect(result).toEqual({ ok: true, value: { opened: "document" } });
+    const openedPath = openPath.mock.calls[0]![0];
+    expect(path.extname(openedPath)).toBe(extension);
+    expect(openedPath).not.toBe(managedPath);
+    expect(readFileSync(openedPath)).toEqual(readFileSync(managedPath));
+    writeFileSync(openedPath, "external edit");
+    expect(readFileSync(managedPath, "utf8")).toBe("authoritative original");
+    expect(world.connection.prepare("SELECT stored_path FROM source_revisions WHERE id = ?").get(PDF_REVISION_ID)).toEqual({ stored_path: managedPath });
+  });
+
+  it("uses the managed DOCX when the user's original upload has been removed", async () => {
+    world.connection.prepare("UPDATE sources SET kind = 'docx' WHERE id = ?").run(PDF_SOURCE_ID);
+    world.connection.prepare("UPDATE source_revisions SET original_path = ? WHERE id = ?").run(path.join(temporaryRoot, "missing.docx"), PDF_REVISION_ID);
+    expect(await makeOpener().openChunk({ projectId: PROJECT_ID, chunkId: PDF_CHUNK_ID })).toMatchObject({ ok: true });
+    expect(path.extname(openPath.mock.calls[0]![0])).toBe(".docx");
+  });
+
+  it("opens already typed files directly and rejects another project's reference", async () => {
+    const typedPath = path.join(temporaryRoot, "report.PDF");
+    writeFileSync(typedPath, "existing original");
+    world.connection.prepare("UPDATE source_revisions SET stored_path = ? WHERE id = ?").run(typedPath, PDF_REVISION_ID);
+    expect(await makeOpener().openChunk({ projectId: "99999999-9999-4999-8999-999999999999", chunkId: PDF_CHUNK_ID })).toMatchObject({ ok: false, error: { code: "NOT_FOUND" } });
+    expect(openPath).not.toHaveBeenCalled();
+    expect(await makeOpener().openChunk({ projectId: PROJECT_ID, chunkId: PDF_CHUNK_ID })).toMatchObject({ ok: true });
+    expect(openPath).toHaveBeenCalledWith(typedPath);
+  });
+
+  it("does not invoke the shell when the managed original is missing", async () => {
+    rmSync(managedPath);
+    expect(await makeOpener().openChunk({ projectId: PROJECT_ID, chunkId: PDF_CHUNK_ID })).toMatchObject({ ok: false, error: { messageKey: "errors.citationOpenFailed" } });
+    expect(openPath).not.toHaveBeenCalled();
   });
 
   it("returns the complete authoritative chunk only to its owning project", async () => {
@@ -90,7 +140,7 @@ describe("CitationOpener", () => {
         images: []
       }
     });
-    expect(readManagedFile).toHaveBeenCalledWith(String.raw`C:\managed\content`);
+    expect(readManagedFile).toHaveBeenCalledWith(managedPath);
     await expect(makeOpener().getCitationDetail({
       projectId: "99999999-9999-4999-8999-999999999999",
       citationId: "c-detail"
@@ -201,9 +251,16 @@ describe("CitationOpener", () => {
     const result = await makeOpener().openCitation({ projectId: PROJECT_ID, citationId: "c-pdf2" });
     expect(result).toMatchObject({ ok: false, error: { code: "INTERNAL" } });
     expect(JSON.stringify(result)).not.toContain("classified");
+    expect(() => readFileSync(openPath.mock.calls[0]![0])).toThrow();
   });
 
   afterEach(() => {
     world.close();
+    const directories = new Set([temporaryRoot, ...openPath.mock.calls.map(([file]) => path.dirname(file))]);
+    for (const directory of directories) {
+      expect(path.dirname(directory)).toBe(tmpdir());
+      expect(path.basename(directory)).toMatch(/^mynotebooklm-(citation-opener-test|original)-/);
+      rmSync(directory, { recursive: true, force: true });
+    }
   });
 });

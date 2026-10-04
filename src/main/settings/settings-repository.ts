@@ -1,4 +1,5 @@
 import type Database from "better-sqlite3";
+import { verifiedGenerationLimits } from "../models/verified-generation-limits";
 import {
   modelProfileDtoSchema,
   modelProfileInputSchema,
@@ -60,6 +61,7 @@ const defaultGenerationTasks = [
   "summary",
   "key-points",
   "qa",
+  "mind-map",
   "custom-transformation"
 ] as const;
 
@@ -84,9 +86,11 @@ function parseGenerationLimits(value: string | null | undefined): GenerationLimi
 
 function toProfile(row: ProfileRow): ModelProfileDto {
   const cachedLimits = parseGenerationLimits(row.generation_limits_json);
-  const generationLimits = cachedLimits?.identity.provider === row.provider
+  const matchingLimits = cachedLimits?.identity.provider === row.provider
     && cachedLimits.identity.modelId === row.model_id
     && cachedLimits.identity.baseUrl.replace(/\/+$/, "") === row.base_url.replace(/\/+$/, "") ? cachedLimits : undefined;
+  const generationLimits = matchingLimits ?? (row.capability === "generation"
+    ? verifiedGenerationLimits({ provider: row.provider, baseUrl: row.base_url, modelId: row.model_id }) : undefined);
   return modelProfileDtoSchema.parse({
     id: row.id,
     name: row.name,
@@ -348,7 +352,7 @@ export class SettingsRepository {
       this.db.prepare(`
         DELETE FROM model_routes
         WHERE task_kind IN ('chat', 'note-title', 'summary', 'key-points', 'qa',
-          'custom-transformation', 'embedding')
+          'mind-map', 'custom-transformation', 'embedding')
       `).run();
       const insert = this.db.prepare(`
         INSERT INTO model_routes(task_kind, position, profile_id) VALUES (?, 0, ?)

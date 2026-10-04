@@ -225,6 +225,7 @@ describe("Settings Component", () => {
     fireEvent.click(taskSelect);
 
     expect(screen.getByRole("option", { name: "摘要" })).toBeTruthy();
+    expect(screen.getByRole("option", { name: "思维导图" })).toBeTruthy();
     expect(screen.queryByRole("option", { name: "总结" })).toBeNull();
     expect(screen.queryByRole("option", { name: "要点" })).toBeNull();
   });

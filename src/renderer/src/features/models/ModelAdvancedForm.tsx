@@ -1,17 +1,15 @@
 import React, { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { ModelProfileDto } from "../../../../shared/models";
+import { DEFAULT_CONTEXT_TOKENS, DEFAULT_OUTPUT_TOKENS } from "../../../../shared/generation-defaults";
 import Icon from "../../ui/Icon";
 import { toast } from "../../ui/Toast";
 
-const UNKNOWN_CONTEXT_TOKENS = 32_768;
-const DEFAULT_OUTPUT_TOKENS = 8_192;
-
-/** Automatic (unoverridden) context capacity: provider data, else the conservative default. */
+/** Automatic (unoverridden) context capacity: detected data, else the default. */
 function effectiveContext(profile: ModelProfileDto): number {
   const limits = profile.generationLimits;
-  if (limits?.windowKind === "input-only") return limits.inputTokenLimit ?? UNKNOWN_CONTEXT_TOKENS;
-  return limits?.contextWindowTokens ?? UNKNOWN_CONTEXT_TOKENS;
+  if (limits?.windowKind === "input-only") return limits.inputTokenLimit ?? limits.contextWindowTokens ?? DEFAULT_CONTEXT_TOKENS;
+  return limits?.contextWindowTokens ?? limits?.inputTokenLimit ?? DEFAULT_CONTEXT_TOKENS;
 }
 
 /** Automatic output allowance: provider cap, else the conservative default. */
@@ -22,9 +20,7 @@ function effectiveOutput(profile: ModelProfileDto): number {
 /** Where the displayed automatic value came from, so the hint can say which. */
 function contextSource(profile: ModelProfileDto): "provider" | "default" {
   const limits = profile.generationLimits;
-  return limits?.windowKind === "input-only"
-    ? (limits.inputTokenLimit === undefined ? "default" : "provider")
-    : (limits?.contextWindowTokens === undefined ? "default" : "provider");
+  return limits?.contextWindowTokens !== undefined || limits?.inputTokenLimit !== undefined ? "provider" : "default";
 }
 
 function parsePositive(value: string): number | null {
@@ -103,7 +99,7 @@ export default function ModelAdvancedForm({ profile, onSaved, onCancel }: {
           onChange={(event) => setContextValue(event.target.value)}
           inputMode="numeric"
         />
-        <small className="field-hint">{limits?.windowKind === "input-only"
+        <small className="field-hint">{limits?.windowKind === "input-only" && limits.inputTokenLimit !== undefined
           ? t("model.contextInputOnlyHint", { value: contextDefault })
           : contextFromProvider
             ? t("model.contextAutomaticHint", { value: contextDefault })

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { advancePercent, advancePodcastPercent, progressCeiling, progressPhase } from "./progress-motion";
+import { advancePercent, advancePodcastPercent, advanceMindMapPercent, mindMapProgressPhase, progressCeiling, progressPhase } from "./progress-motion";
 
 describe("progress motion", () => {
   it("animates only the first three seconds of podcast preparation even when the provider responds quickly", () => {
@@ -66,5 +66,32 @@ describe("progress motion", () => {
     expect(progressPhase(79, 80)).toBe("generating");
     expect(progressPhase(79.6, 40)).toBe("saving");
     expect(progressPhase(80, 40)).toBe("saving");
+  });
+  it("keeps map preparation at four seconds even when the model responds immediately", () => {
+    let value = 0;
+    for (let tick = 0; tick < 20; tick++) value = advanceMindMapPercent(value, 55, "generating", 100);
+    expect(value).toBe(10);
+    expect(mindMapProgressPhase(value, "generating")).toBe("preparing");
+    for (let tick = 0; tick < 20; tick++) value = advanceMindMapPercent(value, 55, "generating", 100);
+    expect(value).toBe(20);
+    expect(mindMapProgressPhase(value, "generating")).toBe("generating");
+    expect(advanceMindMapPercent(value, 35, "preparing", 60_000)).toBe(20);
+  });
+  it("uses quiz generation speeds and holds at the boundary of the actual map stage", () => {
+    expect(advanceMindMapPercent(20, 45, "generating", 1000)).toBe(24);
+    expect(advanceMindMapPercent(49, 45, "generating", 1000)).toBe(50);
+    expect(advanceMindMapPercent(50, 45, "generating", 60_000)).toBe(50);
+    expect(advanceMindMapPercent(20, 55, "generating", 1000)).toBe(50);
+    expect(advanceMindMapPercent(50, 55, "generating", 1000)).toBe(56);
+    expect(advanceMindMapPercent(80, 55, "generating", 60_000)).toBe(80);
+    expect(mindMapProgressPhase(80, "generating")).toBe("generating");
+    expect(advanceMindMapPercent(80, 90, "verifying", 1000)).toBe(81);
+    expect(advanceMindMapPercent(95, 90, "verifying", 60_000)).toBe(95);
+    expect(mindMapProgressPhase(95, "verifying")).toBe("verifying");
+    expect(advanceMindMapPercent(95, 98, "saving", 1000)).toBe(96);
+    expect(advanceMindMapPercent(99, 98, "saving", 60_000)).toBe(99);
+    expect(mindMapProgressPhase(95, "saving")).toBe("saving");
+    expect(mindMapProgressPhase(30, "verifying")).toBe("generating");
+    expect(mindMapProgressPhase(90, "saving")).toBe("verifying");
   });
 });

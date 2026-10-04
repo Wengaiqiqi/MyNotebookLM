@@ -112,7 +112,6 @@ export default function MindMapViewer({ projectId, insightId, onClose }: { proje
         {map && <span className="hint">{t("mindmap.metadata", { sources: map.sourceCount, nodes: map.nodeCount })}</span>}
       </div>
       <div className="mindmap-tools">
-        <button type="button" className="btn sm" disabled={!map} onClick={() => canvas.current?.fit()}><Icon name="expand" />{t("mindmap.fit")}</button>
         <button type="button" className="btn sm" disabled={!map} onClick={() => canvas.current?.collapse(!allCollapsed)}><Icon name="layers" />{t(allCollapsed ? "mindmap.expandAll" : "mindmap.collapseAll")}</button>
         <div className="mindmap-export" ref={exportMenu}>
           <button type="button" className="btn sm" disabled={!map || exporting} aria-expanded={exportOpen} onClick={() => setExportOpen((current) => !current)}><Icon name="download" />{t("mindmap.export")}<Icon name="chevron-down" /></button>
@@ -133,7 +132,6 @@ export default function MindMapViewer({ projectId, insightId, onClose }: { proje
             <button type="button" aria-label={t("mindmap.zoomOut")} onClick={() => canvas.current?.zoom(-0.1)}><Icon name="minus" /></button>
             <span>{Math.round(view.scale * 100)}%</span>
             <button type="button" aria-label={t("mindmap.zoomIn")} onClick={() => canvas.current?.zoom(0.1)}><Icon name="plus" /></button>
-            <button type="button" aria-label={t("mindmap.fit")} onClick={() => canvas.current?.fit()}><Icon name="target" /></button>
           </div>
         </div>
         <div className="mindmap-divider" role="separator" aria-orientation="vertical" aria-label={t("mindmap.resizePanel")} tabIndex={0} onPointerDown={resize}

@@ -142,6 +142,14 @@ describe("main source import orchestration", () => {
     expect(service.listTasks("project")[0]?.error).toEqual({ code: "PROVIDER", messageKey: "errors.provider", recoverable: true });
   });
 
+  it.each(["errors.mindMapInvalidJson", "errors.mindMapInvalidStructure", "errors.mindMapInvalidReferences", "errors.transformationOutputIncomplete"])("keeps map metadata and %s when reloading persisted task progress", (messageKey) => {
+    const row = { id: "task", project_id: "project", source_id: null, kind: "transformation", state: "failed", stage: "verifying",
+      progress_1000: 900, attempt: 0, error_code: "PROVIDER", error_message: messageKey, idempotency_key: null,
+      transformation_rule_id: "builtin:mind-map:zh-CN", created_at: "now", updated_at: "now" };
+    const service = new MainSourceService({ prepare: vi.fn(() => ({ all: () => [row] })) } as any, {} as any, {} as any);
+    expect(service.listTasks("project")[0]).toMatchObject({ transformationKind: "mind-map", progress: 900, error: { messageKey } });
+  });
+
   it("returns managed file size without exposing its stored path", () => {
     const root = mkdtempSync(path.join(tmpdir(), "mynotebooklm-source-size-"));
     const stored = path.join(root, "managed.bin");

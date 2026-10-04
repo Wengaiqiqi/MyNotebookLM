@@ -14,6 +14,7 @@ import { TaskService } from "../tasks/task-service";
 import { NoteRepository } from "./note-repository";
 import { TransformationRepository } from "./transformation-repository";
 import { TransformationService } from "./transformation-service";
+import { SettingsRepository } from "../settings/settings-repository";
 
 const PROJECT = "11111111-1111-4111-8111-111111111111";
 const NOTE = "22222222-2222-4222-8222-222222222222";
@@ -102,6 +103,31 @@ describe("Transformation full input through real model routing", () => {
     expect(JSON.parse(snapshot.input_snapshot_json)).toMatchObject({ content: body, truncated: false });
     expect(snapshot.rendered_prompt_version).toBe("transformation-prompt-full-input-v2");
     expectWithinSharedWindows();
+  });
+  it("sends full input directly for an unknown model under the 1M default", async () => {
+    profiles = [{ ...profile("unidentified"), contextTokensOverride: null, maxOutputTokensOverride: null }];
+    const body = "完整资料🙂 with facts\n".repeat(6000) + "[TAIL]";
+    setBody(body);
+    await service.run(input);
+    expect(requests).toHaveLength(1);
+    expect(requests[0]!.request.messages[0]!.content).toContain(body);
+    expect(requests[0]!.request.maxTokens).toBe(8192);
+    expect(estimateTokens(requests[0]!.request.messages[0]!.content) + 72 + 8192 + 100_000).toBeLessThan(1_000_000);
+  });
+
+  it("sends a 53k-character source directly to official MiMo without unnecessary condensation", async () => {
+    const settings = new SettingsRepository(db.connection);
+    const id = "44444444-4444-4444-8444-444444444444";
+    settings.saveProfile({ id, name: "MiMo", provider: "openai", capability: "generation", baseUrl: "https://api.xiaomimimo.com/v1", modelId: "mimo-v2.6-flash", enabled: true });
+    profiles = [settings.getProfile(id)!];
+    const body = "[START]" + "论文中文资料与研究事实\n".repeat(4500) + "[TAIL]";
+    setBody(body);
+    respond = () => answer(JSON.stringify({ root: { title: "完整导图", refs: [] } }));
+    await service.run({ projectId: PROJECT, noteId: NOTE, builtinKey: "mind-map", language: "zh-CN" });
+    expect(requests).toHaveLength(1);
+    expect(requests[0]!.request.messages[0]!.content).toContain(body);
+    expect(requests[0]!.request.maxTokens).toBe(8192);
+    expect(profiles[0]!.generationLimits!.contextWindowTokens).toBe(1_000_000);
   });
 
   it("processes every Unicode character and includes the middle and tail in the final request", async () => {
@@ -269,6 +295,35 @@ describe("Transformation full input through real model routing", () => {
     expect(requests).toHaveLength(1);
     expect(requests[0]!.request.maxTokens).toBe(8192);
     expect(requests[0]!.request.messages[0]!.content).toContain(body);
+  });
+
+  it.each([false, true])("reprocesses full mind-map excerpts after an output limit (empty=%s)", async (empty) => {
+    profiles = [profile("map-model", 32768, 8192)];
+    const body = "[START]" + "完整资料🙂\n".repeat(5000) + "[TAIL]";
+    setBody(body);
+    respond = (request) => {
+      const part = excerpt(request);
+      if (part === undefined) return answer(JSON.stringify({ root: { title: "完整导图", summary: "涵盖全部资料", refs: [], children: [{ title: "尾部结论", refs: [] }] } }));
+      expect(request.thinking).toBe("off");
+      expect(request.maxTokens).toBe(8192);
+      return part.length > 6000 ? answer(empty ? "" : "unfinished", "length") : answer("compact " + (part.match(/\[(?:START|TAIL)\]/g) ?? []).join(" "));
+    };
+    const result = await service.run({ projectId: PROJECT, noteId: NOTE, builtinKey: "mind-map", language: "zh-CN" });
+    const successfulParts = requests.map(({ request }) => excerpt(request)).filter((part): part is string => part !== undefined && part.length <= 6000);
+    expect(successfulParts.join("")).toBe(body);
+    expect(requests.at(-1)!.request.messages[0]!.content).toMatch(/\[START\][\s\S]*\[TAIL\]/);
+    expect(JSON.parse(result.content).root.title).toBe("完整导图");
+    expect(task().state).toBe("completed");
+    expectWithinSharedWindows();
+  });
+
+  it("keeps the real output-limit error and generation stage for an incomplete map", async () => {
+    respond = () => answer('{"root":{"title":"unfinished', "length");
+    await expect(service.run({ projectId: PROJECT, noteId: NOTE, builtinKey: "mind-map" })).rejects.toMatchObject({ error: { messageKey: "errors.transformationOutputIncomplete" } });
+    const saved = new TaskRepository(db.connection).findById(task().id);
+    expect(saved).toMatchObject({ state: "failed", stage: "generating", transformationKind: "mind-map", error: { messageKey: "errors.transformationOutputIncomplete" } });
+    expect(saved!.progress).toBeLessThan(900);
+    expect(service.listInsights({ projectId: PROJECT })).toEqual([]);
   });
 
   it("reports instructions that cannot fit before contacting the provider", async () => {

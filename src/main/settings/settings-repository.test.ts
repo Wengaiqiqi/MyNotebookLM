@@ -19,6 +19,7 @@ const GENERATION_TASKS = [
   "summary",
   "key-points",
   "qa",
+  "mind-map",
   "custom-transformation"
 ] as const;
 
@@ -85,6 +86,18 @@ describe("SettingsRepository", () => {
 
     repository.deleteProfile(GENERATION_ID);
     expect(repository.listProfiles()).toEqual([]);
+  });
+
+  it("recognizes the official MiMo million-token window for existing profiles without changing manual overrides", () => {
+    repository.saveProfile({ id: GENERATION_ID, name: "MiMo", provider: "openai", capability: "generation", baseUrl: "https://api.xiaomimimo.com/v1", modelId: "mimo-v2.6-flash", enabled: true });
+    const saved = repository.getProfile(GENERATION_ID)!;
+    expect(saved.generationLimits).toMatchObject({ contextWindowTokens: 1_000_000, source: "verified" });
+    expect(saved.contextTokensOverride).toBeNull();
+    appDatabase.connection.prepare("UPDATE model_profiles SET context_tokens_override=65536 WHERE id=?").run(GENERATION_ID);
+    expect(repository.getProfile(GENERATION_ID)!.contextTokensOverride).toBe(65536);
+    const reported = { ...saved.generationLimits!, contextWindowTokens: 500_000, source: "provider" as const };
+    repository.updateGenerationLimits(GENERATION_ID, reported);
+    expect(repository.getProfile(GENERATION_ID)!.generationLimits!.contextWindowTokens).toBe(500_000);
   });
 
   it("replaces routes transactionally and preserves requested order", () => {

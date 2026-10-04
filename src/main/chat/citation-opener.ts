@@ -1,7 +1,9 @@
 import type Database from "better-sqlite3";
 import ExcelJS, { type Cell, type Color, type Worksheet } from "exceljs";
 import { shell } from "electron";
-import { readFile } from "node:fs/promises";
+import { copyFile, mkdtemp, readFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import { parseSafeUrl } from "../sources/url-policy";
 import type { Result } from "../../shared/app-errors";
 import type { CitationDetailResultValue, CitationSheetPreview } from "../../shared/ipc";
@@ -25,6 +27,9 @@ type CitationRow = {
 };
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const DOCUMENT_EXTENSIONS: Partial<Record<SourceKind, string>> = {
+  text: ".txt", markdown: ".md", pdf: ".pdf", docx: ".docx", pptx: ".pptx", xlsx: ".xlsx", csv: ".csv"
+};
 
 /** Opens citations only through authoritative SQLite rows; model text is never a destination. */
 export class CitationOpener {
@@ -98,7 +103,7 @@ export class CitationOpener {
 
   async openSource(input: { projectId: string; sourceId: string }): Promise<Result<{ opened: "document" | "url" }>> {
     try {
-      const row = this.db.prepare("SELECT s.kind, sr.original_path, sr.stored_path FROM sources s JOIN source_revisions sr ON sr.source_id = s.id WHERE s.id = ? AND s.project_id = ? AND s.status <> 'deleted' AND sr.state = 'ready' ORDER BY CASE WHEN sr.id = s.current_revision_id THEN 0 ELSE 1 END, sr.created_at DESC LIMIT 1").get(input.sourceId, input.projectId) as { kind?: string; original_path?: string; stored_path?: string } | undefined;
+      const row = this.db.prepare("SELECT s.kind, sr.original_path, sr.stored_path FROM sources s JOIN source_revisions sr ON sr.source_id = s.id WHERE s.id = ? AND s.project_id = ? AND s.status <> 'deleted' AND sr.state = 'ready' ORDER BY CASE WHEN sr.id = s.current_revision_id THEN 0 ELSE 1 END, sr.created_at DESC LIMIT 1").get(input.sourceId, input.projectId) as { kind: SourceKind; original_path?: string; stored_path?: string } | undefined;
       if (!row) return this.failure("NOT_FOUND", "errors.notFound");
       if (row.kind === "url") {
         if (!row.original_path) return this.failure("NOT_FOUND", "errors.sourceUnavailable");
@@ -109,9 +114,7 @@ export class CitationOpener {
         return { ok: true, value: { opened: "url" } };
       }
       if (!row.stored_path) return this.failure("NOT_FOUND", "errors.sourceUnavailable");
-      const outcome = await this.shell.openPath(row.stored_path);
-      if (typeof outcome === "string" && outcome !== "") return this.failure("INTERNAL", "errors.citationOpenFailed");
-      return { ok: true, value: { opened: "document" } };
+      return await this.openDocument(row.stored_path, row.kind);
     } catch { return this.failure("INTERNAL", "errors.citationOpenFailed"); }
   }
 
@@ -142,13 +145,35 @@ export class CitationOpener {
       return { ok: true, value: { opened: "url" } };
     }
     const stored = this.db.prepare(
-      "SELECT sr.stored_path FROM sources s JOIN source_revisions sr ON sr.source_id = s.id WHERE s.id = ? AND s.project_id = ? AND s.status <> 'deleted' AND sr.state = 'ready' ORDER BY sr.created_at DESC LIMIT 1"
-    ).get(row.source_id, projectId) as { stored_path?: string } | undefined;
+      "SELECT sr.stored_path, s.kind FROM sources s JOIN source_revisions sr ON sr.source_id = s.id WHERE s.id = ? AND s.project_id = ? AND s.status <> 'deleted' AND sr.state = 'ready' ORDER BY sr.created_at DESC LIMIT 1"
+    ).get(row.source_id, projectId) as { stored_path?: string; kind: SourceKind } | undefined;
     if (!stored?.stored_path) return this.failure("NOT_FOUND", "errors.sourceUnavailable");
-    const outcome = await this.shell.openPath(stored.stored_path);
-    // Windows openPath resolves with a non-empty error string instead of throwing.
-    if (typeof outcome === "string" && outcome !== "") return this.failure("INTERNAL", "errors.citationOpenFailed");
-    return { ok: true, value: { opened: "document" } };
+    return await this.openDocument(stored.stored_path, stored.kind);
+  }
+
+  private async openDocument(storedPath: string, kind: SourceKind): Promise<Result<{ opened: "document" }>> {
+    const extension = DOCUMENT_EXTENSIONS[kind];
+    if (!extension) return this.failure("NOT_FOUND", "errors.sourceUnavailable");
+    let temporaryDirectory: string | undefined;
+    let opened = false;
+    try {
+      let target = storedPath;
+      if (path.extname(storedPath).toLowerCase() !== extension) {
+        // Managed imports use "content" without an extension. Windows needs a
+        // typed copy to choose an application; keep the indexed original intact.
+        temporaryDirectory = await mkdtemp(path.join(tmpdir(), "mynotebooklm-original-"));
+        target = path.join(temporaryDirectory, `original${extension}`);
+        await copyFile(storedPath, target);
+      }
+      const outcome = await this.shell.openPath(target);
+      // Windows openPath resolves with a non-empty error string instead of throwing.
+      if (typeof outcome === "string" && outcome !== "") return this.failure("INTERNAL", "errors.citationOpenFailed");
+      opened = true;
+      return { ok: true, value: { opened: "document" } };
+    } finally {
+      // Successful copies must remain available while the external app reads them.
+      if (temporaryDirectory && !opened) await rm(temporaryDirectory, { recursive: true, force: true }).catch(() => undefined);
+    }
   }
 
   private failure(code: "NOT_FOUND" | "UNSAFE_INPUT" | "INTERNAL", messageKey: string): Result<never> {

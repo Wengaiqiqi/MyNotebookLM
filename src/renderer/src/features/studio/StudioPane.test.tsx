@@ -98,6 +98,83 @@ afterEach(() => {
 });
 
 describe("StudioPane", () => {
+  it("keeps the selected rule and inputs separately for each project after unmount", async () => {
+    mockApi();
+    const first = render(<StudioPane projectId={projectId} />);
+    await screen.findByText("洞察内容");
+    fireEvent.click(screen.getByRole("button", { name: "规则" }));
+    fireEvent.click(screen.getByRole("option", { name: "我的规则" }));
+    fireEvent.click(screen.getByRole("button", { name: "来源" }));
+    fireEvent.click(await screen.findByRole("option", { name: "论文.pdf" }));
+    first.unmount();
+    const other = render(<StudioPane projectId="other-project" />);
+    await screen.findByText("洞察内容");
+    expect(screen.getByRole("button", { name: "规则" }).textContent).toContain("摘要");
+    expect(screen.getByRole("button", { name: "来源" }).textContent).toContain("选择一个来源");
+    other.unmount();
+    render(<StudioPane projectId={projectId} />);
+    await screen.findByText("洞察内容");
+    expect(screen.getByRole("button", { name: "规则" }).textContent).toContain("我的规则");
+    expect(screen.getByRole("button", { name: "来源" }).textContent).toContain("已选 1 项");
+    fireEvent.click(screen.getByRole("button", { name: "来源" }));
+    expect(screen.getByRole("option", { name: "论文.pdf" }).getAttribute("aria-selected")).toBe("true");
+  });
+
+  it("binds progress to the submitted map and restores its failure instead of a newer unrelated conversion", async () => {
+    const api = mockApi();
+    vi.mocked(api.transformations!.listBuiltins).mockResolvedValue({ ok: true, value: [builtin, { ...builtin, key: "mind-map", name: "思维导图" }] });
+    const active: TaskDto = { ...taskDto(), state: "running", stage: "generating", progress: 550, transformationKind: "mind-map" };
+    vi.mocked(api.transformations!.run).mockResolvedValue({ ok: true, value: active });
+    const first = render(<StudioPane projectId={projectId} />);
+    await screen.findByText("洞察内容");
+    fireEvent.click(screen.getByRole("button", { name: "规则" }));
+    fireEvent.click(screen.getByRole("option", { name: "思维导图" }));
+    fireEvent.click(screen.getByRole("button", { name: "来源" }));
+    fireEvent.click(await screen.findByRole("option", { name: "论文.pdf" }));
+    fireEvent.click(screen.getByRole("button", { name: "生成思维导图" }));
+    await screen.findByRole("button", { name: "取消" });
+    const percent = screen.getByRole("status").querySelector(".task-card-percent")!.textContent;
+    first.unmount();
+    const failed: TaskDto = { ...active, state: "failed", stage: "verifying", progress: 900,
+      error: { code: "PROVIDER", messageKey: "errors.mindMapInvalidReferences", recoverable: true }, updatedAt: "2026-01-02T00:00:00.000Z" };
+    vi.mocked(api.tasks!.list).mockResolvedValue([{ ...taskDto(), id: "unrelated", state: "running", progress: 200, updatedAt: "2026-01-03T00:00:00.000Z" }, failed]);
+    const second = render(<StudioPane projectId={projectId} />);
+    await screen.findByRole("alert");
+    expect(screen.getByRole("status").querySelector(".task-card-percent")!.textContent).toBe(percent);
+    expect(screen.getByRole("button", { name: "规则" }).textContent).toContain("思维导图");
+    expect(screen.getByRole("button", { name: "来源" }).textContent).toContain("已选 1 项");
+    expect(screen.getByRole("alert").textContent).toContain("资料中不存在的引用编号");
+    expect(screen.queryByRole("button", { name: "取消" })).toBeNull();
+    second.unmount();
+    render(<StudioPane projectId={projectId} />);
+    await screen.findByRole("alert");
+    expect(screen.getByRole("status").querySelector(".task-card-percent")!.textContent).toBe(percent);
+    expect(screen.getByRole("button", { name: "重试" })).toBeTruthy();
+  });
+
+  it("retains a submission whose IPC response arrives after navigation and follows completion in the live feed", async () => {
+    const api = mockApi();
+    let resolveRun!: (result: Awaited<ReturnType<NonNullable<DesktopApi["transformations"]>["run"]>>) => void;
+    vi.mocked(api.transformations!.run).mockImplementation(() => new Promise((resolve) => { resolveRun = resolve; }));
+    const first = render(<StudioPane projectId={projectId} />);
+    await screen.findByText("洞察内容");
+    fireEvent.click(screen.getByRole("button", { name: "来源" }));
+    fireEvent.click(await screen.findByRole("option", { name: "论文.pdf" }));
+    fireEvent.click(screen.getByRole("button", { name: "运行转换" }));
+    await screen.findByText("排队中");
+    first.unmount();
+    let emit!: (task: TaskDto) => void;
+    api.tasks!.subscribe = vi.fn((_id, listener) => { emit = listener; return () => undefined; });
+    render(<StudioPane projectId={projectId} />);
+    await screen.findByText("排队中");
+    await act(async () => { resolveRun({ ok: true, value: taskDto() }); });
+    await act(async () => { emit({ ...taskDto(), state: "completed", progress: 1000 }); });
+    expect(screen.getByText("100%")).toBeTruthy();
+    await act(async () => { emit({ ...taskDto(), id: "other-conversion", state: "running", updatedAt: "2026-01-03T00:00:00.000Z" }); });
+    expect(screen.getByText("已完成")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "取消" })).toBeNull();
+  });
+
   it("animates podcast preparation from zero to 20% in three seconds and preserves it across tabs", async () => {
     vi.useFakeTimers();
     try {
@@ -181,6 +258,85 @@ describe("StudioPane", () => {
       expect(screen.queryByText("正在整理结果")).toBeNull();
       await act(async () => { emit({ ...active, progress: 980, stage: "saving", updatedAt: "2026-01-03T00:00:00.000Z" }); });
       expect(screen.getByText("保存播客音频")).toBeTruthy();
+    } finally { vi.useRealTimers(); }
+  });
+
+  it("animates all four map stages at quiz speeds and preserves the displayed progress across navigation", async () => {
+    vi.useFakeTimers();
+    try {
+      const api = mockApi();
+      let emit!: (task: TaskDto) => void;
+      api.tasks!.subscribe = vi.fn((_id, listener) => { emit = listener; return () => undefined; });
+      const active: TaskDto = { ...taskDto(), id: "mindmap-progress", state: "running", stage: "preparing", progress: 150, transformationKind: "mind-map" };
+      vi.mocked(api.tasks!.list).mockResolvedValue([active]);
+      const first = render(<StudioPane projectId={projectId} />);
+      await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+      const header = () => screen.getByRole("status").querySelector(".task-card-status strong")!.textContent;
+      expect(header()).toBe("准备导图资料");
+      expect(screen.getByText("0%")).toBeTruthy();
+      expect(screen.getByRole("list", { name: "思维导图生成进度" })).toBeTruthy();
+      await act(async () => { vi.advanceTimersByTime(2000); });
+      expect(screen.getByText("10%")).toBeTruthy();
+      await act(async () => { emit({ ...active, stage: "generating", progress: 550 }); vi.advanceTimersByTime(2000); });
+      expect(header()).toBe("生成节点与层级");
+      expect(screen.getByText("20%")).toBeTruthy();
+      await act(async () => { vi.advanceTimersByTime(1000); });
+      expect(screen.getByText("50%")).toBeTruthy();
+      await act(async () => { vi.advanceTimersByTime(1000); });
+      expect(screen.getByText("56%")).toBeTruthy();
+      await act(async () => { vi.advanceTimersByTime(60_000); });
+      expect(screen.getByText("80%")).toBeTruthy();
+      expect(header()).toBe("生成节点与层级");
+      first.unmount();
+      vi.mocked(api.tasks!.list).mockResolvedValue([{ ...active, stage: "generating", progress: 550 }]);
+      render(<StudioPane projectId={projectId} />);
+      await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+      expect(screen.getByText("80%")).toBeTruthy();
+      await act(async () => { emit({ ...active, stage: "verifying", progress: 900 }); });
+      expect(header()).toBe("校验结构与引用");
+      await act(async () => { vi.advanceTimersByTime(1000); });
+      expect(screen.getByText("81%")).toBeTruthy();
+      await act(async () => { vi.advanceTimersByTime(60_000); });
+      expect(screen.getByText("95%")).toBeTruthy();
+      expect(header()).toBe("校验结构与引用");
+      await act(async () => { emit({ ...active, stage: "saving", progress: 980 }); });
+      expect(header()).toBe("保存思维导图");
+      await act(async () => { vi.advanceTimersByTime(1000); });
+      expect(screen.getByText("96%")).toBeTruthy();
+      await act(async () => { vi.advanceTimersByTime(60_000); });
+      expect(screen.getByText("99%")).toBeTruthy();
+      await act(async () => { emit({ ...active, stage: "saving", state: "completed", progress: 1000 }); });
+      expect(screen.getByText("100%")).toBeTruthy();
+    } finally { vi.useRealTimers(); }
+  });
+
+  it("freezes a failed map at its animated percentage and restarts retry preparation from zero", async () => {
+    vi.useFakeTimers();
+    try {
+      const api = mockApi();
+      let emit!: (task: TaskDto) => void;
+      api.tasks!.subscribe = vi.fn((_id, listener) => { emit = listener; return () => undefined; });
+      const active: TaskDto = { ...taskDto(), id: "map-animation-failure", state: "running", stage: "generating", progress: 450, transformationKind: "mind-map" };
+      vi.mocked(api.tasks!.list).mockResolvedValue([active]);
+      const first = render(<StudioPane projectId={projectId} />);
+      await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+      await act(async () => { vi.advanceTimersByTime(6000); });
+      expect(screen.getByText("28%")).toBeTruthy();
+      const failed: TaskDto = { ...active, state: "failed", stage: "verifying", progress: 900, attempt: 1,
+        error: { code: "PROVIDER", messageKey: "errors.mindMapInvalidReferences", recoverable: true }, updatedAt: "2026-01-02T00:00:00.000Z" };
+      await act(async () => { emit(failed); });
+      await act(async () => { vi.advanceTimersByTime(10_000); });
+      expect(screen.getByText("28%")).toBeTruthy();
+      first.unmount();
+      vi.mocked(api.tasks!.list).mockResolvedValue([failed]);
+      render(<StudioPane projectId={projectId} />);
+      await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+      expect(screen.getByText("28%")).toBeTruthy();
+      vi.mocked(api.transformations!.retry).mockResolvedValue({ ok: true, value: { ...active, stage: "preparing", progress: 100, attempt: 1, updatedAt: "2026-01-03T00:00:00.000Z" } });
+      await act(async () => { fireEvent.click(screen.getByRole("button", { name: "重试" })); });
+      expect(screen.getByText("0%")).toBeTruthy();
+      await act(async () => { vi.advanceTimersByTime(2000); });
+      expect(screen.getByText("10%")).toBeTruthy();
     } finally { vi.useRealTimers(); }
   });
 
