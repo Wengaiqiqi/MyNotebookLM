@@ -1,4 +1,4 @@
-﻿import { app, BrowserWindow, ipcMain, Menu } from "electron";
+import { app, BrowserWindow, ipcMain, Menu } from "electron";
 import { randomUUID } from "node:crypto";
 import { mkdir } from "node:fs/promises";
 import path from "node:path";
@@ -75,7 +75,22 @@ if (process.env["NODE_ENV"] === "test" && testUserDataDir) {
 }
 if (process.platform === "win32") app.setAppUserModelId("com.wengaiqiqi.mynotebooklm");
 
+// Startup recovery treats in-flight streams, space builds and deletions as
+// crash leftovers, so a second process must never open the same data.
+const hasInstanceLock = app.requestSingleInstanceLock();
+if (!hasInstanceLock) {
+  app.quit();
+} else {
+  app.on("second-instance", () => {
+    const window = BrowserWindow.getAllWindows()[0];
+    if (!window) return;
+    if (window.isMinimized()) window.restore();
+    window.focus();
+  });
+}
+
 app.whenReady().then(async () => {
+  if (!hasInstanceLock) return;
   const appPaths = getAppPaths(app.getPath("userData"));
   await Promise.all([
     mkdir(appPaths.root, { recursive: true }),
@@ -255,7 +270,12 @@ app.whenReady().then(async () => {
   if (typeof (appDatabase.connection as { prepare?: unknown }).prepare === "function") {
     await taskService.recoverAndContinueEmbedding(continueEmbedding, 60 * 60 * 1000);
   }
-  const sourceService = new MainSourceService(appDatabase.connection, taskService, ingestionService, appPaths.files, (taskId, revisionId) => taskRevisions.set(taskId, revisionId), createNodeUrlSource());
+  const removeSourceVectors = async (projectId: string, sourceId: string): Promise<void> => {
+    const projectSpaces = appDatabase!.connection.prepare("SELECT id, dimension FROM embedding_spaces WHERE project_id = ? AND state <> 'failed'").all(projectId) as Array<{ id: string; dimension: number }>;
+    for (const space of projectSpaces) await lance.deleteSource(space, sourceId);
+  };
+  const sourceService = new MainSourceService(appDatabase.connection, taskService, ingestionService, appPaths.files, (taskId, revisionId) => taskRevisions.set(taskId, revisionId), createNodeUrlSource(), removeSourceVectors);
+  try { sourceService.recoverInterruptedRemovals(); } catch (error) { console.error("[source] removal recovery failed:", error); }
   const failure = <T>(code: "VALIDATION" | "NOT_FOUND" | "CONFLICT" | "CANCELLED" | "INDEX_UNAVAILABLE" | "INTERNAL", messageKey: string, recoverable = false): Result<T> => ({ ok: false, error: { code, messageKey, recoverable } });
   const activeTask = (projectId: string): TaskDto | undefined => {
     const row = appDatabase!.connection.prepare("SELECT * FROM tasks WHERE project_id = ? AND state IN ('queued','running') AND kind IN ('validation','optimize') ORDER BY created_at DESC LIMIT 1").get(projectId) as { id?: string } | undefined;

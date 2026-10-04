@@ -40,8 +40,7 @@ export class IngestionService {
     catch (error) { throw Object.assign(new Error("Managed original could not be parsed", { cause: error }), { code: "SPACE_REBUILD_SOURCE_UNRECOVERABLE" }); }
     const revision = this.db.prepare("SELECT source_id FROM source_revisions WHERE id = ?").get(revisionId) as { source_id: string } | undefined;
     if (!revision) throw new Error("revision not found");
-    const insert = this.db.prepare("INSERT INTO source_chunks(id, revision_id, ordinal, content_hash, text, locator_json) VALUES (?, ?, ?, ?, ?, ?)");
-    this.db.transaction(() => { this.db.prepare("DELETE FROM source_chunks WHERE revision_id = ?").run(revisionId); this.db.prepare("UPDATE source_revisions SET chunking_version = ? WHERE id = ?").run(CHUNKING_VERSION, revisionId); for (const chunk of result.chunks) insert.run(revisionId + "-" + chunk.ordinal, revisionId, chunk.ordinal, chunk.contentHash, chunk.text, JSON.stringify(chunk.locator)); })();
+    this.db.transaction(() => { replaceRevisionChunks(this.db, revisionId, result.chunks); this.db.prepare("UPDATE source_revisions SET chunking_version = ? WHERE id = ?").run(CHUNKING_VERSION, revisionId); })();
   }
 }
 export function throttleProgress(_taskId: string, emit: (value: number) => void, now = Date.now): (value: number) => void {
@@ -49,5 +48,26 @@ export function throttleProgress(_taskId: string, emit: (value: number) => void,
   return (value) => { const current = Math.floor(now() / 1000); if (current !== window) { window = current; count = 0; } if (count++ < 10) emit(value); };
 }
 export function persistParsedResult(db: Database.Database, input: { revisionId: string; taskId: string; chunks: PreparedChunk[]; updatedAt: string }): void {
-  db.transaction(() => { const owner = db.prepare("SELECT 1 FROM tasks t JOIN sources s ON s.id = t.source_id JOIN source_revisions sr ON sr.source_id = s.id WHERE t.id = ? AND t.source_id = s.id AND t.project_id = s.project_id AND t.state = 'running' AND s.status = 'active' AND sr.id = ?").get(input.taskId, input.revisionId); if (!owner) throw new Error("Ingestion result is stale"); const existing = db.prepare("SELECT ordinal, content_hash, text, locator_json FROM source_chunks WHERE revision_id = ? ORDER BY ordinal").all(input.revisionId) as Array<{ ordinal: number; content_hash: string; text: string; locator_json: string }>; const same = existing.length === input.chunks.length && existing.every((row, i) => row.ordinal === input.chunks[i]!.ordinal && row.content_hash === input.chunks[i]!.contentHash && row.text === input.chunks[i]!.text && row.locator_json === JSON.stringify(input.chunks[i]!.locator)); if (!same) { const insert = db.prepare("INSERT INTO source_chunks(id, revision_id, ordinal, content_hash, text, locator_json) VALUES (?, ?, ?, ?, ?, ?)"); db.prepare("DELETE FROM source_chunks WHERE revision_id = ?").run(input.revisionId); for (const chunk of input.chunks) insert.run(input.taskId + "-" + chunk.ordinal, input.revisionId, chunk.ordinal, chunk.contentHash, chunk.text, JSON.stringify(chunk.locator)); } const revision = db.prepare("UPDATE source_revisions SET state = 'awaiting_embedding', chunking_version = ? WHERE id = ? AND state IN ('pending', 'parsing', 'awaiting_embedding')").run(CHUNKING_VERSION, input.revisionId); if (revision.changes !== 1) throw new Error("Revision is not resumable"); const task = db.prepare("UPDATE tasks SET stage = 'embedding', state = 'running', progress_1000 = 600, updated_at = ? WHERE id = ? AND state = 'running'").run(input.updatedAt, input.taskId); if (task.changes !== 1) throw new Error("Task is not running"); })();
+  db.transaction(() => { const owner = db.prepare("SELECT 1 FROM tasks t JOIN sources s ON s.id = t.source_id JOIN source_revisions sr ON sr.source_id = s.id WHERE t.id = ? AND t.source_id = s.id AND t.project_id = s.project_id AND t.state = 'running' AND s.status = 'active' AND sr.id = ?").get(input.taskId, input.revisionId); if (!owner) throw new Error("Ingestion result is stale"); const existing = db.prepare("SELECT ordinal, content_hash, text, locator_json FROM source_chunks WHERE revision_id = ? ORDER BY ordinal").all(input.revisionId) as Array<{ ordinal: number; content_hash: string; text: string; locator_json: string }>; const same = existing.length === input.chunks.length && existing.every((row, i) => row.ordinal === input.chunks[i]!.ordinal && row.content_hash === input.chunks[i]!.contentHash && row.text === input.chunks[i]!.text && row.locator_json === JSON.stringify(input.chunks[i]!.locator)); if (!same) replaceRevisionChunks(db, input.revisionId, input.chunks); const revision = db.prepare("UPDATE source_revisions SET state = 'awaiting_embedding', chunking_version = ? WHERE id = ? AND state IN ('pending', 'parsing', 'awaiting_embedding')").run(CHUNKING_VERSION, input.revisionId); if (revision.changes !== 1) throw new Error("Revision is not resumable"); const task = db.prepare("UPDATE tasks SET stage = 'embedding', state = 'running', progress_1000 = 600, updated_at = ? WHERE id = ? AND state = 'running'").run(input.updatedAt, input.taskId); if (task.changes !== 1) throw new Error("Task is not running"); })();
+}
+
+/** Chunk ids are a pure function of (revision, ordinal), so re-parsing never orphans ids that
+ *  Lance rows or message citations point at. Deleting a chunk still fires the citation FK's
+ *  ON DELETE SET NULL, so citations are re-linked to the chunk with the same content afterwards.
+ *  Must run inside the caller's transaction. */
+export function replaceRevisionChunks(db: Database.Database, revisionId: string, chunks: PreparedChunk[]): void {
+  const cited = db.prepare("SELECT mc.id, sc.content_hash FROM message_citations mc JOIN source_chunks sc ON sc.id = mc.source_chunk_id WHERE sc.revision_id = ?").all(revisionId) as Array<{ id: string; content_hash: string }>;
+  db.prepare("DELETE FROM source_chunks WHERE revision_id = ?").run(revisionId);
+  const insert = db.prepare("INSERT INTO source_chunks(id, revision_id, ordinal, content_hash, text, locator_json) VALUES (?, ?, ?, ?, ?, ?)");
+  const byHash = new Map<string, string>();
+  for (const chunk of chunks) {
+    const id = revisionId + "-" + chunk.ordinal;
+    insert.run(id, revisionId, chunk.ordinal, chunk.contentHash, chunk.text, JSON.stringify(chunk.locator));
+    if (!byHash.has(chunk.contentHash)) byHash.set(chunk.contentHash, id);
+  }
+  const relink = db.prepare("UPDATE message_citations SET source_chunk_id = ? WHERE id = ?");
+  for (const citation of cited) {
+    const chunkId = byHash.get(citation.content_hash);
+    if (chunkId) relink.run(chunkId, citation.id);
+  }
 }

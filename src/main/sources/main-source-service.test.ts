@@ -59,6 +59,25 @@ describe("main source import orchestration", () => {
     expect(sql.filter((query) => query.includes("UPDATE sources SET status")).length).toBe(2);
   });
 
+  it("removes the source's vectors after the SQLite removal commits", () => {
+    const sql: string[] = [];
+    const db = { prepare: vi.fn((query: string) => { sql.push(query); return { get: vi.fn(() => ({})), all: vi.fn(() => []), run: vi.fn() }; }), transaction: (fn: () => unknown) => () => fn() } as any;
+    const removeVectors = vi.fn(async () => { expect(sql.some((query) => query.includes("status = 'deleted'"))).toBe(true); });
+    const service = new MainSourceService(db, { cancel: vi.fn() } as any, { cancel: vi.fn() } as any, undefined, undefined, undefined, removeVectors);
+    service.removeSource({ projectId: "project-1", sourceId: "66666666-6666-4666-8666-666666666666" });
+    expect(removeVectors).toHaveBeenCalledExactlyOnceWith("project-1", "66666666-6666-4666-8666-666666666666");
+  });
+
+  it("finishes removals that a crash left in the deleting state", () => {
+    const sql: string[] = [];
+    const db = { prepare: vi.fn((query: string) => { sql.push(query); return { all: vi.fn(() => query.includes("status = 'deleting'") && query.startsWith("SELECT") ? [{ id: "66666666-6666-4666-8666-666666666666", project_id: "project-1" }] : []), run: vi.fn() }; }), transaction: (fn: () => unknown) => () => fn() } as any;
+    const removeVectors = vi.fn(async () => undefined);
+    new MainSourceService(db, {} as any, {} as any, undefined, undefined, undefined, removeVectors).recoverInterruptedRemovals();
+    expect(sql.some((query) => query.includes("DELETE FROM source_revisions"))).toBe(true);
+    expect(sql.some((query) => query.includes("status = 'deleted'"))).toBe(true);
+    expect(removeVectors).toHaveBeenCalledExactlyOnceWith("project-1", "66666666-6666-4666-8666-666666666666");
+  });
+
   it("stores URL payload and passes its bound revision to ingestion", async () => {
     const db = { prepare: vi.fn((sql: string) => ({ run: vi.fn(), get: vi.fn(() => ({ id: "task-1", project_id: "project-1", kind: "url", display_name: "example.com", status: "active", current_revision_id: null, created_at: "now", updated_at: "now", deleted_at: null })), all: vi.fn(() => []) })), transaction: (fn: () => unknown) => () => fn() } as any;
     const tasks = { createTask: vi.fn(() => ({ id: "task-1" })) } as any;

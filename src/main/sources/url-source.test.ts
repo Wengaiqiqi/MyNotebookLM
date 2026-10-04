@@ -9,6 +9,7 @@ import {
   UnsupportedContentTypeError,
   UrlFetchError,
   createUrlSource,
+  decodeHtml,
   type SafeHttpClient,
   type SafeResponse
 } from "./url-source";
@@ -212,3 +213,22 @@ function fakeClient(routes: Record<string, FakeRoute>): SafeHttpClient {
     }
   };
 }
+
+describe("url-source charset decoding", () => {
+  const gbk = Buffer.from([0xc4, 0xe3, 0xba, 0xc3]); // "你好" in GBK
+  const page = (meta: string) => Buffer.concat([Buffer.from(`<html><head>${meta}</head><body><p>`), gbk, Buffer.from("</p></body></html>")]);
+
+  it("uses the HTTP charset parameter", () => {
+    expect(decodeHtml(page(""), "text/html; charset=GBK")).toContain("你好");
+  });
+
+  it("falls back to <meta charset> when the header has none", () => {
+    expect(decodeHtml(page('<meta charset="gb2312">'), "text/html")).toContain("你好");
+    expect(decodeHtml(page('<meta http-equiv="Content-Type" content="text/html; charset=gbk">'), "text/html")).toContain("你好");
+  });
+
+  it("defaults to UTF-8 and ignores unknown labels", () => {
+    expect(decodeHtml(Buffer.from("<p>中文</p>"), "text/html")).toContain("中文");
+    expect(decodeHtml(Buffer.from("<p>中文</p>"), "text/html; charset=x-unknown")).toContain("中文");
+  });
+});
