@@ -1036,6 +1036,8 @@ button:disabled { cursor: not-allowed; opacity: .5; }
 .studio { grid-template-columns: minmax(0, 5fr) minmax(0, 4fr); grid-template-rows: minmax(0, auto) minmax(0, 1fr); }
 .studio-run { grid-column: 1; grid-row: 1; position: relative; z-index: 1; max-height: min(440px, 55vh); }
 .studio-insights { grid-column: 1; grid-row: 2; }
+.studio-insights > .panel-body:has(> .empty), .mindmap-messages:has(> .empty) { display: flex; flex-direction: column; }
+.studio-insights > .panel-body > .empty, .mindmap-messages > .empty { flex: 1; }
 .studio-rules { grid-column: 2; grid-row: 1 / span 2; }
 .rule-select-footer { position: sticky; bottom: -6px; padding-top: 6px; border-top: 1px solid var(--line); background: var(--surface); }
 .rule-create { display: flex; align-items: center; gap: 8px; color: var(--accent); }
