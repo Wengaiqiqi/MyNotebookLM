@@ -504,6 +504,7 @@ const zhCN = {
     podcastDetail: "播客详情",
     convert: "转换为笔记",
     unavailable: "转换服务尚未就绪。",
+    stepCount: "第 {{current}}/{{total}} 步",
     elapsed: "已用 {{seconds}} 秒",
     phases: { preparing: "准备资料", connecting: "模型响应中", generating: "正在生成内容", saving: "正在整理结果" },
     podcastPhases: { preparing: "准备播客资料", script: "生成双人对话稿", speech: "合成双人语音", saving: "保存播客音频" },

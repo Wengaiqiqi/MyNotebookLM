@@ -15,7 +15,7 @@ import PodcastPlayer from "./PodcastPlayer";
 import PodcastVoices from "./PodcastVoices";
 import MindMapViewer, { downloadMindMap } from "./MindMapViewer";
 import { flattenMindMap, mindMapDocumentSchema } from "../../../../shared/mindmaps";
-import { advancePercent, advancePodcastPercent, advanceMindMapPercent, mindMapProgressPhase, progressCeiling, progressPhase } from "./progress-motion";
+import { advancePodcastPercent, mindMapStepProgress, textStepProgress } from "./progress-motion";
 import { useTaskFeed } from "../../hooks/useTaskFeed";
 import { updateStudioSession, useStudioSession } from "./studio-session";
 import { errorText, formatDateTime, sourceReady } from "../../lib/format";
@@ -230,7 +230,6 @@ export default function StudioPane({ projectId }: { projectId: string }) {
   const isPodcast = starting ? ruleKey === "podcast" : transformTask?.transformationKind === "podcast";
   const isMindMap = starting ? ruleKey === "mind-map" : transformTask?.transformationKind === "mind-map";
   const reportedPercent = starting ? 0 : transformTask ? (transformTask.state === "completed" ? 100 : Math.round(transformTask.progress / 10)) : 0;
-  const ceiling = progressCeiling(reportedPercent);
   const taskKey = `${transformTask?.id ?? ""}:${transformTask?.attempt ?? 0}`;
   useEffect(() => {
     if ((taskState === "queued" || taskState === "running" || taskState === "failed") && runFormRef.current) runFormRef.current.scrollTop = runFormRef.current.scrollHeight;
@@ -245,15 +244,15 @@ export default function StudioPane({ projectId }: { projectId: string }) {
   const runKey = useRef<string>("");
 
   // A completed card must paint 100% on its first frame, so the value shown is
-  // clamped up rather than waiting for the reset effect below.
+  // clamped up rather than waiting for the reset effect below. Only podcasts
+  // animate a percentage; other kinds show the reported step.
   const shownPercent = starting ? 0 : taskState === "completed" ? 100 : isPodcast && displayedPercent >= 20 ? Math.max(displayedPercent, reportedPercent) : displayedPercent;
 
   // One effect owns the whole animation:
   //   completed -> snap to 100 (the result is persisted)
   //   a fresh or retried run -> start over at 0
   //   queued / failed / cancelled -> freeze the last shown value
-  //   running -> climb toward the reported ceiling, so the bar moves
-  //              continuously instead of stepping at milestone boundaries
+  //   running -> tick the elapsed clock (and the podcast preparation ramp)
   useEffect(() => {
     const previous = previousState.current;
     previousState.current = taskState;
@@ -267,9 +266,7 @@ export default function StudioPane({ projectId }: { projectId: string }) {
       const sameRun = cached?.key === taskKey || (taskState === "failed" && cached?.state === "running" && cached.key.startsWith(`${transformTask?.id}:`));
       const restored = sameRun && cached && (cached.state === taskState || (taskState !== "running" && cached.state === "running")) ? cached : undefined;
       runStartedAt.current = restored?.startedAt ?? Date.now();
-      const initialMapPercent = transformTask?.stage === "saving" ? 95 : transformTask?.stage === "verifying" ? 80 : 0;
-      displayedRef.current = restored?.percent ?? (taskState === "running" && isMindMap ? initialMapPercent
-        : previous === undefined && taskState === "running" && isPodcast && reportedPercent < 45 ? 0 : reportedPercent);
+      displayedRef.current = restored?.percent ?? (previous === undefined && taskState === "running" && isPodcast && reportedPercent < 45 ? 0 : reportedPercent);
       setDisplayedPercent(displayedRef.current);
       setElapsedSeconds(Math.floor((Date.now() - runStartedAt.current) / 1000));
     }
@@ -290,11 +287,9 @@ export default function StudioPane({ projectId }: { projectId: string }) {
     remember();
     const timer = setInterval(() => {
       const now = Date.now();
-      const delta = now - last;
       last = now;
       const elapsed = now - runStartedAt.current;
-      const next = isMindMap ? advanceMindMapPercent(displayedRef.current, reportedPercent, transformTask?.stage ?? "preparing", delta)
-        : isPodcast ? advancePodcastPercent(displayedRef.current, reportedPercent, elapsed) : advancePercent(displayedRef.current, ceiling, delta);
+      const next = isPodcast ? advancePodcastPercent(displayedRef.current, reportedPercent, elapsed) : reportedPercent;
       if (next !== displayedRef.current) {
         displayedRef.current = next;
         setDisplayedPercent(next);
@@ -303,22 +298,27 @@ export default function StudioPane({ projectId }: { projectId: string }) {
       remember();
     }, 100);
     return () => clearInterval(timer);
-  }, [taskState, taskKey, ceiling, isPodcast, isMindMap, reportedPercent, projectId, starting, transformTask?.stage]);
+  }, [taskState, taskKey, isPodcast, reportedPercent, projectId, starting]);
 
   const taskPercent = Math.round(shownPercent);
-  const mindMapPhase = taskState === "failed" ? transformTask?.stage ?? "preparing"
-    : mindMapProgressPhase(shownPercent, transformTask?.stage ?? "preparing");
+  const stage = starting ? "preparing" : transformTask?.stage ?? "preparing";
+  const rawProgress = starting ? 0 : transformTask?.progress ?? 0;
+  const stepProgress = isPodcast ? null : isMindMap ? mindMapStepProgress(stage, rawProgress) : textStepProgress(stage, rawProgress);
+  const stepActive = taskState === "running" || taskState === "queued";
   // Keep preparation visible during the opening animation; later podcast
   // phases follow actual script, speech and saving milestones.
   const taskLabel = taskState === "running"
-    ? isMindMap
-      ? t(`transformations.mindMapPhases.${mindMapPhase}`)
-      : isPodcast
-      ? t(`transformations.podcastPhases.${shownPercent < 20 || reportedPercent < 20 ? "preparing" : reportedPercent >= 98 ? "saving" : reportedPercent >= 45 ? "speech" : "script"}`)
-      : t(`transformations.phases.${progressPhase(shownPercent, reportedPercent)}`)
+    ? stepProgress
+      ? t(`transformations.${isMindMap ? "mindMapPhases" : "phases"}.${stepProgress.steps[stepProgress.index]}`)
+      : t(`transformations.podcastPhases.${shownPercent < 20 || reportedPercent < 20 ? "preparing" : reportedPercent >= 98 ? "saving" : reportedPercent >= 45 ? "speech" : "script"}`)
     : t(`transformations.states.${taskState}`, taskState ?? "");
-  // A sliver keeps the bar visible while the first milestone is still pending.
-  const taskBarPercent = taskState === "running" || taskState === "queued" ? Math.max(taskPercent, 3) : taskPercent;
+  // Steps fill one equal segment each. Finished steps are solid; the current
+  // one fills only by a reported fraction, otherwise it pulses in place.
+  const stepWidth = stepProgress ? 100 / stepProgress.steps.length : 0;
+  const taskBarPercent = taskState === "completed" ? 100
+    : stepProgress ? stepWidth * (stepProgress.index + (stepActive ? stepProgress.fraction ?? 0 : 0))
+    : stepActive ? Math.max(taskPercent, 3) : taskPercent;
+  const pulseStep = stepProgress && stepActive && stepProgress.fraction === null;
 
   return (
     <div className="pane studio">
@@ -409,15 +409,16 @@ export default function StudioPane({ projectId }: { projectId: string }) {
                 </div>
                 <span className="task-card-meta">
                   {elapsedSeconds > 0 && <span className="task-card-elapsed">{t("transformations.elapsed", { seconds: elapsedSeconds })}</span>}
-                  <span className="task-card-percent">{taskPercent}%</span>
+                  {stepProgress && taskState !== "completed"
+                    ? <span className="task-card-step">{t("transformations.stepCount", { current: stepProgress.index + 1, total: stepProgress.steps.length })}</span>
+                    : <span className="task-card-percent">{taskPercent}%</span>}
                 </span>
               </div>
               {isMindMap && (
                 <ol className="mindmap-progress-steps" aria-label={t("transformations.mindMapProgress")}>
-                  {(["preparing", "generating", "verifying", "saving"] as const).map((stage, index, stages) => {
-                    const current = stages.indexOf(mindMapPhase as typeof stage);
-                    const complete = taskState === "completed" || index < current;
-                    const active = taskState !== "completed" && index === Math.max(0, current);
+                  {stepProgress!.steps.map((stage, index) => {
+                    const complete = taskState === "completed" || index < stepProgress!.index;
+                    const active = taskState !== "completed" && index === stepProgress!.index;
                     return <li key={stage} className={complete ? "done" : active ? "active" : ""} aria-current={active ? "step" : undefined}><span>{complete ? <Icon name="check" /> : index + 1}</span>{t(`transformations.mindMapPhases.${stage}`)}</li>;
                   })}
                 </ol>
@@ -428,12 +429,14 @@ export default function StudioPane({ projectId }: { projectId: string }) {
                     ? " danger"
                     : taskState === "completed"
                     ? " ok"
-                    : taskState === "running" || taskState === "queued"
+                    : stepActive
                     ? " running"
                     : ""
-                }`}
+                }${stepProgress ? " stepped" : ""}`}
+                style={stepProgress ? { "--steps": stepProgress.steps.length } as React.CSSProperties : undefined}
               >
                 <i style={{ width: `${taskBarPercent}%` }} />
+                {pulseStep && <b className="progress-step-pulse" style={{ left: `${taskBarPercent}%`, width: `${stepWidth}%` }} />}
               </div>
               {!starting && transformTask?.error && (
                 <p className="err" role="alert">

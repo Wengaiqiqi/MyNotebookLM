@@ -504,6 +504,7 @@ const en = {
     podcastDetail: "Podcast details",
     convert: "Convert to note",
     unavailable: "Transformations are unavailable until the desktop service is ready.",
+    stepCount: "Step {{current}} of {{total}}",
     elapsed: "{{seconds}}s",
     phases: { preparing: "Preparing inputs", connecting: "Model responding", generating: "Generating content", saving: "Finalizing results" },
     podcastPhases: { preparing: "Preparing podcast sources", script: "Writing the dialogue", speech: "Synthesizing both voices", saving: "Saving podcast audio" },
