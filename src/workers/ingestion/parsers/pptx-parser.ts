@@ -1,4 +1,5 @@
-import JSZip from "jszip";
+import type JSZip from "jszip";
+import { loadBoundedZip } from "./zip-limits";
 import { XMLParser } from "fast-xml-parser";
 import type { DocumentBlock } from "../types";
 
@@ -18,7 +19,7 @@ const texts = (node: unknown): string[] => {
 };
 
 export async function parsePptx(input: Uint8Array | ArrayBuffer): Promise<DocumentBlock[]> {
-  const zip = await JSZip.loadAsync(input);
+  const zip = await loadBoundedZip(input);
   const raw = async (name: string): Promise<string> => zip.file(name)!.async("string");
   const read = async (name: string): Promise<unknown> => xml.parse(await raw(name));
   const relationshipTarget = async (name: string, type: string): Promise<string | undefined> => {

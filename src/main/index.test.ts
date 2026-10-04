@@ -60,6 +60,7 @@ const mocks = vi.hoisted(() => {
       setPath: vi.fn(),
       getAppPath: vi.fn(() => "C:\\app"),
       setAppUserModelId: vi.fn(),
+      requestSingleInstanceLock: vi.fn(() => true),
       on: vi.fn((event: string, callback: Callback) => {
         callbacks.set(event, callback);
       }),
@@ -212,6 +213,29 @@ describe("main application composition", () => {
     expect(mocks.app.setPath.mock.invocationCallOrder[0]!).toBeLessThan(
       mocks.app.whenReady.mock.invocationCallOrder[0]!
     );
+  });
+
+  it("quits without opening app data when another instance holds the lock", async () => {
+    mocks.app.requestSingleInstanceLock.mockReturnValueOnce(false);
+
+    await import("./index");
+    await Promise.resolve();
+
+    expect(mocks.app.quit).toHaveBeenCalledOnce();
+    expect(mocks.openAppDatabaseAsync).not.toHaveBeenCalled();
+    expect(mocks.callbacks.has("second-instance")).toBe(false);
+  });
+
+  it("focuses the existing window when a second instance starts", async () => {
+    const window = { isMinimized: vi.fn(() => true), restore: vi.fn(), focus: vi.fn() };
+    mocks.getAllWindows.mockReturnValue([window] as never);
+
+    await import("./index");
+    mocks.callbacks.get("second-instance")?.();
+
+    expect(window.restore).toHaveBeenCalledOnce();
+    expect(window.focus).toHaveBeenCalledOnce();
+    mocks.getAllWindows.mockReturnValue([]);
   });
 
   it("ignores the test user data override in production", async () => {

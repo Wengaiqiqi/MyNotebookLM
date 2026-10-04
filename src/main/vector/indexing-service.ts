@@ -120,7 +120,7 @@ export class IndexingService {
         const rows: LanceRow[] = part.map((c, n) => ({ chunkId: c.id, projectId: source.project_id, sourceId: source.source_id, revisionId: input.revisionId, spaceId: input.space.id, ordinal: c.ordinal, contentHash: c.content_hash, text: c.text, vector: vectors[n]!, locator: JSON.parse(c.locator_json), createdAt: Date.now() }));
         await this.lance.upsert(input.space, rows);
       }
-      const actual = (await this.lance.rows(input.space)).filter(r => r.revisionId === input.revisionId);
+      const actual = (await this.lance.rows(input.space, { revisionId: input.revisionId })).filter(r => r.revisionId === input.revisionId);
       if (await this.lance.count(input.space, { revisionId: input.revisionId }) !== chunks.length) throw new Error("Lance row count mismatch");
       this.validateRows(actual, chunks, source, input.revisionId, input.space);
       if (chunks.length) { const vectors = await provider.embedBatch([chunks[0]!.text], input.signal ?? new AbortController().signal, 1); const probe = await this.lance.vectorSearch(input.space, vectors[0]!, 1, { revisionId: input.revisionId }); if (probe.length !== 1 || !this.validateRow(probe[0], chunks[0], source, input.revisionId, input.space)) throw new Error("Lance probe mismatch"); }
@@ -155,7 +155,7 @@ export class IndexingService {
       if (input.signal?.aborted) throw Object.assign(new Error("Space build cancelled"), { code: "SPACE_BUILD_CANCELLED" });
     }
     if (await this.lance.count(input.space, { revisionId: input.revisionId }) !== chunks.length) throw new Error("Lance row count mismatch");
-    const rows = (await this.lance.rows(input.space)).filter(r => r.revisionId === input.revisionId);
+    const rows = (await this.lance.rows(input.space, { revisionId: input.revisionId })).filter(r => r.revisionId === input.revisionId);
     this.validateRows(rows, chunks, source, input.revisionId, input.space);
     if (chunks.length) { const probeVector=(await provider.embedBatch([chunks[0]!.text], input.signal ?? new AbortController().signal, 1))[0]!; const probe=await this.lance.vectorSearch(input.space, probeVector, 1, {revisionId:input.revisionId}); if (probe.length !== 1 || !this.validateRow(probe[0], chunks[0], source, input.revisionId, input.space)) throw new Error("Lance probe mismatch"); }
   }

@@ -22,7 +22,7 @@ const mocks = vi.hoisted(() => {
   };
 });
 
-vi.mock("electron", () => ({ app: { isPackaged: false }, BrowserWindow: mocks.BrowserWindow }));
+vi.mock("electron", () => ({ app: { isPackaged: false }, BrowserWindow: mocks.BrowserWindow, shell: { openExternal: vi.fn(async () => undefined) } }));
 
 describe("createMainWindow", () => {
   beforeEach(() => {
@@ -47,6 +47,20 @@ describe("createMainWindow", () => {
       })
     }));
     expect(mocks.window.setIcon).toHaveBeenCalledWith(expect.stringMatching(/[\\/]build[\\/]icon\.ico$/));
+  });
+
+  it("denies new windows and opens only safe web links in the system browser", async () => {
+    const { createMainWindow, openExternalLink } = await import("./window");
+    createMainWindow();
+    const handler = mocks.window.webContents.setWindowOpenHandler.mock.calls[0]![0] as (details: { url: string }) => unknown;
+    expect(handler({ url: "https://example.com/a" })).toEqual({ action: "deny" });
+
+    const open = vi.fn(async () => undefined);
+    openExternalLink("https://example.com/a?b=1", open);
+    openExternalLink("javascript:alert(1)", open);
+    openExternalLink("file:///C:/Windows/System32/calc.exe", open);
+    openExternalLink("http://127.0.0.1:8080/", open);
+    expect(open).toHaveBeenCalledExactlyOnceWith("https://example.com/a?b=1");
   });
 
   it("validates and cleans up the versioned title-overlay IPC operation", async () => {

@@ -1,4 +1,5 @@
-import JSZip from "jszip";
+import type JSZip from "jszip";
+import { loadBoundedZip } from "./zip-limits";
 import { XMLParser } from "fast-xml-parser";
 import type { CitationImagePreview, CitationSheetPreview } from "../../../shared/ipc";
 import type { SourceLocator } from "../../../shared/sources";
@@ -24,7 +25,7 @@ async function documentRoot(data: Uint8Array): Promise<any> {
 }
 
 async function docxArchive(data: Uint8Array): Promise<{ zip: JSZip; root: any }> {
-  const zip = await JSZip.loadAsync(data);
+  const zip = await loadBoundedZip(data);
   const entry = zip.file("word/document.xml");
   if (!entry) throw new Error("DOCX document.xml is missing");
   return {

@@ -1,7 +1,9 @@
 import ExcelJS from "exceljs";
 import type { DocumentBlock } from "../types";
+import { loadBoundedZip } from "./zip-limits";
 
 export async function parseXlsx(input: Uint8Array | ArrayBuffer, rowsPerBlock = 100): Promise<DocumentBlock[]> {
+  await loadBoundedZip(input);
   const workbook = new ExcelJS.Workbook();
   await workbook.xlsx.load(input);
   const blocks: DocumentBlock[] = [];

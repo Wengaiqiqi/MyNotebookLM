@@ -147,10 +147,25 @@ export function createUrlSource(options: UrlSourceOptions) {
       if (bytes.byteLength > MAX_BODY_BYTES) {
         throw new UrlFetchError("body exceeds 20 MiB decompressed limit", "UNSAFE_INPUT");
       }
-      return extractArticle(new TextDecoder().decode(bytes), response.url || url.href);
+      return extractArticle(decodeHtml(bytes, contentType), response.url || url.href);
     }
   }
   return { fetch };
+}
+
+/** Pick the page encoding from the BOM, the HTTP charset, then <meta charset>; default UTF-8. */
+export function decodeHtml(bytes: Uint8Array, contentType: string): string {
+  const head = Buffer.from(bytes.subarray(0, 3));
+  if (head.equals(Buffer.from([0xef, 0xbb, 0xbf]))) return new TextDecoder("utf-8").decode(bytes);
+  if (head.subarray(0, 2).equals(Buffer.from([0xff, 0xfe]))) return new TextDecoder("utf-16le").decode(bytes);
+  if (head.subarray(0, 2).equals(Buffer.from([0xfe, 0xff]))) return new TextDecoder("utf-16be").decode(bytes);
+  const prescan = Buffer.from(bytes.subarray(0, 4096)).toString("latin1");
+  const label = /charset\s*=\s*["']?([\w.:-]+)/i.exec(contentType)?.[1]
+    ?? /<meta[^>]+charset\s*=\s*["']?([\w.:-]+)/i.exec(prescan)?.[1];
+  if (label) {
+    try { return new TextDecoder(label.toLowerCase()).decode(bytes); } catch { /* unknown label: fall back to UTF-8 */ }
+  }
+  return new TextDecoder("utf-8").decode(bytes);
 }
 
 function extractArticle(html: string, finalUrl: string): FetchedArticle {

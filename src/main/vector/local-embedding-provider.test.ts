@@ -49,7 +49,7 @@ it("accepts only the exact manager active directory after Windows normalization"
   const transformers = await import("@huggingface/transformers");
   const runtime = createTransformersEmbeddingRuntime("C:/models", "C:/models/active-one");
   await runtime("c:/models/active-one", ["x"], new AbortController().signal);
-  expect(transformers.pipeline).toHaveBeenCalledWith("feature-extraction", path.resolve("C:/models/active-one"), expect.anything());
+  expect(transformers.pipeline).toHaveBeenCalledWith("feature-extraction", path.win32.resolve("C:/models/active-one"), expect.anything());
 });
 it("retries a model load after a transient pipeline failure", async () => {
   const transformers = await import("@huggingface/transformers");
@@ -61,7 +61,7 @@ it("retries a model load after a transient pipeline failure", async () => {
 
   await expect(runtime(active, ["first"], new AbortController().signal)).rejects.toThrow("transient model load");
   await expect(runtime(active, ["second"], new AbortController().signal)).resolves.toEqual([[1]]);
-  expect(pipelineMock).toHaveBeenLastCalledWith("feature-extraction", path.resolve(active), { local_files_only: true });
+  expect(pipelineMock).toHaveBeenLastCalledWith("feature-extraction", path.win32.resolve(active), { local_files_only: true });
 });
 it("loads a user-selected weight file from its model root", async () => {
   const root = mkdtempSync(path.join(os.tmpdir(), "mynotebook-local-"));

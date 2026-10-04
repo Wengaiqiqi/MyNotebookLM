@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { validateFile } from "./file-preflight";
+import { decodeTextFile, normalizeTextBytes, validateFile } from "./file-preflight";
 
 describe("file preflight", () => {
   it.each([
@@ -20,5 +20,16 @@ describe("file preflight", () => {
   it("enforces size and parser extension", () => {
     expect(() => validateFile("a.pdf", Buffer.from("%PDF-"), { maxBytes: 4 })).toThrow();
     expect(() => validateFile("a.csv", Buffer.from("%PDF-"))).toThrow();
+  });
+  it("accepts GB18030 and BOM-marked UTF-16 text and normalizes it to UTF-8", () => {
+    const gbk = Buffer.from([0xc4, 0xe3, 0xba, 0xc3, 0x2c, 0x31]); // "你好,1" saved by Chinese Windows Excel/Notepad
+    expect(validateFile("table.csv", gbk)).toEqual({ extension: "csv" });
+    expect(normalizeTextBytes(gbk).toString("utf8")).toBe("你好,1");
+    const utf16le = Buffer.concat([Buffer.from([0xff, 0xfe]), Buffer.from("中文 text", "utf16le")]);
+    expect(validateFile("notes.txt", utf16le)).toEqual({ extension: "txt" });
+    expect(decodeTextFile(utf16le)).toBe("中文 text");
+    const utf16be = Buffer.from([0xfe, 0xff, 0x4e, 0x2d]);
+    expect(decodeTextFile(utf16be)).toBe("中");
+    expect(decodeTextFile(Buffer.from([0xef, 0xbb, 0xbf, 0x61]))).toBe("a");
   });
 });

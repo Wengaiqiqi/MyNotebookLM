@@ -76,6 +76,19 @@ describe("LanceStore", () => {
     try { await store.createSpace(space); await store.upsert(space, [row("r1-a", [1, 0, 0], "a"), row("r2-a", [0, 1, 0], "b", { revisionId: "revision-2" })]); expect(await store.count(space)).toBe(2); expect(await store.count(space, { revisionId: "revision-1" })).toBe(1); expect(await store.count(space, { revisionId: "revision-2" })).toBe(1); await expect(store.count(space, { unknown: "x" } as never)).rejects.toThrow(/filter field/); } finally { await store.close(); await rm(dir, { recursive: true, force: true }); }
   }, 30_000);
 
+  it("reads only filtered rows and deletes one source's vectors", async () => {
+    const dir = await mkdtemp(path.join(os.tmpdir(), "lance-source-delete-")); const store = await LanceStore.open(dir);
+    try {
+      await store.createSpace(space);
+      await store.upsert(space, [row("keep", [1, 0, 0], "keep"), row("drop", [0, 1, 0], "drop", { sourceId: "source-2", revisionId: "revision-2" })]);
+      expect((await store.rows(space, { revisionId: "revision-2" })).map(r => r.chunkId)).toEqual(["drop"]);
+      await store.deleteSource(space, "source-2");
+      expect((await store.rows(space)).map(r => r.chunkId)).toEqual(["keep"]);
+      await expect(store.health(space, "project-1")).resolves.toEqual({ indexedCount: 1 });
+      await store.deleteSource({ id: "00000000-0000-4000-8000-0000000000ff", dimension: 3 }, "source-1");
+    } finally { await store.close(); await rm(dir, { recursive: true, force: true }); }
+  }, 30_000);
+
   it("rejects dimensions and serializes locators canonically", async () => {
     const dir = await mkdtemp(path.join(os.tmpdir(), "lance-store-"));
     const store = await LanceStore.open(dir);

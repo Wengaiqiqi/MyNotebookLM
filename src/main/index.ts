@@ -1,4 +1,4 @@
-﻿import { app, BrowserWindow, ipcMain, Menu } from "electron";
+import { app, BrowserWindow, ipcMain, Menu } from "electron";
 import { randomUUID } from "node:crypto";
 import { mkdir } from "node:fs/promises";
 import path from "node:path";
@@ -15,7 +15,7 @@ import { registerTransformationHandlers } from "./ipc/register-transformation-ha
 import { registerMindMapHandlers } from "./ipc/register-mindmap-handlers";
 import { MindMapService } from "./notes/mindmap-service";
 import { ChatService, recoverInterruptedStreams, type RetrievableChunk, type RetrievalResult } from "./chat/chat-service";
-import { CitationOpener } from "./chat/citation-opener";
+import { CitationOpener, purgeStaleOriginalCopies } from "./chat/citation-opener";
 import { ModelService } from "./models/model-service";
 import { getAppPaths } from "./platform/paths";
 import { ProjectRepository } from "./projects/project-repository";
@@ -75,7 +75,22 @@ if (process.env["NODE_ENV"] === "test" && testUserDataDir) {
 }
 if (process.platform === "win32") app.setAppUserModelId("com.wengaiqiqi.mynotebooklm");
 
+// Startup recovery treats in-flight streams, space builds and deletions as
+// crash leftovers, so a second process must never open the same data.
+const hasInstanceLock = app.requestSingleInstanceLock();
+if (!hasInstanceLock) {
+  app.quit();
+} else {
+  app.on("second-instance", () => {
+    const window = BrowserWindow.getAllWindows()[0];
+    if (!window) return;
+    if (window.isMinimized()) window.restore();
+    window.focus();
+  });
+}
+
 app.whenReady().then(async () => {
+  if (!hasInstanceLock) return;
   const appPaths = getAppPaths(app.getPath("userData"));
   await Promise.all([
     mkdir(appPaths.root, { recursive: true }),
@@ -201,6 +216,19 @@ app.whenReady().then(async () => {
     return row ? { provider: await createProviderForSpace(row, space) } : null;
   }});
   (indexing as IndexingService & { setChunkRecovery?: (revisionId: string) => void }).setChunkRecovery?.((revisionId) => ingestionService.reparseRevision(revisionId));
+  /** Resolve a profile's embedding capability and measure its real dimension with one probe call. */
+  const probeEmbeddingProfile = async (profile: import("../shared/models").ModelProfileDto, modelId: string, seedDimension: (builtIn: boolean) => number, spaceId: string) => {
+    const builtIn = isBuiltInLocalEmbeddingProfile(profile);
+    const trustedRevision = builtIn ? LOCAL_MODEL_MANIFEST.revision : profile.provider === "local" ? canonicalLocalModelPath(profile.baseUrl) : modelId;
+    const capabilitySeed = { provider: profile.provider, modelId, modelRevision: trustedRevision, dimension: seedDimension(builtIn), distance: "cosine" as const, pooling: "mean" as const, preprocessVersion: builtIn ? "e5-query-passage-v1" : profile.provider === "local" ? "local-provider-v1" : "provider-default-v1", chunkingVersion: "persisted" };
+    const provider = await createProviderForSpace({ provider: capabilitySeed.provider, model_id: capabilitySeed.modelId, model_revision: capabilitySeed.modelRevision, dimension: capabilitySeed.dimension, distance: capabilitySeed.distance, pooling: capabilitySeed.pooling, preprocess_version: capabilitySeed.preprocessVersion, chunking_version: capabilitySeed.chunkingVersion, ...(builtIn ? { fingerprint: canonicalEmbeddingFingerprint(capabilitySeed) } : {}) }, { id: spaceId, dimension: capabilitySeed.dimension });
+    const probe = await provider.embedBatch(["embedding profile probe"], new AbortController().signal, 1);
+    const dimension = probe[0]?.length;
+    if (!dimension) return undefined;
+    const capability = provider.describe();
+    const fingerprint = canonicalEmbeddingFingerprint({ provider: capability.provider, modelId: capability.modelId, modelRevision: capability.modelRevision, dimension, distance: capability.distance, pooling: capability.pooling, preprocessVersion: capability.preprocessVersion, chunkingVersion: capability.chunkingVersion });
+    return { capability, dimension, fingerprint };
+  };
   // Lazily build a project's embedding Space on first import so users never
   // have to fail an import manually before the index exists.
   const spaceBuilds = new Map<string, Promise<void>>();
@@ -215,16 +243,9 @@ app.whenReady().then(async () => {
       if (!profile || !profile.enabled || profile.capability !== "embedding") throw unavailable();
       const modelId = profile.modelId.trim();
       if (!modelId) throw unavailable();
-      const builtIn = isBuiltInLocalEmbeddingProfile(profile);
-      const trustedRevision = builtIn ? LOCAL_MODEL_MANIFEST.revision : profile.provider === "local" ? canonicalLocalModelPath(profile.baseUrl) : modelId;
-      const seedDimension = builtIn ? LOCAL_MODEL_MANIFEST.dimension : 1;
-      const capabilitySeed = { provider: profile.provider, modelId, modelRevision: trustedRevision, dimension: seedDimension, distance: "cosine" as const, pooling: "mean" as const, preprocessVersion: builtIn ? "e5-query-passage-v1" : profile.provider === "local" ? "local-provider-v1" : "provider-default-v1", chunkingVersion: "persisted" };
-      const provider = await createProviderForSpace({ provider: capabilitySeed.provider, model_id: capabilitySeed.modelId, model_revision: capabilitySeed.modelRevision, dimension: capabilitySeed.dimension, distance: capabilitySeed.distance, pooling: capabilitySeed.pooling, preprocess_version: capabilitySeed.preprocessVersion, chunking_version: capabilitySeed.chunkingVersion, ...(builtIn ? { fingerprint: canonicalEmbeddingFingerprint(capabilitySeed) } : {}) }, { id: "", dimension: capabilitySeed.dimension });
-      const probe = await provider?.embedBatch?.(["embedding profile probe"], new AbortController().signal, 1);
-      const dimension = probe[0]?.length;
-      if (!dimension) throw unavailable();
-      const capability = provider.describe();
-      const fingerprint = canonicalEmbeddingFingerprint({ provider: capability.provider, modelId: capability.modelId, modelRevision: capability.modelRevision, dimension, distance: capability.distance, pooling: capability.pooling, preprocessVersion: capability.preprocessVersion, chunkingVersion: capability.chunkingVersion });
+      const probed = await probeEmbeddingProfile(profile, modelId, (builtIn) => builtIn ? LOCAL_MODEL_MANIFEST.dimension : 1, "");
+      if (!probed) throw unavailable();
+      const { capability, dimension, fingerprint } = probed;
       const task = taskService.createTask({ projectId, sourceId: null, kind: "validation" });
       taskService.start(task.id, "validating");
       try {
@@ -255,7 +276,13 @@ app.whenReady().then(async () => {
   if (typeof (appDatabase.connection as { prepare?: unknown }).prepare === "function") {
     await taskService.recoverAndContinueEmbedding(continueEmbedding, 60 * 60 * 1000);
   }
-  const sourceService = new MainSourceService(appDatabase.connection, taskService, ingestionService, appPaths.files, (taskId, revisionId) => taskRevisions.set(taskId, revisionId), createNodeUrlSource());
+  const removeSourceVectors = async (projectId: string, sourceId: string): Promise<void> => {
+    const projectSpaces = appDatabase!.connection.prepare("SELECT id, dimension FROM embedding_spaces WHERE project_id = ? AND state <> 'failed'").all(projectId) as Array<{ id: string; dimension: number }>;
+    for (const space of projectSpaces) await lance.deleteSource(space, sourceId);
+  };
+  const citationOpener = () => new CitationOpener(appDatabase!.connection, undefined, undefined, (request) => pool.preview(request));
+  const sourceService = new MainSourceService(appDatabase.connection, taskService, ingestionService, appPaths.files, (taskId, revisionId) => taskRevisions.set(taskId, revisionId), createNodeUrlSource(), removeSourceVectors);
+  try { sourceService.recoverInterruptedRemovals(); } catch (error) { console.error("[source] removal recovery failed:", error); }
   const failure = <T>(code: "VALIDATION" | "NOT_FOUND" | "CONFLICT" | "CANCELLED" | "INDEX_UNAVAILABLE" | "INTERNAL", messageKey: string, recoverable = false): Result<T> => ({ ok: false, error: { code, messageKey, recoverable } });
   const activeTask = (projectId: string): TaskDto | undefined => {
     const row = appDatabase!.connection.prepare("SELECT * FROM tasks WHERE project_id = ? AND state IN ('queued','running') AND kind IN ('validation','optimize') ORDER BY created_at DESC LIMIT 1").get(projectId) as { id?: string } | undefined;
@@ -289,17 +316,10 @@ app.whenReady().then(async () => {
       const current = spaces.active(projectId);
       const modelId = profile.modelId.trim();
       if (!modelId) return failure("VALIDATION", "errors.embeddingProfileUnavailable");
-      const builtIn = isBuiltInLocalEmbeddingProfile(profile);
-      const trustedRevision = builtIn ? LOCAL_MODEL_MANIFEST.revision : profile.provider === "local" ? canonicalLocalModelPath(profile.baseUrl) : modelId;
-      const seedDimension = builtIn ? LOCAL_MODEL_MANIFEST.dimension : profile.provider === "local" ? 1 : current?.dimension ?? 1;
-      const capabilitySeed = { provider: profile.provider, modelId, modelRevision: trustedRevision, dimension: seedDimension, distance: "cosine" as const, pooling: "mean" as const, preprocessVersion: builtIn ? "e5-query-passage-v1" : profile.provider === "local" ? "local-provider-v1" : "provider-default-v1", chunkingVersion: "persisted" };
-      const provider = await createProviderForSpace({ provider: capabilitySeed.provider, model_id: capabilitySeed.modelId, model_revision: capabilitySeed.modelRevision, dimension: capabilitySeed.dimension, distance: capabilitySeed.distance, pooling: capabilitySeed.pooling, preprocess_version: capabilitySeed.preprocessVersion, chunking_version: capabilitySeed.chunkingVersion, ...(builtIn ? { fingerprint: canonicalEmbeddingFingerprint(capabilitySeed) } : {}) }, { id: current?.id ?? "", dimension: capabilitySeed.dimension });
-      const probe = await provider?.embedBatch?.(["embedding profile probe"], new AbortController().signal, 1);
-      const dimension = probe[0]?.length;
-      if (!dimension) return failure("VALIDATION", "errors.embeddingProfileUnavailable");
-      const capability = provider.describe();
+      const probed = await probeEmbeddingProfile(profile, modelId, (builtIn) => builtIn ? LOCAL_MODEL_MANIFEST.dimension : profile.provider === "local" ? 1 : current?.dimension ?? 1, current?.id ?? "");
+      if (!probed) return failure("VALIDATION", "errors.embeddingProfileUnavailable");
+      const { capability, dimension, fingerprint } = probed;
       const modelRevision = capability.modelRevision;
-      const fingerprint = canonicalEmbeddingFingerprint({ provider: capability.provider, modelId: capability.modelId, modelRevision, dimension, distance: capability.distance, pooling: capability.pooling, preprocessVersion: capability.preprocessVersion, chunkingVersion: capability.chunkingVersion });
       const task = taskService.createTask({ projectId, sourceId: null, kind: "validation" });
       return { ok: true, value: runTask(task, () => spaceService.rebuild({ taskId: task.id, recoverSources: true, spec: { projectId, provider: capability.provider, modelId: capability.modelId, modelRevision, dimension, distance: capability.distance, pooling: capability.pooling, preprocessVersion: capability.preprocessVersion, chunkingVersion: capability.chunkingVersion, fingerprint } })) };
     },
@@ -340,7 +360,7 @@ app.whenReady().then(async () => {
       importFile: sourceService.importFile.bind(sourceService), importUrl: sourceService.importUrl.bind(sourceService),
       removeSource: sourceService.removeSource.bind(sourceService), retryTask: sourceService.retryTask.bind(sourceService),
       cancelTask: sourceService.cancelTask.bind(sourceService), ownsSource: sourceService.ownsSource.bind(sourceService), ownsTask: sourceService.ownsTask.bind(sourceService)
-    }, undefined, (input) => new CitationOpener(appDatabase!.connection).openSource(input));
+    }, undefined, (input) => citationOpener().openSource(input));
     cleanupVectorHandlers = registerVectorHandlers(ipcMain, vectorService);
   }
   const modelRouter = new ModelRouter(settingsRepository);
@@ -362,7 +382,7 @@ app.whenReady().then(async () => {
   void Promise.resolve(transformationService.recoverStale(60 * 60 * 1000)).catch(() => { /* stale recovery must not block startup */ });
   cleanupNoteHandlers = registerNoteHandlers(ipcMain, noteService);
   cleanupTransformationHandlers = registerTransformationHandlers(ipcMain, transformationService);
-  cleanupMindMapHandlers = registerMindMapHandlers(ipcMain, new MindMapService(appDatabase.connection), new CitationOpener(appDatabase.connection));
+  cleanupMindMapHandlers = registerMindMapHandlers(ipcMain, new MindMapService(appDatabase.connection), citationOpener());
   const chatService = new ChatService({
     db: appDatabase.connection,
     // Resolve the immutable route snapshot per turn so route changes apply live.
@@ -394,12 +414,13 @@ app.whenReady().then(async () => {
     ipc: ipcMain,
     service: chatService,
     requestHub: new Map(),
-    openCitation: (input) => new CitationOpener(appDatabase!.connection).openCitation(input),
-    getCitationDetail: (input) => new CitationOpener(appDatabase!.connection).getCitationDetail(input),
+    openCitation: (input) => citationOpener().openCitation(input),
+    getCitationDetail: (input) => citationOpener().getCitationDetail(input),
     onWindowClosed: () => void 0
   });
 
   cleanupTitleOverlayHandler = registerTitleOverlayHandler(ipcMain);
+  void purgeStaleOriginalCopies().catch(() => undefined);
 
   Menu.setApplicationMenu(null);
   createMainWindow();
