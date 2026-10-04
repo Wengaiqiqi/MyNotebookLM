@@ -87,24 +87,47 @@ export class MindMapOutputError extends Error {
   }
 }
 
+/**
+ * Scan one JSON object starting at `start`, fixing the mistakes models make
+ * when copying document text: raw newlines/tabs inside strings, ASCII quotes
+ * inside text, Chinese quotes used as delimiters and trailing commas. Returns
+ * null when the object never closes (a truncated map is never completed).
+ */
+function scanObject(text: string, start: number): { json: string; end: number } | null {
+  let out = "", depth = 0, quote = "", escaped = false;
+  for (let index = start; index < text.length; index++) {
+    const char = text[index]!;
+    if (quote) {
+      if (escaped) { escaped = false; out += char; continue; }
+      if (char === "\\") { escaped = true; out += char; continue; }
+      const closes = quote === "\u201c" ? char === "\u201d" : char === '"';
+      if (closes && /^\s*(?:[,:}\]]|$)/.test(text.slice(index + 1, index + 40))) { quote = ""; out += '"'; continue; }
+      if (char === '"') out += '\\"';
+      else if (char === "\n") out += "\\n";
+      else if (char === "\r") out += "\\r";
+      else if (char === "\t") out += "\\t";
+      else if (char < " ") out += `\\u${char.charCodeAt(0).toString(16).padStart(4, "0")}`;
+      else out += char;
+      continue;
+    }
+    if (char === '"' || char === "\u201c") { quote = char; out += '"'; continue; }
+    if (char === "}" || char === "]") out = out.replace(/,\s*$/, "");
+    out += char;
+    if (char === "{") depth++;
+    else if (char === "}" && --depth === 0) return { json: out, end: index };
+  }
+  return null;
+}
+
 function modelJson(raw: string): unknown {
-  const cleaned = raw.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "");
+  const cleaned = raw.replace(/<think>[\s\S]*?<\/think>/gi, "").trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "");
   try { return JSON.parse(cleaned); } catch { /* Accept one complete JSON object surrounded by commentary. */ }
   const candidates: unknown[] = [];
-  let start = -1, depth = 0, quoted = false, escaped = false;
-  for (let index = 0; index < cleaned.length; index++) {
-    const char = cleaned[index];
-    if (start < 0) { if (char === "{") { start = index; depth = 1; } continue; }
-    if (quoted) {
-      if (escaped) escaped = false;
-      else if (char === "\\") escaped = true;
-      else if (char === '"') quoted = false;
-    } else if (char === '"') quoted = true;
-    else if (char === "{") depth++;
-    else if (char === "}" && --depth === 0) {
-      try { candidates.push(JSON.parse(cleaned.slice(start, index + 1))); } catch { /* Repair malformed JSON through the generation route. */ }
-      start = -1;
-    }
+  for (let index = cleaned.indexOf("{"); index >= 0; index = cleaned.indexOf("{", index + 1)) {
+    const object = scanObject(cleaned, index);
+    if (!object) break;
+    try { candidates.push(JSON.parse(object.json)); } catch { /* Repair malformed JSON through the generation route. */ }
+    index = object.end;
   }
   if (candidates.length === 1) return candidates[0];
   throw new MindMapOutputError("json", "Return exactly one complete, valid JSON object, without commentary or multiple maps.");
