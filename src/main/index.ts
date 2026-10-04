@@ -274,6 +274,7 @@ app.whenReady().then(async () => {
     const projectSpaces = appDatabase!.connection.prepare("SELECT id, dimension FROM embedding_spaces WHERE project_id = ? AND state <> 'failed'").all(projectId) as Array<{ id: string; dimension: number }>;
     for (const space of projectSpaces) await lance.deleteSource(space, sourceId);
   };
+  const citationOpener = () => new CitationOpener(appDatabase!.connection, undefined, undefined, (request) => pool.preview(request));
   const sourceService = new MainSourceService(appDatabase.connection, taskService, ingestionService, appPaths.files, (taskId, revisionId) => taskRevisions.set(taskId, revisionId), createNodeUrlSource(), removeSourceVectors);
   try { sourceService.recoverInterruptedRemovals(); } catch (error) { console.error("[source] removal recovery failed:", error); }
   const failure = <T>(code: "VALIDATION" | "NOT_FOUND" | "CONFLICT" | "CANCELLED" | "INDEX_UNAVAILABLE" | "INTERNAL", messageKey: string, recoverable = false): Result<T> => ({ ok: false, error: { code, messageKey, recoverable } });
@@ -360,7 +361,7 @@ app.whenReady().then(async () => {
       importFile: sourceService.importFile.bind(sourceService), importUrl: sourceService.importUrl.bind(sourceService),
       removeSource: sourceService.removeSource.bind(sourceService), retryTask: sourceService.retryTask.bind(sourceService),
       cancelTask: sourceService.cancelTask.bind(sourceService), ownsSource: sourceService.ownsSource.bind(sourceService), ownsTask: sourceService.ownsTask.bind(sourceService)
-    }, undefined, (input) => new CitationOpener(appDatabase!.connection).openSource(input));
+    }, undefined, (input) => citationOpener().openSource(input));
     cleanupVectorHandlers = registerVectorHandlers(ipcMain, vectorService);
   }
   const modelRouter = new ModelRouter(settingsRepository);
@@ -382,7 +383,7 @@ app.whenReady().then(async () => {
   void Promise.resolve(transformationService.recoverStale(60 * 60 * 1000)).catch(() => { /* stale recovery must not block startup */ });
   cleanupNoteHandlers = registerNoteHandlers(ipcMain, noteService);
   cleanupTransformationHandlers = registerTransformationHandlers(ipcMain, transformationService);
-  cleanupMindMapHandlers = registerMindMapHandlers(ipcMain, new MindMapService(appDatabase.connection), new CitationOpener(appDatabase.connection));
+  cleanupMindMapHandlers = registerMindMapHandlers(ipcMain, new MindMapService(appDatabase.connection), citationOpener());
   const chatService = new ChatService({
     db: appDatabase.connection,
     // Resolve the immutable route snapshot per turn so route changes apply live.
@@ -414,8 +415,8 @@ app.whenReady().then(async () => {
     ipc: ipcMain,
     service: chatService,
     requestHub: new Map(),
-    openCitation: (input) => new CitationOpener(appDatabase!.connection).openCitation(input),
-    getCitationDetail: (input) => new CitationOpener(appDatabase!.connection).getCitationDetail(input),
+    openCitation: (input) => citationOpener().openCitation(input),
+    getCitationDetail: (input) => citationOpener().getCitationDetail(input),
     onWindowClosed: () => void 0
   });
 

@@ -26,6 +26,25 @@ describe("worker protocol", () => {
     await pool.close();
   });
 
+  it("runs a citation preview in its own worker and terminates it", async () => {
+    const posted: any[] = []; let terminated = 0;
+    const worker = Object.assign(new EventEmitter(), { postMessage: (message: unknown) => { posted.push(message); }, terminate: async () => { terminated += 1; return 0; } });
+    const pool = new WorkerPool(1, new URL("file:///fake"), () => worker as any);
+    const request = { kind: "xlsx" as const, data: new Uint8Array([1]), locator: { kind: "sheet" as const, sheet: "A" }, citedText: "" };
+    const pending = pool.preview(request);
+    expect(posted[0]).toMatchObject({ version: 1, type: "preview", request });
+    expect(parseWorkerMessage(posted[0])).toMatchObject({ type: "preview" });
+    worker.emit("message", { version: 1, type: "preview-result", taskId: "other", sheet: { name: "wrong" }, images: [] });
+    worker.emit("message", { version: 1, type: "preview-result", taskId: posted[0].taskId, sheet: null, images: [] });
+    await expect(pending).resolves.toEqual({ sheet: null, images: [] });
+    expect(terminated).toBe(1);
+    await pool.close();
+  });
+
+  it("rejects preview messages with an invalid request", () => {
+    expect(() => parseWorkerMessage({ version: 1, type: "preview", taskId: "t", request: { kind: "pdf", data: new Uint8Array(), locator: { kind: "sheet", sheet: "A" }, citedText: "" } })).toThrow();
+  });
+
   it("rejects malformed result messages", async () => {
     const worker = Object.assign(new EventEmitter(), { postMessage: () => undefined, terminate: async () => 0 });
     const pool = new WorkerPool(1, new URL("file:///fake"), () => worker as any);

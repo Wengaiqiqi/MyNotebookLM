@@ -3,22 +3,27 @@ import { Worker } from "node:worker_threads";
 import type { PreparedChunk } from "../../workers/ingestion/types";
 import { sourceLocatorSchema } from "../../shared/sources";
 import { z } from "zod";
+import { randomUUID } from "node:crypto";
+import type { CitationPreviewRequest, CitationPreviewResult } from "../../workers/preview/citation-preview";
 
 export const WORKER_PROTOCOL_VERSION = 1 as const;
 export type WorkerMessage =
   | { version: 1; type: "start"; taskId: string; kind: string; data: Uint8Array }
-  | { version: 1; type: "cancel"; taskId: string };
+  | { version: 1; type: "cancel"; taskId: string }
+  | { version: 1; type: "preview"; taskId: string; request: CitationPreviewRequest };
 export function defaultWorkerConcurrency(parallelism = availableParallelism()): number { return Math.max(1, Math.min(2, parallelism - 1)); }
 export function parseWorkerMessage(value: unknown): WorkerMessage {
   if (!value || typeof value !== "object" || (value as { version?: unknown }).version !== 1) throw new Error("Invalid worker message");
   const message = value as Record<string, unknown>;
   if (message.type === "cancel" && typeof message.taskId === "string") return { version: 1, type: "cancel", taskId: message.taskId };
+  if (message.type === "preview" && typeof message.taskId === "string" && previewRequestSchema.safeParse(message.request).success) return { version: 1, type: "preview", taskId: message.taskId, request: message.request as CitationPreviewRequest };
   if (message.type === "start" && typeof message.taskId === "string" && typeof message.kind === "string" && message.data instanceof Uint8Array) return message as WorkerMessage;
   throw new Error("Invalid worker message");
 }
 export type WorkerResult = { version: 1; type: "result"; taskId: string; chunks: PreparedChunk[] };
 export type WorkerError = Error & { code: string; taskId: string; state: "failed" | "cancelled" };
 export type WorkerProgress = { version: 1; type: "progress"; taskId: string; value: number };
+const previewRequestSchema = z.object({ kind: z.enum(["xlsx", "docx"]), data: z.instanceof(Uint8Array), locator: sourceLocatorSchema, citedText: z.string(), tableName: z.string().optional() }).strict();
 const preparedChunkSchema = z.object({ ordinal: z.number().int().nonnegative(), text: z.string(), locator: sourceLocatorSchema, contentHash: z.string().min(1), tokenEstimate: z.number().int().nonnegative() }).strict();
 const workerErrorSchema = z.object({ code: z.string().min(1), message: z.string().min(1) }).strict();
 function workerError(value: unknown, taskId: string, state: WorkerError["state"]): WorkerError { const parsed = workerErrorSchema.parse(value); const error = new Error(parsed.message) as WorkerError; error.code = parsed.code; error.taskId = taskId; error.state = state; return error; }
@@ -27,6 +32,8 @@ export type DurableWorkerPayload = { kind: string; data: Uint8Array; revisionId?
 type DurablePayloadLoader = ((taskId: string, revisionId: string) => DurableWorkerPayload | undefined) | ((taskId: string) => DurableWorkerPayload | undefined);
 /** Watchdog ceilings: heavy parses regularly stay silent for tens of seconds;
  *  the watchdog only fires when a worker stops reporting entirely. */
+/** A runaway parse fails only its own worker (ERR_WORKER_OUT_OF_MEMORY) instead of the app. */
+export const WORKER_HEAP_LIMIT_MB = 2048;
 export const WORKER_START_TIMEOUT_MS = 120_000;
 export const WORKER_IDLE_TIMEOUT_MS = 60_000;
 type WorkerJob = {
@@ -59,7 +66,7 @@ export class WorkerPool {
   constructor(
     concurrency = defaultWorkerConcurrency(),
     private readonly workerUrl = new URL("../ingestionWorker.js", import.meta.url),
-    private readonly factory: () => PoolWorker = () => new Worker(this.workerUrl) as PoolWorker,
+    private readonly factory: () => PoolWorker = () => new Worker(this.workerUrl, { resourceLimits: { maxOldGenerationSizeMb: WORKER_HEAP_LIMIT_MB } }) as PoolWorker,
     durablePayload?: DurablePayloadLoader,
     onProgress?: (taskId: string, value: number) => void
   ) {
@@ -167,6 +174,36 @@ export class WorkerPool {
         finish(asError(reason), undefined, true);
       }
     }
+  }
+
+  /** Run one citation preview in a short-lived worker so Office parsing never blocks the main process. */
+  preview(request: CitationPreviewRequest): Promise<CitationPreviewResult> {
+    if (this.closed) return Promise.reject(new Error("Worker pool is closed"));
+    return new Promise((resolve, reject) => {
+      const taskId = randomUUID();
+      let worker: PoolWorker;
+      try { worker = this.factory(); } catch (reason) { reject(asError(reason)); return; }
+      this.workers.add(worker);
+      let done = false;
+      const finish = (error?: Error, result?: CitationPreviewResult): void => {
+        if (done) return;
+        done = true;
+        clearTimeout(timer);
+        this.workers.delete(worker);
+        worker.removeAllListeners();
+        void worker.terminate().catch(() => undefined);
+        if (error) reject(error); else resolve(result!);
+      };
+      const timer = setTimeout(() => finish(new Error("Preview worker timed out")), WORKER_START_TIMEOUT_MS);
+      worker.on?.("message", (message: any) => {
+        if (message?.version !== 1 || message.taskId !== taskId) return;
+        if (message.type === "preview-result") finish(undefined, { sheet: message.sheet ?? null, images: Array.isArray(message.images) ? message.images : [] });
+        else if (message.type === "error") finish(new Error(typeof message.error?.message === "string" ? message.error.message : "Preview failed"));
+      });
+      worker.once("error", (reason) => finish(asError(reason)));
+      worker.once("exit", (code) => finish(new Error("Preview worker exited: " + code)));
+      try { worker.postMessage({ version: 1, type: "preview", taskId, request }); } catch (reason) { finish(asError(reason)); }
+    });
   }
 
   cancel(taskId: string): void {
