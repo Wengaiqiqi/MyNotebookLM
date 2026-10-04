@@ -238,6 +238,7 @@ const zhCN = {
     conflict: "数据已发生变化，请重新加载后重试。",
     configuration: "请检查提供商地址、API Key 和模型配置后重试。",
     credentialBinding: "已保存的密钥与当前提供商地址不匹配，请重新输入 API Key。",
+    credentialUnreadable: "已保存的 API Key 无法解密。请在设置 → 模型服务中重新填写并保存密钥，再重试资料导入。",
     internal: "操作未能完成，请重试。",
     invalidResponse: "提供商返回了无效响应，请检查其服务状态后重试。",
     indexUnavailable: "索引暂时不可用，请重试或重建。",

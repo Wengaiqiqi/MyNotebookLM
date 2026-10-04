@@ -238,6 +238,7 @@ const en = {
     conflict: "The data changed. Reload and retry.",
     configuration: "Check the provider address, API key and model configuration.",
     credentialBinding: "The saved key does not match the current provider address. Re-enter the API key.",
+    credentialUnreadable: "The saved API key could not be decrypted. Re-enter and save it in Settings → Model services, then retry importing the source.",
     internal: "The operation could not be completed. Please retry.",
     invalidResponse: "The provider returned an invalid response. Check its service status.",
     indexUnavailable: "The index is temporarily unavailable. Retry or rebuild.",

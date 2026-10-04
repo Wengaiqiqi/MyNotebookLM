@@ -176,25 +176,21 @@ describe("TaskRepository", () => {
       .toThrow(StaleTaskStateError);
   });
 
-  it("maps error code/message into a safe DTO error summary", () => {
+  it.each([
+    { code: "UNSAFE_INPUT" as const, messageKey: "errors.unsafeInput", recoverable: false },
+    { code: "AUTH" as const, messageKey: "errors.credentialUnreadable", recoverable: false }
+  ])("maps error code/message into a safe DTO error summary ($messageKey)", (error) => {
     createTask();
     const task = repository.transition({
       id: TASK_ID,
       expectedState: "queued",
       nextState: "failed",
       stage: "parsing",
-      error: {
-        code: "UNSAFE_INPUT",
-        messageKey: "errors.unsafeInput",
-        recoverable: false
-      },
+      error,
       updatedAt: "2026-08-25T00:00:00.001Z"
     });
-    expect(task.error).toEqual({
-      code: "UNSAFE_INPUT",
-      messageKey: "errors.unsafeInput",
-      recoverable: false
-    });
+    expect(task.error).toEqual(error);
+    expect(repository.findById(TASK_ID)?.error).toEqual(error);
   });
 
   it("rejects a duplicate idempotency key on create", () => {

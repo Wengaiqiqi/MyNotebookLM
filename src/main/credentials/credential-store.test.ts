@@ -1,7 +1,7 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { openAppDatabase, type AppDatabase } from "../db/database";
 import { SettingsRepository } from "../settings/settings-repository";
 import { ProviderRequestError } from "../models/http-client";
@@ -208,6 +208,28 @@ describe("CredentialStore", () => {
       { provider: "openai", baseUrl: "https://api.openai.com/v1" },
       async () => { throw error; }
     )).rejects.toBe(error);
+  });
+
+  it("classifies an unreadable credential without calling the provider and recovers after replacement", async () => {
+    const protector = new DeterministicProtector();
+    protector.decrypt = vi.fn(protector.decrypt.bind(protector))
+      .mockRejectedValueOnce(new Error("decryption failed: old-secret"));
+    const store = new CredentialStore(appDatabase.connection, protector);
+    const connection = { provider: "openai" as const, baseUrl: "https://api.openai.com/v1" };
+    const use = vi.fn(async (value?: string) => value);
+    await store.set(PROFILE_ID, "old-secret");
+
+    const error = await store.withSecret(PROFILE_ID, connection, use).catch((reason: unknown) => reason);
+    expect(error).toBeInstanceOf(ProviderRequestError);
+    expect(error).toMatchObject({ failure: {
+      error: { code: "AUTH", messageKey: "errors.credentialUnreadable", recoverable: false },
+      fallbackEligible: false
+    } });
+    expect(JSON.stringify(error)).not.toContain("old-secret");
+    expect(use).not.toHaveBeenCalled();
+
+    await store.set(PROFILE_ID, "replacement-secret");
+    await expect(store.withSecret(PROFILE_ID, connection, use)).resolves.toBe("replacement-secret");
   });
 
   it("replaces callback errors whose message contains the api key", async () => {
