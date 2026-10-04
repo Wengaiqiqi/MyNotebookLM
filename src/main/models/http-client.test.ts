@@ -104,6 +104,65 @@ describe("ProviderHttpClient", () => {
     expect(networkError.failure).toMatchObject({ error: { code: "NETWORK" } });
   });
 
+  it("times out a fetch that never observes its abort signal", async () => {
+    const deaf: FetchLike = async () => new Promise<Response>(() => { /* never settles */ });
+    const client = new ProviderHttpClient(deaf, { timeoutMs: 5 });
+
+    const error = await requestError(() => client.json("https://models.example", "/models", { signal: new AbortController().signal }));
+
+    expect(error.failure).toMatchObject({ fallbackEligible: true, error: { code: "TIMEOUT" } });
+  });
+
+  it("times out a stream kept open only by keep-alive filler", async () => {
+    const encoder = new TextEncoder();
+    const timers: ReturnType<typeof setInterval>[] = [];
+    const keepAlive = (filler: string): FetchLike => async () => {
+      let timer: ReturnType<typeof setInterval> | undefined;
+      return new Response(new ReadableStream({
+        start(controller) {
+          timer = setInterval(() => controller.enqueue(encoder.encode(filler)), 2);
+          timers.push(timer);
+        },
+        cancel() { clearInterval(timer); }
+      }));
+    };
+    try {
+      const sse = new ProviderHttpClient(keepAlive(": keep-alive\n\n"), { idleTimeoutMs: 30 });
+      const sseError = await requestError(async () => {
+        for await (const _record of sse.sse("https://models.example", "/stream", { signal: new AbortController().signal })) {
+          // Comments never count as progress.
+        }
+      });
+      expect(sseError.failure).toMatchObject({ fallbackEligible: true, error: { code: "TIMEOUT" } });
+
+      const ndjson = new ProviderHttpClient(keepAlive("\n"), { idleTimeoutMs: 30 });
+      const ndjsonError = await requestError(async () => {
+        for await (const _record of ndjson.ndjson("https://models.example", "/stream", { signal: new AbortController().signal })) {
+          // Blank lines never count as progress.
+        }
+      });
+      expect(ndjsonError.failure).toMatchObject({ fallbackEligible: true, error: { code: "TIMEOUT" } });
+    } finally {
+      for (const timer of timers) clearInterval(timer);
+    }
+  });
+
+  it("keeps a slow stream alive while records keep arriving", async () => {
+    const encoder = new TextEncoder();
+    let sent = 0;
+    const slow: FetchLike = async () => new Response(new ReadableStream({
+      async pull(controller) {
+        await new Promise((resolve) => setTimeout(resolve, 60));
+        if (sent++ < 6) controller.enqueue(encoder.encode(`: ping\n\ndata: {"n":${sent}}\n\n`));
+        else controller.close();
+      }
+    }));
+    const client = new ProviderHttpClient(slow, { idleTimeoutMs: 250 });
+    const records: unknown[] = [];
+    for await (const record of client.sse("https://models.example", "/stream", { signal: new AbortController().signal })) records.push(record);
+    expect(records).toHaveLength(6);
+  });
+
   it("normalizes HTTP failures and preserves only retry metadata", async () => {
     const secret = "secret-token";
     const client = new ProviderHttpClient(async () => response(

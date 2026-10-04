@@ -1,5 +1,6 @@
 import type Database from "better-sqlite3";
 import type { ProviderKind } from "../../shared/models";
+import { ProviderRequestError } from "../models/http-client";
 
 export interface SecretProtector {
   isAvailable(): Promise<boolean>;
@@ -234,7 +235,10 @@ export class CredentialStore implements CredentialStore {
       if (!encryptedSecret) throw new Error("Credential could not be read");
       apiKey = await this.protector.decrypt(encryptedSecret);
     } catch {
-      throw new Error("Credential could not be read");
+      throw new ProviderRequestError({
+        error: { code: "AUTH", messageKey: "errors.credentialUnreadable", recoverable: false },
+        fallbackEligible: false
+      });
     }
 
     try {

@@ -3,6 +3,7 @@ import { mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { MainSourceService } from "./main-source-service";
+import { ProviderRequestError } from "../models/http-client";
 
 describe("main source import orchestration", () => {
   it("runs file preflight before creating a source task", async () => {
@@ -113,7 +114,10 @@ describe("main source import orchestration", () => {
     expect(ingestion.run).toHaveBeenCalledWith(expect.objectContaining({ taskId: "00000000-0000-4000-8000-000000000003", kind: "text" }));
   });
 
-  it("persists sanitized error evidence when ingestion fails", async () => {
+  it.each([
+    [Object.assign(new Error("provider failed api_key=SECRET"), { code: "PROVIDER" }), { code: "PROVIDER", messageKey: "errors.provider", recoverable: true }],
+    [new ProviderRequestError({ error: { code: "AUTH", messageKey: "errors.credentialUnreadable", recoverable: false }, fallbackEligible: false }), { code: "AUTH", messageKey: "errors.credentialUnreadable", recoverable: false }]
+  ])("persists sanitized error evidence when ingestion fails (%s)", async (error, expected) => {
     const rows: Record<string, unknown>[] = [];
     const db = { prepare: vi.fn((sql: string) => ({
       run: (...args: unknown[]) => { if (sql.includes("sources")) rows.push({ id: args[0], project_id: args[1], kind: args[2], display_name: args[3], status: "active", current_revision_id: null, created_at: "2026-01-01T00:00:00.000Z", updated_at: "2026-01-01T00:00:00.000Z", deleted_at: null }); },
@@ -122,12 +126,11 @@ describe("main source import orchestration", () => {
     })), transaction: (fn: () => void) => () => fn() } as any;
     const fail = vi.fn();
     const tasks = { createTask: vi.fn(() => ({ id: "00000000-0000-4000-8000-000000000003" })), fail } as any;
-    const ingestion = { run: vi.fn(async () => { throw Object.assign(new Error("provider failed api_key=SECRET"), { code: "PROVIDER" }); }) } as any;
+    const ingestion = { run: vi.fn(async () => { throw error; }) } as any;
     const service = new MainSourceService(db, tasks, ingestion);
     await service.importFile({ projectId: "00000000-0000-4000-8000-000000000001", path: "src/test/fixtures/text/bilingual-sample.txt" });
     await vi.waitFor(() => expect(fail).toHaveBeenCalledOnce());
-    expect(fail).toHaveBeenCalledWith("00000000-0000-4000-8000-000000000003", expect.objectContaining({ code: "PROVIDER", recoverable: true }), false);
-    expect(fail.mock.calls[0]![1].messageKey).toBe("errors.provider");
+    expect(fail).toHaveBeenCalledWith("00000000-0000-4000-8000-000000000003", expected, false);
   });
 
   it("returns persisted failure evidence when listing tasks", () => {
@@ -160,8 +163,10 @@ describe("main source import orchestration", () => {
     const row = { id: "task", project_id: "project", source_id: null, kind: "ingest", state: "failed", stage: "parsing", progress_1000: 0, attempt: 0, error_code: "PROVIDER", error_message: "provider failed: api_key=SECRET", idempotency_key: null, created_at: "now", updated_at: "now" };
     const service = new MainSourceService({ prepare: vi.fn(() => ({ all: () => [row] })) } as any, {} as any, {} as any);
     expect(service.listTasks("project")[0]?.error).toEqual({ code: "PROVIDER", messageKey: "errors.provider", recoverable: true });
+    row.error_code = "AUTH";
+    row.error_message = "errors.credentialUnreadable";
+    expect(service.listTasks("project")[0]?.error).toEqual({ code: "AUTH", messageKey: "errors.credentialUnreadable", recoverable: false });
   });
-
   it.each(["errors.mindMapInvalidJson", "errors.mindMapInvalidStructure", "errors.mindMapInvalidReferences", "errors.transformationOutputIncomplete"])("keeps map metadata and %s when reloading persisted task progress", (messageKey) => {
     const row = { id: "task", project_id: "project", source_id: null, kind: "transformation", state: "failed", stage: "verifying",
       progress_1000: 900, attempt: 0, error_code: "PROVIDER", error_message: messageKey, idempotency_key: null,

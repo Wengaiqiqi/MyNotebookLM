@@ -16,6 +16,7 @@ import { parseSafeUrl } from "./url-policy";
 import { UnsupportedContentTypeError, type UrlSource, UrlFetchError } from "./url-source";
 import { normalizeTextBytes, validateFile } from "./file-preflight";
 import { CHUNKING_VERSION } from "../../workers/ingestion/chunker";
+import { ProviderRequestError } from "../models/http-client";
 
 type Row = Record<string, unknown>;
 const ERROR_CODES = new Set<TaskErrorSummaryDto["code"]>([
@@ -24,15 +25,16 @@ const ERROR_CODES = new Set<TaskErrorSummaryDto["code"]>([
   "UNSUPPORTED_FORMAT", "UNSAFE_INPUT", "INDEX_UNAVAILABLE", "INTERNAL"
 ]);
 function taskError(error: unknown): TaskErrorSummaryDto {
-  console.error("[ingest] task failed:", error);
-  const candidate = error as { code?: unknown; message?: unknown };
+  const candidate = (error instanceof ProviderRequestError ? error.failure.error : error) as { code?: unknown; message?: unknown; messageKey?: unknown };
   const recoverableHint = (candidate as { recoverable?: unknown }).recoverable === true;
   const code = typeof candidate.code === "string" && ERROR_CODES.has(candidate.code as TaskErrorSummaryDto["code"])
     ? candidate.code as TaskErrorSummaryDto["code"]
     : "INTERNAL";
-  const supplied = typeof candidate.message === "string" ? candidate.message : "";
+  const supplied = typeof candidate.messageKey === "string" ? candidate.messageKey : typeof candidate.message === "string" ? candidate.message : "";
   const messageKey = safeTaskMessageKey(code, supplied);
-  return { code, messageKey, recoverable: recoverableHint || isRetryableCode(code) };
+  const summary = { code, messageKey, recoverable: recoverableHint || isRetryableCode(code) };
+  console.error("[ingest] task failed:", summary);
+  return summary;
 }
 export class MainSourceService {
   constructor(private readonly db: Database.Database, private readonly tasks: TaskService, private readonly ingestion: IngestionService, private readonly storageRoot?: string, private readonly bindRevision?: (taskId: string, revisionId: string) => void, private readonly urlSource?: UrlSource, private readonly removeVectors?: (projectId: string, sourceId: string) => Promise<void>) {}
