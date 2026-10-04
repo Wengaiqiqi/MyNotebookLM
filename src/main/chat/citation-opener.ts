@@ -1,6 +1,6 @@
 import type Database from "better-sqlite3";
 import { shell } from "electron";
-import { copyFile, mkdtemp, readFile, rm } from "node:fs/promises";
+import { copyFile, mkdtemp, readdir, readFile, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { parseSafeUrl } from "../sources/url-policy";
@@ -24,6 +24,21 @@ type CitationRow = {
   source_id: string;
   locator_json: string;
 };
+
+const ORIGINAL_COPY_PREFIX = "mynotebooklm-original-";
+
+/** Typed copies stay behind while an external app reads them; reclaim them once they are old. */
+export async function purgeStaleOriginalCopies(maxAgeMs = 24 * 60 * 60 * 1000, root = tmpdir(), now = Date.now()): Promise<void> {
+  for (const name of await readdir(root).catch(() => [] as string[])) {
+    if (!name.startsWith(ORIGINAL_COPY_PREFIX)) continue;
+    const directory = path.join(root, name);
+    try {
+      const info = await stat(directory);
+      // Still-open files (Windows locks) fail here and are retried on the next start.
+      if (info.isDirectory() && now - info.mtimeMs > maxAgeMs) await rm(directory, { recursive: true, force: true });
+    } catch { /* best effort */ }
+  }
+}
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const DOCUMENT_EXTENSIONS: Partial<Record<SourceKind, string>> = {
@@ -145,7 +160,7 @@ export class CitationOpener {
       return { ok: true, value: { opened: "url" } };
     }
     const stored = this.db.prepare(
-      "SELECT sr.stored_path, s.kind FROM sources s JOIN source_revisions sr ON sr.source_id = s.id WHERE s.id = ? AND s.project_id = ? AND s.status <> 'deleted' AND sr.state = 'ready' ORDER BY sr.created_at DESC LIMIT 1"
+      "SELECT sr.stored_path, s.kind FROM sources s JOIN source_revisions sr ON sr.source_id = s.id WHERE s.id = ? AND s.project_id = ? AND s.status <> 'deleted' AND sr.state = 'ready' ORDER BY CASE WHEN sr.id = s.current_revision_id THEN 0 ELSE 1 END, sr.created_at DESC LIMIT 1"
     ).get(row.source_id, projectId) as { stored_path?: string; kind: SourceKind } | undefined;
     if (!stored?.stored_path) return this.failure("NOT_FOUND", "errors.sourceUnavailable");
     return await this.openDocument(stored.stored_path, stored.kind);
@@ -161,7 +176,7 @@ export class CitationOpener {
       if (path.extname(storedPath).toLowerCase() !== extension) {
         // Managed imports use "content" without an extension. Windows needs a
         // typed copy to choose an application; keep the indexed original intact.
-        temporaryDirectory = await mkdtemp(path.join(tmpdir(), "mynotebooklm-original-"));
+        temporaryDirectory = await mkdtemp(path.join(tmpdir(), ORIGINAL_COPY_PREFIX));
         target = path.join(temporaryDirectory, `original${extension}`);
         await copyFile(storedPath, target);
       }

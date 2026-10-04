@@ -41,6 +41,7 @@ describe("source IPC handlers", () => {
     const cleanup = registerSourceHandlers(bus as any, {} as any, dialog as any);
     const choose = bus.handlers.get(SOURCE_CHANNELS.chooseFiles)!;
     await expect(choose({}, { projectId })).resolves.toMatchObject({ ok: true, value: null });
+    expect(dialog.showOpenDialog).toHaveBeenCalledWith(expect.objectContaining({ filters: [expect.objectContaining({ extensions: expect.arrayContaining(["pdf", "docx", "csv"]) })] }));
     cleanup();
     expect(bus.removeHandler).toHaveBeenCalledWith(SOURCE_CHANNELS.chooseFiles);
   });

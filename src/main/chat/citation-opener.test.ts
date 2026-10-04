@@ -6,7 +6,8 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { openAppDatabase, type AppDatabase } from "../db/database";
-import { CitationOpener } from "./citation-opener";
+import { CitationOpener, purgeStaleOriginalCopies } from "./citation-opener";
+import { mkdirSync, existsSync, utimesSync } from "node:fs";
 
 const PROJECT_ID = "11111111-1111-4111-8111-111111111111";
 const CONVERSATION_ID = "33333333-3333-4333-8333-333333333333";
@@ -262,5 +263,20 @@ describe("CitationOpener", () => {
       expect(path.basename(directory)).toMatch(/^mynotebooklm-(citation-opener-test|original)-/);
       rmSync(directory, { recursive: true, force: true });
     }
+  });
+});
+
+describe("purgeStaleOriginalCopies", () => {
+  it("removes only old typed copies made by openDocument", async () => {
+    const root = mkdtempSync(path.join(tmpdir(), "mynotebooklm-purge-test-"));
+    try {
+      const old = path.join(root, "mynotebooklm-original-old"); const fresh = path.join(root, "mynotebooklm-original-new"); const other = path.join(root, "unrelated");
+      for (const directory of [old, fresh, other]) mkdirSync(directory);
+      const now = Date.now();
+      utimesSync(old, new Date(now - 48 * 3600_000), new Date(now - 48 * 3600_000));
+      utimesSync(other, new Date(now - 48 * 3600_000), new Date(now - 48 * 3600_000));
+      await purgeStaleOriginalCopies(24 * 3600_000, root, now);
+      expect([existsSync(old), existsSync(fresh), existsSync(other)]).toEqual([false, true, true]);
+    } finally { rmSync(root, { recursive: true, force: true }); }
   });
 });

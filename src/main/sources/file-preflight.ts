@@ -1,5 +1,6 @@
 import path from "node:path";
-const extensions = new Set(["txt", "md", "markdown", "csv", "pdf", "docx", "pptx", "xlsx"]);
+export const IMPORT_EXTENSIONS = ["txt", "md", "markdown", "csv", "pdf", "docx", "pptx", "xlsx"] as const;
+const extensions = new Set<string>(IMPORT_EXTENSIONS);
 const textExtensions = new Set(["txt", "md", "markdown", "csv"]);
 function zipHas(bytes: Buffer, value: string): boolean { return bytes.includes(Buffer.from(value)); }
 export function validateFile(name: string, bytes: Buffer, options: { maxBytes?: number } = {}): { extension: string } {
