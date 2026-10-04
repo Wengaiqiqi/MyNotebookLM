@@ -1,10 +1,11 @@
-import { app, BrowserWindow, type IpcMain } from "electron";
+import { app, BrowserWindow, shell, type IpcMain } from "electron";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { z } from "zod";
 import { internalFailure, validationFailure } from "../shared/app-errors";
 import { TITLE_OVERLAY_CHANNELS } from "../shared/ipc";
 import { appThemeSchema, type AppTheme } from "../shared/settings";
+import { parseSafeUrl } from "./sources/url-policy";
 
 const rendererUrl = process.env["ELECTRON_RENDERER_URL"];
 const rendererFile = path.join(__dirname, "../renderer/index.html");
@@ -20,6 +21,13 @@ type IpcMainLike = Pick<IpcMain, "handle" | "removeHandler">;
 
 function titleOverlayFor(theme: AppTheme) {
   return theme === "dark" ? darkTitleOverlay : lightTitleOverlay;
+}
+
+/** Links in answers and previews open in the system browser; the app never opens its own windows. */
+export function openExternalLink(url: string, open: (url: string) => Promise<void> = shell.openExternal): void {
+  let parsed: URL;
+  try { parsed = parseSafeUrl(url); } catch { return; }
+  void open(parsed.href).catch(() => undefined);
 }
 
 function isAllowedNavigation(url: string): boolean {
@@ -50,7 +58,10 @@ export function createMainWindow(): BrowserWindow {
 
   window.setIcon(windowIcon);
   window.once("ready-to-show", () => window.show());
-  window.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
+  window.webContents.setWindowOpenHandler(({ url }) => {
+    openExternalLink(url);
+    return { action: "deny" };
+  });
   window.webContents.on("will-navigate", (event, url) => {
     if (!isAllowedNavigation(url)) event.preventDefault();
   });
