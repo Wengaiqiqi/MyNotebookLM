@@ -21,7 +21,7 @@ const profile = {
   enabled: true
 };
 const profileDto = { ...profile, createdAt: timestamp, updatedAt: timestamp };
-const settings = { onboardingCompleted: false, locale: "zh-CN" as const, theme: "light" as const };
+const settings = { onboardingCompleted: false, locale: "zh-CN" as const, theme: "light" as const, proxyMode: "system" as const, proxyUrl: "", proxyBypass: "" };
 const credentialStatus = { profileId: PROFILE_ID, hasCredential: true, mask: "••••••••" };
 const discoveryInput = {
   profileId: PROFILE_ID,

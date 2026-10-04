@@ -1,5 +1,6 @@
 import { Buffer } from "node:buffer";
 import { classifyProviderError, type ProviderFailure } from "./provider-errors";
+import { modelFetch } from "../network/model-fetch";
 
 const DEFAULT_TIMEOUT_MS = 30_000;
 /** Streaming responses may legitimately run for minutes; the read watchdog
@@ -96,7 +97,7 @@ export class ProviderHttpClient {
   private readonly maxResponseBytes: number;
 
   constructor(
-    private readonly fetchImpl: FetchLike = fetch,
+    private readonly fetchImpl: FetchLike = modelFetch,
     options: HttpClientOptions = {}
   ) {
     this.timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;

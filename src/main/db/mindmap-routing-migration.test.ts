@@ -12,7 +12,7 @@ it("upgrades map routes independently while retaining existing routes and attemp
   const databasePath = path.join(root, "app.db");
   let db: AppDatabase | undefined;
   try {
-    cpSync(migrations, oldMigrations, { recursive: true, filter: (source) => !path.basename(source).startsWith("020_") });
+    cpSync(migrations, oldMigrations, { recursive: true, filter: (source) => !/^0(2\d|[3-9]\d)_/.test(path.basename(source)) });
     expect(readdirSync(oldMigrations)).toHaveLength(19);
     db = openAppDatabase(databasePath, oldMigrations);
     const settings = new SettingsRepository(db.connection);

@@ -135,7 +135,8 @@ vi.mock("electron", () => ({
   BrowserWindow: { getAllWindows: mocks.getAllWindows },
   shell: { openPath: vi.fn(async () => ""), openExternal: vi.fn(async () => undefined) },
   Menu: { setApplicationMenu: mocks.setApplicationMenu },
-  ipcMain: mocks.ipcMain
+  ipcMain: mocks.ipcMain,
+  session: { fromPartition: vi.fn(() => ({ setProxy: vi.fn(async () => undefined), closeAllConnections: vi.fn(async () => undefined), fetch: vi.fn() })) }
 }));
 vi.mock("node:fs/promises", () => ({ mkdir: mocks.mkdir }));
 vi.mock("./platform/paths", () => ({ getAppPaths: mocks.getAppPaths }));

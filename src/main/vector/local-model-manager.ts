@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { mkdir, readFile, rename, rm, stat, appendFile } from "node:fs/promises";
 import path from "node:path";
 import { LOCAL_MODEL_ID, LOCAL_MODEL_MANIFEST, LOCAL_MODEL_REVISION, type LocalModelManifest } from "./local-model-manifest";
+import { modelFetch } from "../network/model-fetch";
 export type ModelManifest = { modelId: string; revision: string; dimension: number; files: Readonly<Record<string, string>> };
 
 export type DownloadProgress = (value: number) => void;
@@ -14,7 +15,7 @@ export function managedActiveDirectory(root: string, manifest: Pick<ModelManifes
 export function managedStagingDirectory(root: string, manifest: Pick<ModelManifest, "modelId" | "revision">): string { return `${managedActiveDirectory(root, manifest)}.partial`; }
 const MODEL_FILES = new Set(Object.keys(LOCAL_MODEL_MANIFEST.files));
 const HF_ROOT = `https://huggingface.co/${LOCAL_MODEL_ID}/resolve/${LOCAL_MODEL_REVISION}`;
-export function createLocalModelDownloader(fetcher: typeof fetch = fetch): ModelDownloader {
+export function createLocalModelDownloader(fetcher: typeof fetch = modelFetch): ModelDownloader {
   return async (file, offset, onProgress, signal) => {
     if (!MODEL_FILES.has(file) || file.includes("..") || path.isAbsolute(file)) throw new Error("不允许的模型文件路径");
     const init: RequestInit = { signal }; if (offset) init.headers = { Range: `bytes=${offset}-` };
@@ -23,7 +24,7 @@ export function createLocalModelDownloader(fetcher: typeof fetch = fetch): Model
     const bytes = new Uint8Array(await response.arrayBuffer()); onProgress(bytes.length ? 1 : 0); return bytes;
   };
 }
-export function createLocalModelManager<T>(root: string, runtime: ModelRuntime<T>, fetcher: typeof fetch = fetch, stagingRuntime: ModelRuntime<T> = runtime) {
+export function createLocalModelManager<T>(root: string, runtime: ModelRuntime<T>, fetcher: typeof fetch = modelFetch, stagingRuntime: ModelRuntime<T> = runtime) {
   return new LocalModelManager(root, createLocalModelDownloader(fetcher), runtime, LOCAL_MODEL_MANIFEST, stagingRuntime);
 }
 export class OfflineModelError extends Error { constructor() { super("本地模型未安装，当前处于离线模式"); this.name = "OfflineModelError"; } }
