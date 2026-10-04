@@ -83,8 +83,9 @@ describe("main source import orchestration", () => {
     const tasks = { createTask: vi.fn(() => ({ id: "task-1" })) } as any;
     const ingestion = { run: vi.fn(() => Promise.resolve()) } as any;
     vi.stubGlobal("fetch", vi.fn(async () => new Response("payload", { status: 200 })));
-    const service = new MainSourceService(db, tasks, ingestion, "D:/managed-files", undefined, { fetch: vi.fn(async () => ({ finalUrl: "https://example.com/article", title: "Article", text: "payload", sections: [], contentHash: "hash" })) });
-    await service.importUrl({ projectId: "project-1", url: "https://example.com/article" });
+    const root = mkdtempSync(path.join(tmpdir(), "mynotebooklm-url-import-"));
+    const service = new MainSourceService(db, tasks, ingestion, root, undefined, { fetch: vi.fn(async () => ({ finalUrl: "https://example.com/article", title: "Article", text: "payload", sections: [], contentHash: "hash" })) });
+    try { await service.importUrl({ projectId: "project-1", url: "https://example.com/article" }); } finally { rmSync(root, { recursive: true, force: true }); }
     expect(ingestion.run).toHaveBeenCalledWith(expect.objectContaining({ taskId: "task-1", revisionId: expect.any(String) }));
     const revisionInsert = db.prepare.mock.calls.find(([sql]: [string]) => String(sql).includes("source_revisions"));
     expect(revisionInsert).toBeTruthy();

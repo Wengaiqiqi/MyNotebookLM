@@ -1,14 +1,16 @@
 import { describe, expect, it } from "vitest";
+import path from "node:path";
 import { getAppPaths } from "./paths";
 
 describe("getAppPaths", () => {
   it("keeps mutable data beneath Electron userData", () => {
-    expect(getAppPaths("C:\\Users\\Ada\\AppData\\Roaming\\MyNotebookLM")).toEqual({
-      root: "C:\\Users\\Ada\\AppData\\Roaming\\MyNotebookLM",
-      database: "C:\\Users\\Ada\\AppData\\Roaming\\MyNotebookLM\\data\\app.db",
-      files: "C:\\Users\\Ada\\AppData\\Roaming\\MyNotebookLM\\files",
-      models: "C:\\Users\\Ada\\AppData\\Roaming\\MyNotebookLM\\models\\huggingface",
-      logs: "C:\\Users\\Ada\\AppData\\Roaming\\MyNotebookLM\\logs"
+    const root = path.join(path.sep, "Users", "Ada", "AppData", "Roaming", "MyNotebookLM");
+    expect(getAppPaths(root)).toEqual({
+      root,
+      database: path.join(root, "data", "app.db"),
+      files: path.join(root, "files"),
+      models: path.join(root, "models", "huggingface"),
+      logs: path.join(root, "logs")
     });
   });
 });
