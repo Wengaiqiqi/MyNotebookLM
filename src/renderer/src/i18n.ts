@@ -25,7 +25,7 @@ export async function changeLanguage(next: AppLanguage): Promise<void> {
   await i18n.changeLanguage(next);
 }
 
-export function readTheme(): AppTheme {
+function readTheme(): AppTheme {
   return localStorage.getItem("mynotebooklm.theme") === "dark" ? "dark" : "light";
 }
 

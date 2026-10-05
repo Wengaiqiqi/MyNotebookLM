@@ -1,7 +1,7 @@
 import JSZip from "jszip";
 
 /** Office files are capped at 100 MiB compressed; this bounds what they may expand to. */
-export const MAX_UNCOMPRESSED_BYTES = 1024 * 1024 * 1024;
+const MAX_UNCOMPRESSED_BYTES = 1024 * 1024 * 1024;
 
 /** Load an Office archive, rejecting zip bombs from the central directory before inflating anything. */
 export async function loadBoundedZip(input: Uint8Array | ArrayBuffer, limit = MAX_UNCOMPRESSED_BYTES): Promise<JSZip> {

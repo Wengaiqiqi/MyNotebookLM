@@ -2,7 +2,7 @@ import type Database from "better-sqlite3";
 import type { CitationDto, ConversationDto, MessageDto } from "../../shared/chat";
 type Base={projectId:string;conversationId:string;id:string;content?:string;createdAt:string};
 type Assistant=Base&{replyToMessageId:string;provider:string;profileId:string;model:string};
-export type TerminalContinuationInput = Readonly<{
+type TerminalContinuationInput = Readonly<{
   projectId: string;
   messageId: string;
   conversationId: string;
@@ -26,8 +26,8 @@ export type TerminalContinuationInput = Readonly<{
   }>;
   updatedAt: string;
 }>;
-export type HistoryPair = { user: { id: string; sequence: number; content: string }; assistant: { id: string; sequence: number; content: string } };
-export type GenerationContextRecord = { snapshot: unknown; runtime: Record<string, unknown>; revision: number; activeRequestId: string | null };
+type HistoryPair = { user: { id: string; sequence: number; content: string }; assistant: { id: string; sequence: number; content: string } };
+type GenerationContextRecord = { snapshot: unknown; runtime: Record<string, unknown>; revision: number; activeRequestId: string | null };
 type ConvRow=Record<string,unknown>;
 export class ConversationRepository {
  constructor(private readonly db:Database.Database){}

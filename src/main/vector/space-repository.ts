@@ -1,5 +1,5 @@
 export type SpaceSpec = { projectId:string; provider:string; modelId:string; modelRevision:string; dimension:number; distance:"cosine"; pooling:"mean"; preprocessVersion:string; chunkingVersion:string; fingerprint:string };
-export type Space = SpaceSpec & { id:string; state:string; progress1000:number; createdAt:string; updatedAt:string };
+type Space = SpaceSpec & { id:string; state:string; progress1000:number; createdAt:string; updatedAt:string };
 type DB = { prepare(sql:string): { get(...a:unknown[]): any; all(...a:unknown[]): any; run(...a:unknown[]): any }; transaction<T>(fn:()=>T):()=>T };
 type LanceCleanup = { deleteSpace(space:{id:string}): Promise<void> };
 export class SpaceRepository {

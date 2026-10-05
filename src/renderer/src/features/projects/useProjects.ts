@@ -2,9 +2,9 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { ProjectDto } from "../../../../shared/projects";
 import { toast } from "../../ui/Toast";
 
-export type ProjectAction = "create" | "rename" | "remove" | undefined;
+type ProjectAction = "create" | "rename" | "remove" | undefined;
 
-export interface ProjectsState {
+interface ProjectsState {
   projects: ProjectDto[];
   archived: ProjectDto[];
   loaded: boolean;

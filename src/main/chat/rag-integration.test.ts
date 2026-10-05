@@ -16,6 +16,9 @@ import { OpenAiCompatibleProvider } from "../models/openai-provider";
 import type { ModelProvider } from "../models/provider";
 import { startFakeProviderServer, type FakeProviderServer } from "../models/test/fake-provider-server";
 
+/** Single-profile chat route, mirroring the router's enabled-generation filter. */
+const routeTo = (profile?: ModelProfileDto) => ({ resolve: () => (profile?.enabled && profile.capability === "generation" ? [profile] : []) });
+
 const PROJECT_ID = "11111111-1111-4111-8111-111111111111";
 const REQUEST_ID = "77777777-7777-4777-8777-777777777777";
 const CHUNK_A = "99999999-9999-4999-8999-99999999999a";
@@ -215,7 +218,7 @@ describe("RAG integration with real LanceDB and streaming chat", () => {
       yield { type: "usage", inputTokens: 10, outputTokens: 5 };
       yield { type: "done", finishReason: calls < 3 ? "length" : "stop" };
     } };
-    const create = () => new ChatService({ ...chatDeps(connection, new RetrievalService({ db: connection, lance: lance!, provider: fakeEmbeddingProvider() }), model), generationProfile: selected });
+    const create = () => new ChatService({ ...chatDeps(connection, new RetrievalService({ db: connection, lance: lance!, provider: fakeEmbeddingProvider() }), model), router: routeTo(selected) });
     let service = create();
     const conversation = service.createConversation({ projectId: PROJECT_ID, title: "Continue" });
     const sent = await service.send({ requestId: REQUEST_ID, projectId: PROJECT_ID, conversationId: conversation.id, question: "alpha" }, () => {});
@@ -337,7 +340,7 @@ function chatDeps(
 ): ConstructorParameters<typeof ChatService>[0] {
   return {
     db: connection,
-    generationProfile: profile(),
+    router: routeTo(profile()),
     providerFactory: () => generation ?? providerStreaming("Grounded answer ", "[S1]"),
     retrieval: async ({ projectId, question }): Promise<RetrievableChunk[]> => {
       const result = await retrieval.search({ projectId, query: question, limit: 12 });

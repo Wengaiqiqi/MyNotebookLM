@@ -64,7 +64,7 @@ function assertSafeDirectory(root: string): void {
   if (!stat.isDirectory() || stat.isSymbolicLink() || path.resolve(realpathSync(root)) !== root) throw new Error("reparse point or symbolic link in storage path");
 }
 
-export type StagedProjectFiles = { rollback(): void; purge(): void };
+type StagedProjectFiles = { rollback(): void; purge(): void };
 
 /** Purge deterministic trash only after the database no longer contains the project. */
 export function purgeOrphanProjectTrash(root: string, liveProjectIds: ReadonlySet<string>): void {

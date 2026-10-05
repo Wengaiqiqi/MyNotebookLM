@@ -23,13 +23,13 @@ export function responseByteBudget(outputTokens?: number): number {
 
 export type FetchLike = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
 
-export type HttpClientOptions = Readonly<{
+type HttpClientOptions = Readonly<{
   timeoutMs?: number;
   idleTimeoutMs?: number;
   maxResponseBytes?: number;
 }>;
 
-export type HttpRequestOptions = RequestInit & Readonly<{ signal: AbortSignal; maxResponseBytes?: number }>;
+type HttpRequestOptions = RequestInit & Readonly<{ signal: AbortSignal; maxResponseBytes?: number }>;
 
 type RequestedResponse = Readonly<{
   response: Response;

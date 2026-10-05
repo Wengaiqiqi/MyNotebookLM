@@ -6,7 +6,7 @@ import path from "node:path";
 import { existsSync, statSync } from "node:fs";
 import type { EmbeddingFingerprint } from "../../shared/vector";
 import { createEmbeddingProvider, type EmbeddingProvider } from "./embedding-provider";
-export type EmbeddingRuntime = (model: unknown, inputs: string[], signal: AbortSignal) => Promise<number[][]>;
+type EmbeddingRuntime = (model: unknown, inputs: string[], signal: AbortSignal) => Promise<number[][]>;
 export function isAuthoritativeLocalCapability(value: EmbeddingFingerprint, expected: EmbeddingFingerprint): boolean { return value.provider === expected.provider && value.modelId === expected.modelId && value.modelRevision === expected.modelRevision && value.dimension === expected.dimension && value.distance === expected.distance && value.pooling === expected.pooling && value.preprocessVersion === expected.preprocessVersion && value.chunkingVersion === expected.chunkingVersion; }
 export class LocalEmbeddingProvider {
   constructor(private readonly manager: LocalModelManager, private readonly embed: EmbeddingRuntime, private readonly batchSize = 16) {}

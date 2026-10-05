@@ -35,7 +35,7 @@ const mocks = vi.hoisted(() => {
     cleanupModel,
     cleanupTitleOverlay,
     createModelProvider,
-    IndexingService: vi.fn(function (this: Record<string, unknown>, _db: unknown, provider: unknown) { this.provider = provider; this.index = vi.fn(async () => undefined); this.rebuild = vi.fn(async () => undefined); }),
+    IndexingService: vi.fn(function (this: Record<string, unknown>, _db: unknown, provider: unknown) { this.provider = provider; this.index = vi.fn(async () => undefined); this.rebuild = vi.fn(async () => undefined); this.setChunkRecovery = vi.fn(); }),
     TaskService: vi.fn(function (this: Record<string, unknown>) {
       this.createTask = vi.fn(() => ({ id: "task-1" }));
       this.start = vi.fn(() => ({ id: "task-1" }));
@@ -43,6 +43,7 @@ const mocks = vi.hoisted(() => {
       this.complete = vi.fn(() => ({ id: "task-1" }));
       this.fail = vi.fn(() => ({ id: "task-1" }));
       this.cancel = vi.fn(() => ({ id: "task-1" }));
+      this.getById = vi.fn(() => null);
       this.recoverAndContinueEmbedding = vi.fn(async (continueTask: (task: { id: string; projectId: string; sourceId: string }) => Promise<void>) => {
         if (recoveryTask) {
           try { await continueTask(recoveryTask); } catch { /* startup recovery reports the task failure */ }
@@ -90,6 +91,8 @@ const mocks = vi.hoisted(() => {
     ProjectService: vi.fn(function (this: Record<string, unknown>, repository: unknown) {
       events.push("service");
       this.repository = repository;
+      this.configureCleanup = vi.fn();
+      this.recoverStaleDeletions = vi.fn(async () => undefined);
     }),
     SettingsRepository: vi.fn(function (this: Record<string, unknown>, db: unknown) {
       events.push("settings-repository");

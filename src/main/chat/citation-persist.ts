@@ -5,7 +5,7 @@ import { citationClaim, relevantSourceExcerpt } from "./citation-relevance";
 
 const QUOTE_LIMIT = 240;
 
-export type CitationRow = Readonly<{
+type CitationRow = Readonly<{
   id: string;
   label: string;
   sourceId: string;

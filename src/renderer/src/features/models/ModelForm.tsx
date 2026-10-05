@@ -11,7 +11,7 @@ import Icon from "../../ui/Icon";
 import { modelOutputKind } from "../../../../shared/models";
 import { toast } from "../../ui/Toast";
 
-export type SavedProfile = { profile: ModelProfileDto; credentialMask?: string };
+type SavedProfile = { profile: ModelProfileDto; credentialMask?: string };
 
 const PROVIDER_DEFAULT_BASE_URL: Partial<Record<ProviderKind, string>> = {
   openai: "https://api.openai.com/v1",
@@ -23,7 +23,7 @@ const PROVIDER_DEFAULT_BASE_URL: Partial<Record<ProviderKind, string>> = {
 const GENERATION_PROVIDERS: ProviderKind[] = ["openai", "openai-compatible", "anthropic", "gemini", "ollama"];
 const EMBEDDING_PROVIDERS: ProviderKind[] = ["openai", "openai-compatible", "gemini", "ollama", "local"];
 
-export const providerLabelKey = (provider: ProviderKind): string => `model.providers.${provider}`;
+const providerLabelKey = (provider: ProviderKind): string => `model.providers.${provider}`;
 
 function cleanDisplayName(name: string): string {
   return name.replace(/\s+\/\s+\d+$/, "").trim() || name;

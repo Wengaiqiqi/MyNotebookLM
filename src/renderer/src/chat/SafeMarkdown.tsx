@@ -103,7 +103,7 @@ function hydrateMath(host: HTMLElement, expressions: MathExpression[]): void {
 }
 
 /** Render Markdown to allowlisted HTML; chat escapes raw HTML, source previews may sanitize it. */
-export function renderSafeMarkdown(text: string, allowSafeHtml = false): string {
+function renderSafeMarkdown(text: string, allowSafeHtml = false): string {
   ensureLinkHardening();
   // Chat text keeps raw HTML inert. Imported Markdown may opt into parsing it,
   // but the same explicit DOMPurify allowlist remains the trust boundary.
@@ -155,7 +155,7 @@ function citationPieces(value: string, citations: Map<string, CitationDto>): Pie
 
 // Split sanitized HTML into text nodes and code regions so [S#]
 // markers inside code blocks never become buttons.
-export interface SafeMarkdownProps {
+interface SafeMarkdownProps {
   text: string;
   citations?: CitationDto[];
   onCitationOpen?: ((citation: CitationDto) => void) | undefined;

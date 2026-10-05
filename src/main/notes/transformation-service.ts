@@ -43,7 +43,7 @@ export type TransformationRunRequest = Readonly<{
   signal?: AbortSignal;
 }>;
 
-export type TransformationServiceDeps = Readonly<{
+type TransformationServiceDeps = Readonly<{
   db: Database.Database;
   tasks: Pick<TaskService, "createTask" | "start" | "advance" | "complete" | "fail" | "retry" | "retryCancelled" | "cancel"> & Partial<Pick<TaskService, "recoverStaleRunning">>;
   taskRepository: Pick<TaskRepository, "findByIdempotencyKey" | "findById">;
@@ -56,13 +56,13 @@ export type TransformationServiceDeps = Readonly<{
   now?: () => string;
 }>;
 
-export class TransformationInProgressError extends Error {
+class TransformationInProgressError extends Error {
   constructor(readonly taskId: string) { super(`Transformation already running: ${taskId}`); this.name = "TransformationInProgressError"; }
 }
-export class TransformationTaskNotFoundError extends Error {
+class TransformationTaskNotFoundError extends Error {
   constructor(taskId: string) { super(`Transformation task not found: ${taskId}`); this.name = "TransformationTaskNotFoundError"; }
 }
-export class TransformationInsightNotFoundError extends Error {
+class TransformationInsightNotFoundError extends Error {
   constructor(insightId: string) { super(`Transformation insight not found: ${insightId}`); this.name = "TransformationInsightNotFoundError"; }
 }
 
@@ -601,4 +601,3 @@ export class TransformationService {
   }
 }
 
-export { OUTPUT_BYTE_LIMIT, RENDERED_PROMPT_VERSION };

@@ -8,7 +8,7 @@ export type FakeProviderRequest = Readonly<{
   body: string;
 }>;
 
-export type FakeProviderHandler = (
+type FakeProviderHandler = (
   request: FakeProviderRequest,
   response: ServerResponse
 ) => void | Promise<void>;

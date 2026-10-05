@@ -1,5 +1,5 @@
 
-export type CitationRegion =
+type CitationRegion =
   | { type: "text"; text: string }
   | { type: "code"; text: string };
 

@@ -2,7 +2,7 @@ import { z } from "zod";
 import { modelTaskKindSchema, providerKindSchema } from "./models";
 
 export const transformationAppliesToSchema = z.enum(["source", "sources", "message", "answer", "note"]);
-export const transformationNameSchema = z.string().trim().min(1).max(100);
+const transformationNameSchema = z.string().trim().min(1).max(100);
 const allowedPlaceholder = /\{\{(?:content|source_title|project_name|language)\}\}/g;
 const invalidTemplateSyntax = /\{\{|\}\}|\$\{|<%|%>|\{%|%\}|<\/?[a-z][^>]*>|javascript\s*:/i;
 export const transformationPromptSchema = z.string().trim().min(1).refine(
@@ -37,7 +37,7 @@ export const updateTransformationInputSchema = createTransformationInputSchema.e
   version: z.number().int().positive(),
   enabled: z.boolean()
 }).strict();
-export const transformationIdInputSchema = z.object({ projectId: z.uuid(), id: z.uuid() }).strict();
+const transformationIdInputSchema = z.object({ projectId: z.uuid(), id: z.uuid() }).strict();
 export const builtinTransformationDtoSchema = z.object({
   key: z.enum(["summary", "key-points", "qa", "podcast", "mind-map"]), language: z.enum(["zh-CN", "en"]), name: z.string().trim().min(1).max(100),
   appliesTo: transformationAppliesToSchema, prompt: z.string().trim().min(1)
@@ -106,7 +106,7 @@ export type PodcastAudioDto = z.infer<typeof podcastAudioSchema>;
 export type TransformationDto = z.infer<typeof transformationDtoSchema>;
 export type CreateTransformationInput = z.infer<typeof createTransformationInputSchema>;
 export type UpdateTransformationInput = z.infer<typeof updateTransformationInputSchema>;
-export type TransformationIdInput = z.infer<typeof transformationIdInputSchema>;
+type TransformationIdInput = z.infer<typeof transformationIdInputSchema>;
 export type InsightUsage = z.infer<typeof insightUsageSchema>;
 export type InsightDto = z.infer<typeof insightDtoSchema>;
 export type TransformationRunInput = z.infer<typeof transformationRunInputSchema>;

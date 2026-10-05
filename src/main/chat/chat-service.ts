@@ -1,5 +1,5 @@
 import type Database from "better-sqlite3";
-import { modelOutputKind, type ModelProfileDto } from "../../shared/models";
+import type { ModelProfileDto } from "../../shared/models";
 import type { AppErrorDto, Result } from "../../shared/app-errors";
 import type { ChatTurn, ModelProvider } from "../models/provider";
 import { ModelRouter } from "../models/model-router";
@@ -27,17 +27,15 @@ export type RetrievalFn = (input: { projectId: string; question: string; evidenc
 
 export type ChatSendDeps = {
   db: Database.Database;
-  generationProfile?: ModelProfileDto | undefined;
-  router?: Pick<ModelRouter, "resolve">;
+  router: Pick<ModelRouter, "resolve">;
   providerFactory: (profile: ModelProfileDto) => ModelProvider;
   retrieval: RetrievalFn;
   now?: () => Date;
-  randomId?: (n: number) => string;
 };
 
-export type SendInput = { requestId: string; projectId: string; conversationId: string; question: string; generationProfileId?: string; thinking?: "off" | "low" | "medium" | "high" };
-export type RegenerateInput = { requestId: string; projectId: string; conversationId: string; messageId: string; question?: string; thinking?: "off" | "low" | "medium" | "high" };
-export type ContinueInput = { requestId: string; projectId: string; conversationId: string; messageId: string; expectedRevision: number };
+type SendInput = { requestId: string; projectId: string; conversationId: string; question: string; generationProfileId?: string; thinking?: "off" | "low" | "medium" | "high" };
+type RegenerateInput = { requestId: string; projectId: string; conversationId: string; messageId: string; question?: string; thinking?: "off" | "low" | "medium" | "high" };
+type ContinueInput = { requestId: string; projectId: string; conversationId: string; messageId: string; expectedRevision: number };
 type ConversationQuery = { projectId: string; conversationId: string };
 type PreparedGenerationRequest = {
   messages: ChatTurn[];
@@ -57,7 +55,6 @@ type StreamEvent =
   | { type: "fallback"; requestId: string; attempted: { provider: string; model: string; profileId: string | null }; next: { provider: string; model: string; profileId: string | null }; errorCode: string }
   | { type: "failed"; requestId: string; messageId: string; error: AppErrorDto; operation?: "initial" | "continue"; message?: MessageDto };
 
-export { normalizeFinishReason, type FinishKind } from "../models/finish-reason";
 import { normalizeFinishReason, type FinishKind } from "../models/finish-reason";
 
 function appError(code: AppErrorDto["code"], messageKey: string, recoverable = false): AppErrorDto {
@@ -147,7 +144,6 @@ type TurnContext = {
   profile: ModelProfileDto;
   profiles: readonly ModelProfileDto[];
   owner: SessionOwner;
-  nextId: () => string;
   userMessage: MessageDto;
   /** When set, this turn replaces an earlier assistant reply instead of appending after a fresh user message. */
   supersedesMessageId: string | null;
@@ -221,16 +217,14 @@ export class ChatService {
       if (this.inFlightConversations.has(input.conversationId)) {
         return { ok: false, error: appError("CONFLICT", "errors.chatSendInFlight", true) };
       }
-      let counter = 0;
-      const nextId = (): string => (this.deps.randomId ? this.deps.randomId(++counter) : crypto.randomUUID());
       const userMessage = repo.appendUserMessage({
         projectId: input.projectId,
         conversationId: input.conversationId,
-        id: nextId(),
+        id: crypto.randomUUID(),
         content: input.question,
         createdAt: this.clock().toISOString()
       });
-      return await this.runTurn({ requestId: input.requestId, turn: input, repo, profile, profiles, owner, nextId, userMessage, supersedesMessageId: null, ...(input.generationProfileId ? { generationProfileId: input.generationProfileId } : {}), ...(input.thinking ? { thinking: input.thinking } : {}), emit });
+      return await this.runTurn({ requestId: input.requestId, turn: input, repo, profile, profiles, owner, userMessage, supersedesMessageId: null, ...(input.generationProfileId ? { generationProfileId: input.generationProfileId } : {}), ...(input.thinking ? { thinking: input.thinking } : {}), emit });
     } catch (reason) {
       return internalResult(reason);
     }
@@ -264,9 +258,7 @@ export class ChatService {
         if (!question) return { ok: false, error: appError("VALIDATION", "errors.validation") };
         userMessage = repo.updateUserMessage({ projectId: input.projectId, id: userMessage.id, content: question, updatedAt: this.clock().toISOString() });
       }
-      let counter = 0;
-      const nextId = (): string => (this.deps.randomId ? this.deps.randomId(++counter) : crypto.randomUUID());
-      return await this.runTurn({ requestId: input.requestId, turn: input, repo, profile, profiles, owner, nextId, userMessage, supersedesMessageId: old.id, ...(input.thinking ? { thinking: input.thinking } : {}), emit });
+      return await this.runTurn({ requestId: input.requestId, turn: input, repo, profile, profiles, owner, userMessage, supersedesMessageId: old.id, ...(input.thinking ? { thinking: input.thinking } : {}), emit });
     } catch (reason) {
       return internalResult(reason);
     }
@@ -290,12 +282,7 @@ export class ChatService {
       if (saved.activeRequestId === null
         && saved.runtime.lastRequestId === input.requestId
         && saved.runtime.status !== "running") {
-        const interrupted = saved.runtime.status === "interrupted";
-        if (interrupted) emit({ type: "cancelled", requestId: input.requestId, messageId: input.messageId, message, operation: "continue" });
-        else emit({ type: "completed", requestId: input.requestId, messageId: input.messageId, message });
-        return interrupted
-          ? { ok: false, error: appError("PROVIDER", "errors.providerIncomplete", true) }
-          : { ok: true, value: { requestId: input.requestId, assistantMessageId: input.messageId } };
+        return replayTerminal(input, message, saved.runtime.status === "interrupted", emit);
       }
       if (message.state !== "completed" || !message.generation?.canContinue) return { ok: false, error: appError("CONFLICT", "errors.continueUnavailable", true) };
       const snapshot = saved.snapshot as {
@@ -408,13 +395,7 @@ export class ChatService {
       if (claim.kind === "replay") {
         // Same requestId, already terminal: re-emit the stored outcome so a
         // reconnecting renderer sees a terminal event instead of waiting forever.
-        const runtime = claim.context.runtime;
-        const interrupted = runtime.status === "interrupted";
-        if (interrupted) emit({ type: "cancelled", requestId: input.requestId, messageId: input.messageId, message: claim.message, operation: "continue" });
-        else emit({ type: "completed", requestId: input.requestId, messageId: input.messageId, message: claim.message });
-        return interrupted
-          ? { ok: false, error: appError("PROVIDER", "errors.providerIncomplete", true) }
-          : { ok: true, value: { requestId: input.requestId, assistantMessageId: input.messageId } };
+        return replayTerminal(input, claim.message, claim.context.runtime.status === "interrupted", emit);
       }
       const { signal } = this.registry.register(input.requestId, owner);
       this.inFlightConversations.add(input.conversationId);
@@ -460,12 +441,12 @@ export class ChatService {
    * existing user/assistant pair, so no duplicate user row can be created.
    */
   private async runTurn(args: TurnContext): Promise<Result<{ requestId: string; assistantMessageId: string }>> {
-    const { turn, repo, profile, profiles, owner, nextId, userMessage, supersedesMessageId, generationProfileId, thinking, emit } = args;
+    const { turn, repo, profile, profiles, owner, userMessage, supersedesMessageId, generationProfileId, thinking, emit } = args;
     const requestId = turn.requestId;
     const { signal } = this.registry.register(requestId, owner);
     this.inFlightConversations.add(turn.conversationId);
     const startedAt = this.clock().toISOString();
-    const draftId = nextId();
+    const draftId = crypto.randomUUID();
     try {
       const assistant = supersedesMessageId
         ? repo.regenerateAssistantMessage({
@@ -943,21 +924,13 @@ export class ChatService {
   }
 
   private generationProfiles(overrideProfileId?: string): readonly ModelProfileDto[] {
-    if (this.deps.router) return this.deps.router.resolve("chat", overrideProfileId);
-    const profile = this.deps.generationProfile;
-    return profile && profile.enabled && profile.capability === "generation" && modelOutputKind(profile) === "text" ? [profile] : [];
+    return this.deps.router.resolve("chat", overrideProfileId);
   }
 
   private routedDeps() {
-    const router = this.deps.router ?? {
-      resolve: (_task: "chat", _override?: string) => {
-        const profile = this.deps.generationProfile;
-        return profile && profile.enabled && profile.capability === "generation" && modelOutputKind(profile) === "text" ? [Object.freeze({ ...profile })] : [];
-      }
-    };
     return {
       db: this.deps.db,
-      router,
+      router: this.deps.router,
       providerFactory: this.deps.providerFactory,
       ...(this.deps.now ? { clock: this.deps.now } : {}),
       id: () => crypto.randomUUID()
@@ -983,10 +956,14 @@ function mergeUsageSnapshot(previous: { inputTokens: number; outputTokens: numbe
   return { inputTokens, outputTokens, totalTokens: inputTokens + outputTokens };
 }
 
-function internalResult(_reason: unknown): Result<never> {
-  return { ok: false, error: appError("INTERNAL", "errors.internal") };
+function replayTerminal(input: ContinueInput, message: MessageDto, interrupted: boolean, emit: (event: StreamEvent) => void): Result<{ requestId: string; assistantMessageId: string }> {
+  if (interrupted) emit({ type: "cancelled", requestId: input.requestId, messageId: input.messageId, message, operation: "continue" });
+  else emit({ type: "completed", requestId: input.requestId, messageId: input.messageId, message });
+  return interrupted
+    ? { ok: false, error: appError("PROVIDER", "errors.providerIncomplete", true) }
+    : { ok: true, value: { requestId: input.requestId, assistantMessageId: input.messageId } };
 }
 
-export async function sendChatMessage(deps: ChatSendDeps, input: SendInput, emit: (event: StreamEvent) => void): Promise<Result<{ requestId: string; assistantMessageId: string }>> {
-  return new ChatService(deps).send(input, emit);
+function internalResult(_reason: unknown): Result<never> {
+  return { ok: false, error: appError("INTERNAL", "errors.internal") };
 }

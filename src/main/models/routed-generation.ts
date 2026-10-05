@@ -23,7 +23,7 @@ export type RoutedProfile = Readonly<{
   profileId: string | null;
 }>;
 
-export type FallbackDto = Readonly<{
+type FallbackDto = Readonly<{
   attempted: RoutedProfile;
   next: RoutedProfile;
   errorCode: string;
@@ -62,10 +62,6 @@ export class RoutedGeneration {
   ): AsyncGenerator<RoutedGenerationEvent> {
     return generateRouted(this.deps, taskKind, request, overrideProfileId, signal);
   }
-}
-
-export function createRoutedGeneration(deps: RoutedGenerationDeps): RoutedGeneration {
-  return new RoutedGeneration(deps);
 }
 
 function safeProviderFailure(reason: unknown): { error: AppErrorDto; fallbackEligible: boolean } {

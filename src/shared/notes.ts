@@ -1,10 +1,10 @@
 import { z } from "zod";
 
-export const noteBodySchema = z.string().refine(
+const noteBodySchema = z.string().refine(
   (value) => new TextEncoder().encode(value).byteLength <= 2 * 1024 * 1024,
   "Note body must be at most 2 MiB"
 );
-export const noteTitleSchema = z.string().trim().min(1).max(200);
+const noteTitleSchema = z.string().trim().min(1).max(200);
 
 const noteFieldsSchema = z.object({
   id: z.uuid(),

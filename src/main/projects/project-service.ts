@@ -19,7 +19,7 @@ type DeletionTaskService = {
   fail(id: string, error: TaskErrorSummaryDto, autoRetry?: boolean): TaskDto;
 };
 
-export type ProjectCleanupAdapter = {
+type ProjectCleanupAdapter = {
   managedFiles?: (projectId: string) => Promise<void | { rollback(): void; purge(): void }> | void | { rollback(): void; purge(): void };
   restoreProjectFiles?: (projectId: string) => void;
   lanceRows?: (projectId: string) => Promise<void> | void;
@@ -27,7 +27,7 @@ export type ProjectCleanupAdapter = {
   taskService?: DeletionTaskService;
 };
 
-export type ProjectServiceOptions = ProjectCleanupAdapter & {
+type ProjectServiceOptions = ProjectCleanupAdapter & {
   now?: () => string;
   deletionGraceMs?: number;
   autoStartDeletion?: boolean;

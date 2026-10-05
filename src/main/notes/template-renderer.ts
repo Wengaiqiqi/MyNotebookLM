@@ -21,5 +21,3 @@ export function renderTransformationPrompt(template: string, values: Transformat
   };
   return parsed.replace(placeholders, (_match, key: string) => resolved[key] ?? "");
 }
-
-export const renderTemplate = renderTransformationPrompt;

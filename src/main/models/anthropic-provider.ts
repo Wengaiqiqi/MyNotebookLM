@@ -9,10 +9,10 @@ import type {
   ModelProvider
 } from "./provider";
 
-export const ANTHROPIC_BASE_URL = "https://api.anthropic.com";
+const ANTHROPIC_BASE_URL = "https://api.anthropic.com";
 const ANTHROPIC_VERSION = "2023-06-01";
 
-export type AnthropicProviderOptions = Readonly<{
+type AnthropicProviderOptions = Readonly<{
   baseUrl?: string;
   apiKey?: string;
 }>;

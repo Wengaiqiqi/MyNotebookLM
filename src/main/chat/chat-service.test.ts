@@ -3,7 +3,7 @@ import type { ModelProfileDto } from "../../shared/models";
 import type Database from "better-sqlite3";
 import { openAppDatabase, type AppDatabase } from "../db/database";
 import { ConversationRepository } from "./conversation-repository";
-import { ChatService, recoverInterruptedStreams, sendChatMessage, type ChatSendDeps, type RetrievableChunk } from "./chat-service";
+import { ChatService, recoverInterruptedStreams, type ChatSendDeps, type RetrievableChunk } from "./chat-service";
 import { CitationOpener } from "./citation-opener";
 import type { CitationDto } from "../../shared/chat";
 import type { Result } from "../../shared/app-errors";
@@ -15,6 +15,9 @@ import { ModelRouter } from "../models/model-router";
 import { ModelService } from "../models/model-service";
 import type { CredentialStore } from "../credentials/credential-store";
 import { MindMapService, normalizeMindMapOutput } from "../notes/mindmap-service";
+
+/** Single-profile chat route, mirroring the router's enabled-generation filter. */
+const routeTo = (profile?: ModelProfileDto) => ({ resolve: () => (profile?.enabled && profile.capability === "generation" ? [profile] : []) });
 
 const PROJECT_ID = "11111111-1111-4111-8111-111111111111";
 const USER_ID = "44444444-4444-4444-8444-444444444444";
@@ -65,7 +68,7 @@ function fakeProvider(chunks?: string[]): {
 
 async function collectEvents(deps: ChatSendDeps, input: Parameters<ChatService["send"]>[0]) {
   const events: Array<Record<string, unknown>> = [];
-  const result = await sendChatMessage(deps, { ...input }, (event) => events.push(event as Record<string, unknown>));
+  const result = await new ChatService(deps).send({ ...input }, (event) => events.push(event as Record<string, unknown>));
   return { result, events };
 }
 
@@ -76,7 +79,7 @@ describe("ChatService streaming orchestration", () => {
     const provider = fakeProvider();
     return {
       db: world.database.connection,
-      generationProfile: makeProfile(),
+      router: routeTo(makeProfile()),
       providerFactory: () => provider,
       retrieval: async () => [
         {
@@ -91,7 +94,6 @@ describe("ChatService streaming orchestration", () => {
         }
       ],
       now: () => new Date(AT),
-      randomId: (n) => `id-${Math.random().toString(36).slice(2, 8)}-${n}`,
       ...overrides
     };
   }
@@ -185,7 +187,7 @@ function expectOk(result: Result<{ requestId: string; assistantMessageId: string
   it("pins an unfinished citation across continuation and refuses insufficient space", async () => {
     const profile = { ...makeProfile(), contextTokensOverride: 8192, maxOutputTokensOverride: 2048 };
     let calls = 0;
-    const svc = new ChatService(baseDeps({ generationProfile: profile, retrieval: async (input) => (await baseDeps().retrieval(input)).map((row) => ({ ...row, text: "Fact ".repeat(800) })), providerFactory: () => ({ ...fakeProvider(), async *generate() {
+    const svc = new ChatService(baseDeps({ router: routeTo(profile), retrieval: async (input) => (await baseDeps().retrieval(input)).map((row) => ({ ...row, text: "Fact ".repeat(800) })), providerFactory: () => ({ ...fakeProvider(), async *generate() {
       calls++; yield { type: "text-delta", text: calls === 1 ? "x".repeat(2000) + " [S1" : "]" };
       yield { type: "done", finishReason: calls === 1 ? "length" : "stop" };
     } }) }));
@@ -268,7 +270,7 @@ function expectOk(result: Result<{ requestId: string; assistantMessageId: string
     }
     const profile = { ...makeProfile(), contextTokensOverride: 131072 };
     const requests: GenerateRequest[] = [];
-    const svc = new ChatService(baseDeps({ generationProfile: profile, retrieval: async () => rows, providerFactory: () => ({ ...fakeProvider(), async *generate(request: GenerateRequest) {
+    const svc = new ChatService(baseDeps({ router: routeTo(profile), retrieval: async () => rows, providerFactory: () => ({ ...fakeProvider(), async *generate(request: GenerateRequest) {
       requests.push(request);
       yield { type: "text-delta", text: requests.length === 1 ? "Fact [S100]" : " more" };
       yield { type: "usage", inputTokens: 10 };
@@ -373,7 +375,7 @@ function expectOk(result: Result<{ requestId: string; assistantMessageId: string
 
   it("records the updated continuation allowance before streaming and rejects a changed question", async () => {
     const profile = makeProfile();
-    const svc = new ChatService(baseDeps({ generationProfile: profile, retrieval: async () => [], providerFactory: () => ({ ...fakeProvider(), async *generate() { yield { type: "text-delta", text: "Partial" }; yield { type: "done", finishReason: "length" }; } }) }));
+    const svc = new ChatService(baseDeps({ router: routeTo(profile), retrieval: async () => [], providerFactory: () => ({ ...fakeProvider(), async *generate() { yield { type: "text-delta", text: "Partial" }; yield { type: "done", finishReason: "length" }; } }) }));
     const first = expectOk(await svc.send({ requestId: REQUEST_ID, projectId: PROJECT_ID, conversationId: world.conversationId, question: "Q" }, () => {}));
     const message = world.repository.getMessage(PROJECT_ID, first.assistantMessageId)!;
     profile.maxOutputTokensOverride = 4096;
@@ -432,7 +434,6 @@ function expectOk(result: Result<{ requestId: string; assistantMessageId: string
     let primaryCalls = 0;
     const calls: string[] = [];
     const deps = baseDeps({
-      generationProfile: undefined,
       router: new ModelRouter(routes),
       providerFactory: (item) => item.id === primary.id
         ? {
@@ -609,7 +610,6 @@ function expectOk(result: Result<{ requestId: string; assistantMessageId: string
     for (const item of [primary, fallback]) routes.saveProfile({ id: item.id, name: item.name, provider: item.provider, capability: item.capability, baseUrl: item.baseUrl, modelId: item.modelId, enabled: item.enabled });
     routes.replaceRoute("chat", [primary.id, fallback.id]);
     const deps = baseDeps({
-      generationProfile: undefined,
       router: new ModelRouter(routes),
       providerFactory: (item) => item.id === primary.id
         ? { ...fakeProvider(), async *generate() { throw new ProviderRequestError(classifyProviderError({ status: 503 })); } }
@@ -632,7 +632,7 @@ function expectOk(result: Result<{ requestId: string; assistantMessageId: string
     routes.replaceRoute("chat", [primary.id, fallback.id]);
     let release!: () => void;
     const gate = new Promise<void>((resolve) => { release = resolve; });
-    const deps = baseDeps({ generationProfile: undefined, router: new ModelRouter(routes), providerFactory: () => ({ ...fakeProvider(), async *generate() { yield { type: "text-delta", text: "partial" }; await gate; } }) });
+    const deps = baseDeps({ router: new ModelRouter(routes), providerFactory: () => ({ ...fakeProvider(), async *generate() { yield { type: "text-delta", text: "partial" }; await gate; } }) });
     const service = new ChatService(deps);
     const events: Array<Record<string, unknown>> = [];
     const pending = service.send({ requestId: REQUEST_ID, projectId: PROJECT_ID, conversationId: world.conversationId, question: "cancel" }, (event) => events.push(event as Record<string, unknown>));
@@ -699,7 +699,7 @@ function expectOk(result: Result<{ requestId: string; assistantMessageId: string
   });
 
   it("fails before user persistence when no enabled generation profile exists", async () => {
-    const deps = baseDeps({ generationProfile: undefined });
+    const deps = baseDeps({ router: routeTo(undefined) });
     const { result, events } = await collectEvents(deps, { requestId: REQUEST_ID, projectId: PROJECT_ID, conversationId: world.conversationId, question: "?" });
     expect(result).toMatchObject({ ok: false, error: { code: "VALIDATION" } });
     expect(events).toHaveLength(0);
@@ -837,7 +837,7 @@ function expectOk(result: Result<{ requestId: string; assistantMessageId: string
 
   it("rejects invalid configuration without changing an edited question or appending another turn", async () => {
     const profile: ModelProfileDto = makeProfile();
-    const service = new ChatService(baseDeps({ generationProfile: profile }));
+    const service = new ChatService(baseDeps({ router: routeTo(profile) }));
     const first = expectOk(await service.send({ requestId: REQUEST_ID, projectId: PROJECT_ID, conversationId: world.conversationId, question: "Original question" }, () => {}));
     const before = world.repository.listMessages(PROJECT_ID, world.conversationId);
     profile.maxOutputTokensOverride = 900_000;
@@ -851,7 +851,7 @@ function expectOk(result: Result<{ requestId: string; assistantMessageId: string
     const evidence = await deps.retrieval({ projectId: PROJECT_ID, question: "What?" });
     let budget = -1;
     let request: GenerateRequest | undefined;
-    const service = new ChatService({ ...deps, generationProfile: { ...makeProfile(), contextTokensOverride: 8192 },
+    const service = new ChatService({ ...deps, router: routeTo({ ...makeProfile(), contextTokensOverride: 8192 }),
       retrieval: async (input) => { budget = input.evidenceTokenBudget!; return budget >= 96 ? evidence : []; },
       providerFactory: () => ({ ...fakeProvider(), async *generate(input): AsyncGenerator<GenerationEvent> { request = input; yield { type: "text-delta", text: "Answer [S1]" }; yield { type: "done", finishReason: "stop" }; } }) });
     const result = expectOk(await service.send({ requestId: REQUEST_ID, projectId: PROJECT_ID, conversationId: world.conversationId, question: "What?" }, () => {}));
@@ -875,7 +875,7 @@ function expectOk(result: Result<{ requestId: string; assistantMessageId: string
   it("blocks stale capacity overrides on send and continuation before calling a provider", async () => {
     const profile: ModelProfileDto = { ...makeProfile(), contextTokensOverride: 65536, maxOutputTokensOverride: 8192 };
     const factory = vi.fn(() => ({ ...fakeProvider(), async *generate(): AsyncGenerator<GenerationEvent> { yield { type: "text-delta", text: "Answer" }; yield { type: "done", finishReason: "length" }; } }));
-    const service = new ChatService(baseDeps({ generationProfile: profile, providerFactory: factory }));
+    const service = new ChatService(baseDeps({ router: routeTo(profile), providerFactory: factory }));
     const first = expectOk(await service.send({ requestId: REQUEST_ID, projectId: PROJECT_ID, conversationId: world.conversationId, question: "Hi" }, () => {}));
     profile.generationLimits = { windowKind: "shared", contextWindowTokens: 4096, maxOutputTokens: 2048, source: "provider", observedAt: AT, identity: { provider: profile.provider, baseUrl: profile.baseUrl, modelId: profile.modelId } };
     const revision = world.repository.getGenerationContext(PROJECT_ID, first.assistantMessageId)!.revision;
@@ -953,7 +953,7 @@ function expectOk(result: Result<{ requestId: string; assistantMessageId: string
     const evidence = await deps.retrieval({ projectId: PROJECT_ID, question: "What?" });
     let calls = 0;
     const service = new ChatService({ ...deps,
-      generationProfile: { ...makeProfile(), contextTokensOverride: 8192, maxOutputTokensOverride: 2048 },
+      router: routeTo({ ...makeProfile(), contextTokensOverride: 8192, maxOutputTokensOverride: 2048 }),
       retrieval: async () => evidence.map((item) => ({ ...item, text: "Evidence ".repeat(4500) })),
       providerFactory: () => ({ ...fakeProvider(), async *generate(): AsyncGenerator<GenerationEvent> {
         calls++;
@@ -1030,7 +1030,7 @@ describe("ChatService conversation operations and retrieval failure", () => {
     const provider = fakeProvider();
     return {
       db: world.database.connection,
-      generationProfile: makeProfile(),
+      router: routeTo(makeProfile()),
       providerFactory: () => provider,
       retrieval: async () => [
         {
@@ -1045,7 +1045,6 @@ describe("ChatService conversation operations and retrieval failure", () => {
         }
       ],
       now: () => new Date(AT),
-      randomId: (n) => `id-${Math.random().toString(36).slice(2, 8)}-${n}`,
       ...overrides
     };
   }
@@ -1064,11 +1063,10 @@ describe("ChatService conversation operations and retrieval failure", () => {
     const provider = fakeProvider();
     return new ChatService({
       db: world.database.connection,
-      generationProfile: makeProfile(),
+      router: routeTo(makeProfile()),
       providerFactory: () => provider,
       retrieval: async () => [],
       now: () => new Date(AT),
-      randomId: (n) => `id-${Math.random().toString(36).slice(2, 8)}-${n}`,
       ...deps
     });
   }

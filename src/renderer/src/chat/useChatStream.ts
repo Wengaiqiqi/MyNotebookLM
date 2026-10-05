@@ -4,10 +4,9 @@ import type { MessageDto } from "../../../shared/chat";
 import type { ChatRequestEvent, DesktopApi } from "../../../shared/ipc";
 import { getChatStreamSession, type ChatStreamState } from "./chat-stream-session";
 
-export type { ChatStreamState } from "./chat-stream-session";
 type ChatApi = DesktopApi["chat"];
 
-export interface UseChatStreamResult {
+interface UseChatStreamResult {
   messages: MessageDto[];
   streamingMessageId: string | null;
   /** Id of a failed/cancelled assistant draft that can be repaired via regenerate. */

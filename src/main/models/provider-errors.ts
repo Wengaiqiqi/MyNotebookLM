@@ -5,7 +5,7 @@ export type ProviderFailure = Readonly<{
   fallbackEligible: boolean;
 }>;
 
-export type ProviderFailureInput = Readonly<{
+type ProviderFailureInput = Readonly<{
   status?: number;
   headers?: Headers;
   body?: string;

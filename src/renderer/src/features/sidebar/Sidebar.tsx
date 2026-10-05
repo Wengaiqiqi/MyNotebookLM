@@ -6,7 +6,7 @@ import Icon from "../../ui/Icon";
 import { BrandMark } from "../../ui/Icon";
 import { formatDate } from "../../lib/format";
 
-export interface SidebarProps {
+interface SidebarProps {
   projects: ProjectDto[];
   archived: ProjectDto[];
   selectedId?: string | undefined;

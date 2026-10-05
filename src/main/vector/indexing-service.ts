@@ -12,9 +12,9 @@ type StoredLike = Omit<LanceRow, "locator"> & { locatorJson?: string; locator?: 
 type SpaceBoundary = { project_id: string; source_id: string; space_id?: string; space_project_id?: string; space_dimension?: number; space_state?: string; active_space_id?: string; provider?: string; model_id?: string; model_revision?: string; distance?: string; pooling?: string; preprocess_version?: string; chunking_version?: string; fingerprint?: string };
 /** Character ceiling per embedding input; conservative against providers
  *  whose tokenizers count dense CJK/digit content at ~1 token per char. */
-export const EMBEDDING_INPUT_CHAR_LIMIT = 2400;
+const EMBEDDING_INPUT_CHAR_LIMIT = 2400;
 
-export function splitForEmbedding(text: string, limit = EMBEDDING_INPUT_CHAR_LIMIT): string[] {
+function splitForEmbedding(text: string, limit = EMBEDDING_INPUT_CHAR_LIMIT): string[] {
   if (text.length <= limit) return [text];
   const parts: string[] = [];
   let rest = text;

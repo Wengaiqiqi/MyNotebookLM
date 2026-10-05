@@ -21,7 +21,7 @@ import type { CitationDetailResultValue } from "../../shared/ipc";
 type Emit = (event: unknown) => void;
 type StreamOutcome = Result<{ requestId: string; assistantMessageId: string }>;
 
-export type ChatHandlersServiceLike = {
+type ChatHandlersServiceLike = {
   listConversations(projectId: string): unknown;
   createConversation(input: { projectId: string; title: string }): unknown;
   renameConversation(input: { projectId: string; conversationId: string; title: string }): unknown;
@@ -34,10 +34,10 @@ export type ChatHandlersServiceLike = {
   stopRequest(requestId: string, caller: { projectId: string }): boolean;
 };
 
-export type CitationOpenerLike = (input: { projectId: string; citationId: string }) => Promise<Result<{ opened: "document" | "url" }>>;
-export type CitationDetailLike = (input: { projectId: string; citationId: string }) => Promise<Result<CitationDetailResultValue>>;
+type CitationOpenerLike = (input: { projectId: string; citationId: string }) => Promise<Result<{ opened: "document" | "url" }>>;
+type CitationDetailLike = (input: { projectId: string; citationId: string }) => Promise<Result<CitationDetailResultValue>>;
 
-export type ChatWindowLike = {
+type ChatWindowLike = {
   webContents: {
     isDestroyed(): boolean;
     send(channel: string, value: unknown): void;

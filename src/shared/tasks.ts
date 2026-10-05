@@ -9,7 +9,7 @@ export const taskKindSchema = z.enum([
   "transformation"
 ]);
 
-export const taskStateSchema = z.enum([
+const taskStateSchema = z.enum([
   "queued",
   "running",
   "completed",
@@ -32,7 +32,7 @@ export const taskStageSchema = z.enum([
   "saving"
 ]);
 
-export const taskProgressSchema = z.number().int().min(0).max(1000);
+const taskProgressSchema = z.number().int().min(0).max(1000);
 
 export const taskErrorSummaryDtoSchema = z.object({
   code: appErrorCodeSchema,
@@ -58,8 +58,8 @@ export const taskDtoSchema = z.object({
 }).strict();
 
 export type TaskKind = z.infer<typeof taskKindSchema>;
-export type TaskState = z.infer<typeof taskStateSchema>;
+type TaskState = z.infer<typeof taskStateSchema>;
 export type TaskStage = z.infer<typeof taskStageSchema>;
-export type TaskProgress = z.infer<typeof taskProgressSchema>;
+type TaskProgress = z.infer<typeof taskProgressSchema>;
 export type TaskErrorSummaryDto = z.infer<typeof taskErrorSummaryDtoSchema>;
 export type TaskDto = z.infer<typeof taskDtoSchema>;

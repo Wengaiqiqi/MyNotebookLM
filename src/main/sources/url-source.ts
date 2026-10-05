@@ -15,7 +15,7 @@ import {
   UrlPolicyError
 } from "./url-policy";
 
-export type DnsResolver = (host: string) => Promise<string[]>;
+type DnsResolver = (host: string) => Promise<string[]>;
 
 export type SafeResponse = {
   status: number;
@@ -30,7 +30,7 @@ export type SafeHttpClient = {
   request: (url: string, init: SafeRequestInit) => Promise<SafeResponse>;
 };
 
-export type UrlSourceOptions = {
+type UrlSourceOptions = {
   resolver: DnsResolver;
   client: SafeHttpClient;
   timeoutMs?: number;
@@ -50,7 +50,7 @@ export class UnsupportedContentTypeError extends Error {
   }
 }
 
-export type FetchedSection = { locator: Extract<SourceLocator, { kind: "section" }>; text: string };
+type FetchedSection = { locator: Extract<SourceLocator, { kind: "section" }>; text: string };
 
 export type FetchedArticle = {
   finalUrl: string;

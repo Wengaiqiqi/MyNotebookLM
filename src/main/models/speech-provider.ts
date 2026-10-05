@@ -7,13 +7,13 @@ import { RoutedGenerationError } from "./routed-generation";
 import { discoverSpeechVoices } from "./speech-voices";
 import { modelFetch } from "../network/model-fetch";
 
-export const MAX_AUDIO_BYTES = 64 * 1024 * 1024;
+const MAX_AUDIO_BYTES = 64 * 1024 * 1024;
 export const podcastScriptSchema = z.object({
   title: z.string().trim().min(1).max(200),
   turns: z.array(z.object({ speaker: z.enum(["A", "B"]), text: z.string().trim().min(1).max(2_000) }).strict()).min(2).max(64)
 }).strict().refine((script) => new Set(script.turns.map((turn) => turn.speaker)).size === 2)
   .refine((script) => script.turns.reduce((size, turn) => size + turn.text.length, 0) <= 16_000);
-export type SpeechTurn = z.infer<typeof podcastScriptSchema>["turns"][number];
+type SpeechTurn = z.infer<typeof podcastScriptSchema>["turns"][number];
 
 export function parsePodcastScript(content: string): z.infer<typeof podcastScriptSchema> {
   try { return podcastScriptSchema.parse(JSON.parse(content.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, ""))); }

@@ -8,13 +8,13 @@ import type {
   ModelProvider
 } from "./provider";
 
-export const OPENAI_BASE_URL = "https://api.openai.com/v1";
+const OPENAI_BASE_URL = "https://api.openai.com/v1";
 
-export type ThinkingLevel = "off" | "low" | "medium" | "high";
-export type ThinkingDialect = "glm" | "effort" | "qwen";
+type ThinkingLevel = "off" | "low" | "medium" | "high";
+type ThinkingDialect = "glm" | "effort" | "qwen";
 
 /** Wire-format dialects for the OpenAI-compatible ecosystem. */
-export function thinkingCandidates(level: ThinkingLevel, model: string): ThinkingDialect[] {
+function thinkingCandidates(level: ThinkingLevel, model: string): ThinkingDialect[] {
   const id = model.toLowerCase();
   if (/^(glm|doubao|ep-)/.test(id)) return ["glm"];
   if (/^(o[134]|gpt-5)/.test(id)) return ["effort"];
@@ -23,7 +23,7 @@ export function thinkingCandidates(level: ThinkingLevel, model: string): Thinkin
   return level === "off" ? ["glm", "qwen"] : ["glm", "effort", "qwen"];
 }
 
-export function thinkingBody(dialect: ThinkingDialect, level: ThinkingLevel): Record<string, unknown> {
+function thinkingBody(dialect: ThinkingDialect, level: ThinkingLevel): Record<string, unknown> {
   switch (dialect) {
     case "glm": return { thinking: { type: level === "off" ? "disabled" : "enabled" } };
     case "effort": return { reasoning_effort: level === "off" ? "low" : level };
@@ -31,7 +31,7 @@ export function thinkingBody(dialect: ThinkingDialect, level: ThinkingLevel): Re
   }
 }
 
-export type OpenAiProviderOptions = Readonly<{
+type OpenAiProviderOptions = Readonly<{
   baseUrl?: string;
   apiKey?: string;
 }>;

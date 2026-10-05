@@ -9,9 +9,9 @@ import type {
   ModelProvider
 } from "./provider";
 
-export const OLLAMA_BASE_URL = "http://127.0.0.1:11434";
+const OLLAMA_BASE_URL = "http://127.0.0.1:11434";
 
-export type OllamaProviderOptions = Readonly<{ baseUrl?: string }>;
+type OllamaProviderOptions = Readonly<{ baseUrl?: string }>;
 
 function embeddings(value: unknown, expectedCount: number): number[][] {
   if (!Array.isArray(value) || value.length !== expectedCount) throw malformedResponse();

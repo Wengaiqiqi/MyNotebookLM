@@ -1,7 +1,7 @@
 import type { TaskStage } from "../../../../shared/tasks";
 
 /** Where a running transformation is, in steps the main process actually reports. */
-export type StepProgress<Step extends string> = { steps: readonly Step[]; index: number };
+type StepProgress<Step extends string> = { steps: readonly Step[]; index: number };
 
 const textSteps = ["preparing", "connecting", "generating", "saving"] as const;
 const mindMapSteps = ["preparing", "generating", "verifying", "saving"] as const;

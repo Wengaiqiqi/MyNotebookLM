@@ -11,13 +11,13 @@ export const sourceKindSchema = z.enum([
   "url"
 ]);
 
-export const sourceStatusSchema = z.enum([
+const sourceStatusSchema = z.enum([
   "active",
   "deleting",
   "deleted"
 ]);
 
-export const sourceRevisionStateSchema = z.enum([
+const sourceRevisionStateSchema = z.enum([
   "pending",
   "parsing",
   "awaiting_embedding",
@@ -25,7 +25,7 @@ export const sourceRevisionStateSchema = z.enum([
   "failed"
 ]);
 
-export const locatorKindSchema = z.enum([
+const locatorKindSchema = z.enum([
   "page",
   "slide",
   "sheet",
@@ -118,7 +118,7 @@ export const sourceDtoSchema = z.object({
   ,currentRevisionState: sourceRevisionStateSchema.optional()
 }).strict();
 
-export const sourceRevisionDtoSchema = z.object({
+const sourceRevisionDtoSchema = z.object({
   id: z.uuid(),
   sourceId: z.uuid(),
   originalPath: z.string().trim().min(1),
@@ -131,7 +131,7 @@ export const sourceRevisionDtoSchema = z.object({
   activatedAt: z.iso.datetime().nullable()
 }).strict();
 
-export const sourceChunkDtoSchema = z.object({
+const sourceChunkDtoSchema = z.object({
   id: z.uuid(),
   revisionId: z.uuid(),
   ordinal: nonNegativeInteger,
@@ -141,10 +141,10 @@ export const sourceChunkDtoSchema = z.object({
 }).strict();
 
 export type SourceKind = z.infer<typeof sourceKindSchema>;
-export type SourceStatus = z.infer<typeof sourceStatusSchema>;
-export type SourceRevisionState = z.infer<typeof sourceRevisionStateSchema>;
-export type LocatorKind = z.infer<typeof locatorKindSchema>;
+type SourceStatus = z.infer<typeof sourceStatusSchema>;
+type SourceRevisionState = z.infer<typeof sourceRevisionStateSchema>;
+type LocatorKind = z.infer<typeof locatorKindSchema>;
 export type SourceLocator = z.infer<typeof sourceLocatorSchema>;
 export type SourceDto = z.infer<typeof sourceDtoSchema>;
-export type SourceRevisionDto = z.infer<typeof sourceRevisionDtoSchema>;
-export type SourceChunkDto = z.infer<typeof sourceChunkDtoSchema>;
+type SourceRevisionDto = z.infer<typeof sourceRevisionDtoSchema>;
+type SourceChunkDto = z.infer<typeof sourceChunkDtoSchema>;

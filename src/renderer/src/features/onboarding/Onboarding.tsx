@@ -5,7 +5,7 @@ import ModelForm from "../models/ModelForm";
 import Icon from "../../ui/Icon";
 import type { AppLanguage, AppTheme } from "../../i18n";
 
-export interface OnboardingProps {
+interface OnboardingProps {
   language: AppLanguage;
   theme: AppTheme;
   onLanguage: (language: AppLanguage) => void;

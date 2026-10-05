@@ -28,10 +28,6 @@ export const BUILTIN_TRANSFORMATIONS: readonly BuiltinTransformationDescriptor[]
   descriptors.map((descriptor) => Object.freeze(descriptor))
 );
 
-export const BUILT_IN_TRANSFORMATIONS = BUILTIN_TRANSFORMATIONS;
-
 export function listBuiltinTransformations(): readonly BuiltinTransformationDescriptor[] {
   return BUILTIN_TRANSFORMATIONS.slice();
 }
-
-export const getBuiltinTransformations = listBuiltinTransformations;

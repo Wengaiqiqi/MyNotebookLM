@@ -136,7 +136,7 @@ app.whenReady().then(async () => {
   workerPool = pool;
   let ingestionService!: IngestionService;
   const lance = await LanceStore.open(path.join(appPaths.root, "vectors"));
-  projectService.configureCleanup?.({
+  projectService.configureCleanup({
     autoStartDeletion: true,
     managedFiles: async (projectId) => {
       const rows = appDatabase!.connection.prepare("SELECT id FROM sources WHERE project_id = ?").all(projectId) as Array<{ id: string }>;
@@ -159,7 +159,7 @@ app.whenReady().then(async () => {
     },
     taskService
   });
-  await projectService.recoverStaleDeletions?.();
+  await projectService.recoverStaleDeletions();
   const spaces = new SpaceRepository(appDatabase.connection, undefined, undefined, lance);
   const spaceService = new SpaceService(spaces, { rebuild: async (raw: unknown) => {
     const input = raw as { space: { id: string; dimension: number }; spec: { projectId: string }; signal?: AbortSignal; revisionId?: string; recoverSources?: boolean };
@@ -172,32 +172,36 @@ app.whenReady().then(async () => {
   const stagingRuntime = createTransformersEmbeddingRuntime(appPaths.models, managedStagingDirectory(appPaths.models, LOCAL_MODEL_MANIFEST));
   const localManager = createLocalModelManager(appPaths.models, async (directory, signal) => localRuntime(directory, [], signal), modelFetch, async (directory, signal) => stagingRuntime(directory, [], signal));
   const localEmbeddingProvider = new LocalEmbeddingProvider(localManager, localRuntime);
-  const createProviderForSpace = async (row: { provider: string; model_id: string; model_revision: string; dimension?: number; distance?: string; pooling?: string; preprocess_version?: string; chunking_version?: string; fingerprint?: string }, space: { id: string; dimension: number }) => {
+  type SpaceRow = { provider: string; model_id: string; model_revision: string; dimension?: number; distance?: string; pooling?: string; preprocess_version?: string; chunking_version?: string; fingerprint?: string };
+  type CompleteSpaceRow = SpaceRow & { dimension: number; distance: "cosine"; pooling: "mean"; preprocess_version: string; chunking_version: string };
+  const isCompleteCapability = (row: SpaceRow): row is CompleteSpaceRow => Boolean(row.dimension) && row.distance === "cosine" && row.pooling === "mean" && Boolean(row.preprocess_version) && Boolean(row.chunking_version);
+  const profileMismatch = (message: string) => Object.assign(new Error(message), { code: "EMBEDDING_PROFILE_MISMATCH", recoverable: false });
+  const assertAuthoritative = (row: CompleteSpaceRow, modelRevision: string, actual: import("../shared/vector").EmbeddingFingerprint) => {
+    const persisted = { provider: row.provider, modelId: row.model_id, modelRevision, dimension: row.dimension, distance: row.distance, pooling: row.pooling, preprocessVersion: row.preprocess_version, chunkingVersion: row.chunking_version } as const;
+    if (!isAuthoritativeLocalCapability(persisted, actual) || row.fingerprint !== canonicalEmbeddingFingerprint(actual)) throw profileMismatch("Local embedding capability is not authoritative");
+  };
+  const createProviderForSpace = async (row: SpaceRow, space: { id: string; dimension: number }) => {
     const profile = row.provider === "local"
       ? (row.model_id === BUILT_IN_LOCAL_EMBEDDING_PROFILE.modelId && row.model_revision === LOCAL_MODEL_MANIFEST.revision
         ? BUILT_IN_LOCAL_EMBEDDING_PROFILE
         : settingsRepository.listProfiles().find(p => p.capability === "embedding" && p.enabled && p.provider === "local" && p.modelId === row.model_id && canonicalLocalModelPath(p.baseUrl) === canonicalLocalModelPath(row.model_revision)))
       : settingsRepository.listProfiles().find(p => p.capability === "embedding" && p.enabled && p.provider === row.provider && p.modelId === row.model_id);
-    if (!profile) throw Object.assign(new Error("Embedding profile is missing or mismatched"), { code: "EMBEDDING_PROFILE_MISMATCH", recoverable: false });
+    if (!profile) throw profileMismatch("Embedding profile is missing or mismatched");
     if (profile.provider === "local") {
       if (!isBuiltInLocalEmbeddingProfile(profile)) {
-        if (!row.dimension || row.distance !== "cosine" || row.pooling !== "mean" || !row.preprocess_version || !row.chunking_version) throw Object.assign(new Error("Local embedding capability is incomplete"), { code: "EMBEDDING_PROFILE_MISMATCH", recoverable: false });
+        if (!isCompleteCapability(row)) throw profileMismatch("Local embedding capability is incomplete");
         const provider = createLocalDirectoryEmbeddingProvider(profile.baseUrl, profile.modelId);
         if (row.fingerprint) {
           if (provider.describe().dimension !== row.dimension) await provider.embedBatch(["embedding profile probe"], new AbortController().signal, 1);
-          const actual = provider.describe();
-          const persisted = { provider: row.provider, modelId: row.model_id, modelRevision: canonicalLocalModelPath(row.model_revision), dimension: row.dimension, distance: row.distance, pooling: row.pooling, preprocessVersion: row.preprocess_version, chunkingVersion: row.chunking_version } as const;
-          if (!isAuthoritativeLocalCapability(persisted, actual) || row.fingerprint !== canonicalEmbeddingFingerprint(actual)) throw Object.assign(new Error("Local embedding capability is not authoritative"), { code: "EMBEDDING_PROFILE_MISMATCH", recoverable: false });
+          assertAuthoritative(row, canonicalLocalModelPath(row.model_revision), provider.describe());
         }
         return provider;
       }
-      const actual = localEmbeddingProvider.describe();
-      if (!row.dimension || row.distance !== "cosine" || row.pooling !== "mean" || !row.preprocess_version || !row.chunking_version || !row.fingerprint) throw Object.assign(new Error("Local embedding capability is incomplete"), { code: "EMBEDDING_PROFILE_MISMATCH", recoverable: false });
-      const persisted = { provider: row.provider, modelId: row.model_id, modelRevision: row.model_revision, dimension: row.dimension, distance: row.distance, pooling: row.pooling, preprocessVersion: row.preprocess_version, chunkingVersion: row.chunking_version } as const;
-      if (!isAuthoritativeLocalCapability(persisted, actual) || row.fingerprint !== canonicalEmbeddingFingerprint(actual)) throw Object.assign(new Error("Local embedding capability is not authoritative"), { code: "EMBEDDING_PROFILE_MISMATCH", recoverable: false });
+      if (!isCompleteCapability(row) || !row.fingerprint) throw profileMismatch("Local embedding capability is incomplete");
+      assertAuthoritative(row, row.model_revision, localEmbeddingProvider.describe());
       return localEmbeddingProvider;
     }
-    if (!row.dimension || row.distance !== "cosine" || row.pooling !== "mean" || !row.preprocess_version || !row.chunking_version) throw Object.assign(new Error("Embedding capability is incomplete"), { code: "EMBEDDING_PROFILE_MISMATCH", recoverable: false });
+    if (!isCompleteCapability(row)) throw profileMismatch("Embedding capability is incomplete");
     let fingerprint: import("../shared/vector").EmbeddingFingerprint = { provider: row.provider, modelId: row.model_id, modelRevision: row.model_revision, dimension: row.dimension, distance: row.distance, pooling: row.pooling, preprocessVersion: row.preprocess_version, chunkingVersion: row.chunking_version };
     return {
       describe: () => fingerprint,
@@ -225,7 +229,7 @@ app.whenReady().then(async () => {
     const row = appDatabase!.connection.prepare("SELECT provider, model_id, model_revision, dimension, distance, pooling, preprocess_version, chunking_version, fingerprint FROM embedding_spaces WHERE id = ? AND project_id = ? AND state = 'active'").get(space.id, projectId) as { provider: string; model_id: string; model_revision: string; dimension: number; distance: string; pooling: string; preprocess_version: string; chunking_version: string; fingerprint: string } | undefined;
     return row ? { provider: await createProviderForSpace(row, space) } : null;
   }});
-  (indexing as IndexingService & { setChunkRecovery?: (revisionId: string) => void }).setChunkRecovery?.((revisionId) => ingestionService.reparseRevision(revisionId));
+  indexing.setChunkRecovery((revisionId) => ingestionService.reparseRevision(revisionId));
   /** Resolve a profile's embedding capability and measure its real dimension with one probe call. */
   const probeEmbeddingProfile = async (profile: import("../shared/models").ModelProfileDto, modelId: string, seedDimension: (builtIn: boolean) => number, spaceId: string) => {
     const builtIn = isBuiltInLocalEmbeddingProfile(profile);
@@ -283,26 +287,24 @@ app.whenReady().then(async () => {
     if (!space) throw new Error("No active embedding space for queued task");
     await indexing.index({ taskId: task.id, revisionId, space });
   };
-  if (typeof (appDatabase.connection as { prepare?: unknown }).prepare === "function") {
-    await taskService.recoverAndContinueEmbedding(continueEmbedding, 60 * 60 * 1000);
-  }
+  await taskService.recoverAndContinueEmbedding(continueEmbedding, 60 * 60 * 1000);
   const removeSourceVectors = async (projectId: string, sourceId: string): Promise<void> => {
     const projectSpaces = appDatabase!.connection.prepare("SELECT id, dimension FROM embedding_spaces WHERE project_id = ? AND state <> 'failed'").all(projectId) as Array<{ id: string; dimension: number }>;
     for (const space of projectSpaces) await lance.deleteSource(space, sourceId);
   };
-  const citationOpener = () => new CitationOpener(appDatabase!.connection, undefined, undefined, (request) => pool.preview(request));
+  const citationOpener = new CitationOpener(appDatabase.connection, undefined, undefined, (request) => pool.preview(request));
   const sourceService = new MainSourceService(appDatabase.connection, taskService, ingestionService, appPaths.files, (taskId, revisionId) => taskRevisions.set(taskId, revisionId), createNodeUrlSource(), removeSourceVectors);
   try { sourceService.recoverInterruptedRemovals(); } catch (error) { console.error("[source] removal recovery failed:", error); }
   const failure = <T>(code: "VALIDATION" | "NOT_FOUND" | "CONFLICT" | "CANCELLED" | "INDEX_UNAVAILABLE" | "INTERNAL", messageKey: string, recoverable = false): Result<T> => ({ ok: false, error: { code, messageKey, recoverable } });
   const activeTask = (projectId: string): TaskDto | undefined => {
     const row = appDatabase!.connection.prepare("SELECT * FROM tasks WHERE project_id = ? AND state IN ('queued','running') AND kind IN ('validation','optimize') ORDER BY created_at DESC LIMIT 1").get(projectId) as { id?: string } | undefined;
-    return row?.id ? (taskService.getById?.(row.id) ?? undefined) : undefined;
+    return row?.id ? (taskService.getById(row.id) ?? undefined) : undefined;
   };
   const runTask = (task: TaskDto, work: () => Promise<void>): TaskDto => {
     if (task.kind !== "optimize") taskService.start(task.id, "validating");
     void work().then(() => { if (task.kind !== "optimize") taskService.complete(task.id); }).catch((error) => {
       if ((error as { code?: string }).code === "TASK_CANCELLED" || (error as { code?: string }).code === "SPACE_BUILD_CANCELLED") {
-        const current = taskService.getById?.(task.id);
+        const current = taskService.getById(task.id);
         if (current?.state === "queued" || current?.state === "running") taskService.cancel(task.id);
       }
       else {
@@ -350,7 +352,7 @@ app.whenReady().then(async () => {
       return { ok: true, value: runTask(task, () => spaceService.optimize({ taskId: task.id, projectId, space })) };
     },
     cancelTask: async ({ projectId, taskId }: { projectId: string; taskId: string }): Promise<Result<TaskDto>> => {
-      const task = taskService.getById?.(taskId);
+      const task = taskService.getById(taskId);
       if (!task || task.projectId !== projectId) return failure("NOT_FOUND", "errors.notFound");
       spaceService.cancel(taskId);
       try { return { ok: true, value: taskService.cancel(taskId) }; } catch { return failure("CONFLICT", "errors.taskConflict", true); }
@@ -364,15 +366,13 @@ app.whenReady().then(async () => {
   };
   cleanupProjectHandlers = registerProjectHandlers(ipcMain, projectService);
   cleanupModelHandlers = registerModelHandlers(ipcMain, modelService);
-  if (typeof (ipcMain as { handle?: unknown }).handle === "function") {
-    cleanupSourceHandlers = registerSourceHandlers(ipcMain, {
-      listSources: sourceService.listSources.bind(sourceService), listTasks: sourceService.listTasks.bind(sourceService),
-      importFile: sourceService.importFile.bind(sourceService), importUrl: sourceService.importUrl.bind(sourceService),
-      removeSource: sourceService.removeSource.bind(sourceService), retryTask: sourceService.retryTask.bind(sourceService),
-      cancelTask: sourceService.cancelTask.bind(sourceService), ownsSource: sourceService.ownsSource.bind(sourceService), ownsTask: sourceService.ownsTask.bind(sourceService)
-    }, undefined, (input) => citationOpener().openSource(input));
-    cleanupVectorHandlers = registerVectorHandlers(ipcMain, vectorService);
-  }
+  cleanupSourceHandlers = registerSourceHandlers(ipcMain, {
+    listSources: sourceService.listSources.bind(sourceService), listTasks: sourceService.listTasks.bind(sourceService),
+    importFile: sourceService.importFile.bind(sourceService), importUrl: sourceService.importUrl.bind(sourceService),
+    removeSource: sourceService.removeSource.bind(sourceService), retryTask: sourceService.retryTask.bind(sourceService),
+    cancelTask: sourceService.cancelTask.bind(sourceService), ownsSource: sourceService.ownsSource.bind(sourceService), ownsTask: sourceService.ownsTask.bind(sourceService)
+  }, undefined, (input) => citationOpener.openSource(input));
+  cleanupVectorHandlers = registerVectorHandlers(ipcMain, vectorService);
   const modelRouter = new ModelRouter(settingsRepository);
   const providerFactory = (profile: import("../shared/models").ModelProfileDto) => ({
     describe: () => { throw new Error("provider describe is not used for generation"); },
@@ -392,7 +392,7 @@ app.whenReady().then(async () => {
   void Promise.resolve(transformationService.recoverStale(60 * 60 * 1000)).catch(() => { /* stale recovery must not block startup */ });
   cleanupNoteHandlers = registerNoteHandlers(ipcMain, noteService);
   cleanupTransformationHandlers = registerTransformationHandlers(ipcMain, transformationService);
-  cleanupMindMapHandlers = registerMindMapHandlers(ipcMain, new MindMapService(appDatabase.connection), citationOpener());
+  cleanupMindMapHandlers = registerMindMapHandlers(ipcMain, new MindMapService(appDatabase.connection), citationOpener);
   const chatService = new ChatService({
     db: appDatabase.connection,
     // Resolve the immutable route snapshot per turn so route changes apply live.
@@ -424,8 +424,8 @@ app.whenReady().then(async () => {
     ipc: ipcMain,
     service: chatService,
     requestHub: new Map(),
-    openCitation: (input) => citationOpener().openCitation(input),
-    getCitationDetail: (input) => citationOpener().getCitationDetail(input),
+    openCitation: (input) => citationOpener.openCitation(input),
+    getCitationDetail: (input) => citationOpener.getCitationDetail(input),
     onWindowClosed: () => void 0
   });
 

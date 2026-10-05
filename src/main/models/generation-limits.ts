@@ -21,7 +21,7 @@ export function maxDefaultOutputTokens(contextTokens: number): number {
 }
 
 /** Largest output reserve that still fits a minimum input inside the window. */
-export function maxOutputForContext(contextTokens: number): number {
+function maxOutputForContext(contextTokens: number): number {
   const safety = safetyMarginTokens(contextTokens);
   return Math.max(MIN_OUTPUT_TOKENS, contextTokens - safety - MIN_INPUT_RESERVE);
 }

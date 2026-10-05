@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { Buffer } from "node:buffer";
 import type { ChatTurn } from "../models/provider";
 import { citationLabelSchema } from "../../shared/chat";
-import { assembleContext, estimateTokens, MAX_CITED_CHUNKS } from "./context-builder";
+import { assembleContext, estimateTokens } from "./context-builder";
 import { buildSystemPrompt } from "./prompts";
 
 function chunk(ordinal: number, text: string) {
@@ -37,7 +37,6 @@ describe("assembleContext", () => {
     expect(first.citations[0]).toMatchObject({ chunkId: "chunk-1", sourceDisplayName: "Source 1", locatorSummary: "page 1" });
 
     const over = assembleContext({ question: QUESTION, retrieved: Array.from({ length: 40 }, (_, i) => chunk(i + 1, `t${i}`)) });
-    expect(MAX_CITED_CHUNKS).toBeGreaterThan(32);
     expect(citationLabelSchema.parse("S33")).toBe("S33");
     expect(citationLabelSchema.safeParse("S100").success).toBe(true);
     expect(over.citations.map((c) => c.label)).toEqual(Array.from({ length: 40 }, (_, i) => `S${i + 1}`));

@@ -2,9 +2,9 @@ import React, { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import Icon from "./Icon";
 
-export type ToastKind = "info" | "success" | "error";
+type ToastKind = "info" | "success" | "error";
 
-export interface ToastItem {
+interface ToastItem {
   id: number;
   kind: ToastKind;
   message: string;

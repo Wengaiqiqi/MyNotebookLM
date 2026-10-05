@@ -2,7 +2,7 @@ import type { TaskErrorSummaryDto, TaskDto, TaskKind, TaskStage } from "../../sh
 import { MAX_ATTEMPTS, canRetry, isRetryableCode, retryDelayMs } from "./retry-policy";
 import type { TaskRepository } from "./task-repository";
 
-export type TaskServiceDeps = {
+type TaskServiceDeps = {
   now: () => string;
   random: () => number;
   id: () => string;

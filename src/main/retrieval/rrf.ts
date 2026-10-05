@@ -1,6 +1,5 @@
 export type RetrievalCandidate = { chunkId: string; contentHash: string; sourceId?: string; score?: number; [key: string]: unknown };
 export function fuseRrf(lists: RetrievalCandidate[][], k = 60): RetrievalCandidate[] { const map = new Map<string, RetrievalCandidate & { score: number }>(); lists.forEach(list => list.forEach((item, i) => { const old = map.get(item.contentHash); map.set(item.contentHash, { ...(old ?? item), score: (old?.score ?? 0) + 1 / (k + i + 1) }); })); return [...map.values()].sort((a, b) => b.score - a.score || a.chunkId.localeCompare(b.chunkId)); }
-export function reciprocalRankFusion(lists: RetrievalCandidate[][], limit: number, k = 60): RetrievalCandidate[] { return fuseRrf(lists, k).slice(0, limit); }
 export function diversifyHits<T extends RetrievalCandidate & { ordinal?: number }>(hits: T[], limit: number, adjacent = 4): T[] {
   const out: T[] = [];
   const selected = new Set<string>();

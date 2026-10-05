@@ -5,7 +5,7 @@ import type { DocumentBlock, PreparedChunk } from "./types";
 export const CHUNKING_VERSION = "blocks-480-80-v5";
 
 export const DEFAULT_TARGET_TOKENS = 480;
-export const DEFAULT_OVERLAP_TOKENS = 80;
+const DEFAULT_OVERLAP_TOKENS = 80;
 
 const CJK_CODE_POINT =
   /[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uac00-\ud7af\uf900-\ufaff]/;
@@ -165,7 +165,7 @@ function joinFragments(fragments: Fragment[]): string {
   return out;
 }
 
-export interface ChunkOptions {
+interface ChunkOptions {
   targetTokens?: number;
   overlapTokens?: number;
 }

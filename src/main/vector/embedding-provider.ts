@@ -1,15 +1,14 @@
 import type { EmbeddingFingerprint } from "../../shared/vector";
 
-export interface EmbeddingAdapter {
+interface EmbeddingAdapter {
   embed(request: { model: string; inputs: string[]; dimensions?: number }, signal: AbortSignal): Promise<number[][]>;
   describe(): EmbeddingFingerprint;
 }
 
-export interface EmbeddingProviderOptions {
+interface EmbeddingProviderOptions {
   provider: string;
   model: string;
   adapter: EmbeddingAdapter;
-  batchSize?: number;
 }
 
 export interface EmbeddingProvider {
@@ -24,7 +23,7 @@ export function createEmbeddingProvider(options: EmbeddingProviderOptions): Embe
   return {
     async embedBatch(texts, signal, requestedBatchSize) {
       if (!texts.length) throw new Error("Embedding input cannot be empty");
-      const size = Math.max(1, Math.min(requestedBatchSize ?? options.batchSize ?? DEFAULT_BATCHES[options.provider] ?? 32, texts.length));
+      const size = Math.max(1, Math.min(requestedBatchSize ?? DEFAULT_BATCHES[options.provider] ?? 32, texts.length));
       const result: number[][] = [];
       let expectedDimension: number | undefined;
       for (let offset = 0; offset < texts.length; offset += size) {

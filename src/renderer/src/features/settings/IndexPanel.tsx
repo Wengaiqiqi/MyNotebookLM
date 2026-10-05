@@ -147,7 +147,7 @@ export default function IndexPanel({ projectId }: { projectId: string }) {
   );
 }
 
-export function MigrationDialog({ open, profiles, onClose, onConfirm }: {
+function MigrationDialog({ open, profiles, onClose, onConfirm }: {
   open: boolean;
   profiles: Array<{ id: string; name: string }>;
   onClose: () => void;

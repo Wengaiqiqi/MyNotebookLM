@@ -3,11 +3,11 @@ import { mkdir, readFile, rename, rm, stat, appendFile } from "node:fs/promises"
 import path from "node:path";
 import { LOCAL_MODEL_ID, LOCAL_MODEL_MANIFEST, LOCAL_MODEL_REVISION, type LocalModelManifest } from "./local-model-manifest";
 import { modelFetch } from "../network/model-fetch";
-export type ModelManifest = { modelId: string; revision: string; dimension: number; files: Readonly<Record<string, string>> };
+type ModelManifest = { modelId: string; revision: string; dimension: number; files: Readonly<Record<string, string>> };
 
 export type DownloadProgress = (value: number) => void;
 export type ModelDownloader = (file: string, offset: number, onProgress: DownloadProgress, signal: AbortSignal) => Promise<Uint8Array>;
-export type ModelRuntime<T> = (directory: string, signal: AbortSignal) => Promise<T>;
+type ModelRuntime<T> = (directory: string, signal: AbortSignal) => Promise<T>;
 function validateManagedIdentity(manifest: Pick<ModelManifest, "modelId" | "revision">): void {
   if (!/^[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+$/.test(manifest.modelId) || !/^[A-Za-z0-9._-]+$/.test(manifest.revision) || manifest.revision === "." || manifest.revision === "..") throw new Error("模型标识或 revision 无效");
 }
@@ -27,7 +27,7 @@ export function createLocalModelDownloader(fetcher: typeof fetch = modelFetch): 
 export function createLocalModelManager<T>(root: string, runtime: ModelRuntime<T>, fetcher: typeof fetch = modelFetch, stagingRuntime: ModelRuntime<T> = runtime) {
   return new LocalModelManager(root, createLocalModelDownloader(fetcher), runtime, LOCAL_MODEL_MANIFEST, stagingRuntime);
 }
-export class OfflineModelError extends Error { constructor() { super("本地模型未安装，当前处于离线模式"); this.name = "OfflineModelError"; } }
+class OfflineModelError extends Error { constructor() { super("本地模型未安装，当前处于离线模式"); this.name = "OfflineModelError"; } }
 
 export class LocalModelManager<T = unknown> {
   private loading: LoadingOperation<T> | undefined;

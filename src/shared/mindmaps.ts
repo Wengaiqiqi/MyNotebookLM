@@ -9,7 +9,7 @@ export interface MindMapNode {
   children: MindMapNode[];
 }
 
-export const mindMapNodeSchema: z.ZodType<MindMapNode> = z.lazy(() => z.object({
+const mindMapNodeSchema: z.ZodType<MindMapNode> = z.lazy(() => z.object({
   id: z.string().min(1).max(128), title: z.string().trim().min(1).max(200),
   summary: z.string().max(8000), keyPoints: z.array(z.string().max(2000)).max(50),
   refs: z.array(z.string().max(128)).max(256), children: z.array(mindMapNodeSchema).max(100)

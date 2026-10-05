@@ -2,8 +2,7 @@ import Database from "better-sqlite3";
 import { createHash } from "node:crypto";
 import { copyFile, readFile, rename, writeFile, readdir, unlink } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
-export type VectorBackup = { verified: boolean; createdAt: number; path?: string };
-export function keepNewestBackups(backups: VectorBackup[]): VectorBackup[] { return backups.filter((b) => b.verified).sort((a, b) => b.createdAt - a.createdAt).slice(0, 3); }
+type VectorBackup = { verified: boolean; createdAt: number; path?: string };
 type BackupMeta = VectorBackup & { path: string; sha256: string };
 async function isVerifiedBackup(filePath: string, sha256?: string): Promise<boolean> {
   let copy: Database.Database | undefined;

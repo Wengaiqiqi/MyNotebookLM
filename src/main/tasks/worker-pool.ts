@@ -7,7 +7,7 @@ import { randomUUID } from "node:crypto";
 import type { CitationPreviewRequest, CitationPreviewResult } from "../../workers/preview/citation-preview";
 
 export const WORKER_PROTOCOL_VERSION = 1 as const;
-export type WorkerMessage =
+type WorkerMessage =
   | { version: 1; type: "start"; taskId: string; kind: string; data: Uint8Array }
   | { version: 1; type: "cancel"; taskId: string }
   | { version: 1; type: "preview"; taskId: string; request: CitationPreviewRequest };
@@ -20,22 +20,22 @@ export function parseWorkerMessage(value: unknown): WorkerMessage {
   if (message.type === "start" && typeof message.taskId === "string" && typeof message.kind === "string" && message.data instanceof Uint8Array) return message as WorkerMessage;
   throw new Error("Invalid worker message");
 }
-export type WorkerResult = { version: 1; type: "result"; taskId: string; chunks: PreparedChunk[] };
-export type WorkerError = Error & { code: string; taskId: string; state: "failed" | "cancelled" };
-export type WorkerProgress = { version: 1; type: "progress"; taskId: string; value: number };
+type WorkerResult = { version: 1; type: "result"; taskId: string; chunks: PreparedChunk[] };
+type WorkerError = Error & { code: string; taskId: string; state: "failed" | "cancelled" };
+type WorkerProgress = { version: 1; type: "progress"; taskId: string; value: number };
 const previewRequestSchema = z.object({ kind: z.enum(["xlsx", "docx"]), data: z.instanceof(Uint8Array), locator: sourceLocatorSchema, citedText: z.string(), tableName: z.string().optional() }).strict();
 const preparedChunkSchema = z.object({ ordinal: z.number().int().nonnegative(), text: z.string(), locator: sourceLocatorSchema, contentHash: z.string().min(1), tokenEstimate: z.number().int().nonnegative() }).strict();
 const workerErrorSchema = z.object({ code: z.string().min(1), message: z.string().min(1) }).strict();
 function workerError(value: unknown, taskId: string, state: WorkerError["state"]): WorkerError { const parsed = workerErrorSchema.parse(value); const error = new Error(parsed.message) as WorkerError; error.code = parsed.code; error.taskId = taskId; error.state = state; return error; }
-export type PoolWorker = { postMessage: (message: unknown) => void; terminate: () => Promise<number>; on?: (event: string, listener: (...args: any[]) => void) => PoolWorker; once: (event: string, listener: (...args: any[]) => void) => PoolWorker; removeAllListeners: () => PoolWorker };
+type PoolWorker = { postMessage: (message: unknown) => void; terminate: () => Promise<number>; on?: (event: string, listener: (...args: any[]) => void) => PoolWorker; once: (event: string, listener: (...args: any[]) => void) => PoolWorker; removeAllListeners: () => PoolWorker };
 export type DurableWorkerPayload = { kind: string; data: Uint8Array; revisionId?: string };
 type DurablePayloadLoader = ((taskId: string, revisionId: string) => DurableWorkerPayload | undefined) | ((taskId: string) => DurableWorkerPayload | undefined);
 /** Watchdog ceilings: heavy parses regularly stay silent for tens of seconds;
  *  the watchdog only fires when a worker stops reporting entirely. */
 /** A runaway parse fails only its own worker (ERR_WORKER_OUT_OF_MEMORY) instead of the app. */
-export const WORKER_HEAP_LIMIT_MB = 2048;
-export const WORKER_START_TIMEOUT_MS = 120_000;
-export const WORKER_IDLE_TIMEOUT_MS = 60_000;
+const WORKER_HEAP_LIMIT_MB = 2048;
+const WORKER_START_TIMEOUT_MS = 120_000;
+const WORKER_IDLE_TIMEOUT_MS = 60_000;
 type WorkerJob = {
   taskId: string;
   revisionId: string;

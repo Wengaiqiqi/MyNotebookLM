@@ -12,7 +12,7 @@ function modalHost(): HTMLElement {
   return host;
 }
 
-export interface ModalProps {
+interface ModalProps {
   open: boolean;
   onClose: () => void;
   labelledBy: string;

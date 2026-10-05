@@ -40,8 +40,8 @@ export const modelTaskKindSchema = z.enum([
   "embedding"
 ]);
 
-export const embeddingDistanceSchema = z.literal("cosine");
-export const embeddingPoolingSchema = z.literal("mean");
+const embeddingDistanceSchema = z.literal("cosine");
+const embeddingPoolingSchema = z.literal("mean");
 
 export const embeddingMetadataSchema = z.object({
   dimension: z.number().int().positive(),
@@ -118,7 +118,7 @@ export const modelRouteDtoSchema = z.object({
   profileId: z.uuid()
 }).strict();
 
-export const modelRouteAttemptStateSchema = z.enum(["started", "completed", "failed", "cancelled"]);
+const modelRouteAttemptStateSchema = z.enum(["started", "completed", "failed", "cancelled"]);
 export const modelRouteAttemptDtoSchema = z.object({
   id: z.uuid(),
   projectId: z.uuid(),
@@ -298,7 +298,7 @@ export type EmbeddingMetadata = Readonly<z.infer<typeof embeddingMetadataSchema>
 export type ModelProfileInput = z.infer<typeof modelProfileInputSchema>;
 export type ModelProfileDto = z.infer<typeof modelProfileDtoSchema>;
 export type ModelRouteDto = z.infer<typeof modelRouteDtoSchema>;
-export type ModelRouteAttemptState = z.infer<typeof modelRouteAttemptStateSchema>;
+type ModelRouteAttemptState = z.infer<typeof modelRouteAttemptStateSchema>;
 export type ModelRouteAttemptDto = z.infer<typeof modelRouteAttemptDtoSchema>;
 export type DefaultModelRoutesDto = z.infer<typeof defaultModelRoutesDtoSchema>;
 export type SetDefaultModelRoutesInput = z.infer<typeof setDefaultModelRoutesInputSchema>;

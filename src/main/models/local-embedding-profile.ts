@@ -10,7 +10,7 @@ const BUILT_IN_LOCAL_EMBEDDING_METADATA: EmbeddingMetadata = Object.freeze({
   preprocessingVersion: "e5-query-passage-v1"
 });
 
-export type BuiltInLocalEmbeddingProfile = Readonly<ModelProfileInput & EmbeddingMetadata & {
+type BuiltInLocalEmbeddingProfile = Readonly<ModelProfileInput & EmbeddingMetadata & {
   metadata: EmbeddingMetadata;
   editable: false;
   requiresCredential: false;

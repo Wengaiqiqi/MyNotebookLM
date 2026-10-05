@@ -62,7 +62,7 @@ export class StaleTaskStateError extends Error {
   }
 }
 
-export type TaskTransition = {
+type TaskTransition = {
   id: string;
   expectedState: "queued" | "running" | "failed" | "cancelled";
   nextState: "queued" | "running" | "completed" | "failed" | "cancelled";
@@ -73,7 +73,7 @@ export type TaskTransition = {
   updatedAt: string;
 };
 
-export type TaskRepositoryHooks = {
+type TaskRepositoryHooks = {
   beforeTransitionWrite?: (id: string, expectedState: "queued" | "running" | "failed" | "cancelled") => void;
   onTransition?: (task: TaskDto) => void;
 };

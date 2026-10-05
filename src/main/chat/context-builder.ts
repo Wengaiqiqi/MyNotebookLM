@@ -15,9 +15,6 @@ import {
 import { buildSystemPrompt, type PromptLocale } from "./prompts";
 import { neutralizeHistoricalCitations } from "./citation-parser";
 
-export { DEFAULT_CONTEXT_TOKENS, DEFAULT_OUTPUT_TOKENS, MAX_SAFE_TOKEN_INPUT } from "../models/generation-limits";
-/** Legacy export retained for callers; final chat evidence is budget-driven. */
-export const MAX_CITED_CHUNKS = 4_096;
 const REQUEST_OVERHEAD_TOKENS = 64;
 const MESSAGE_OVERHEAD_TOKENS = 8;
 const HISTORY_RESERVE_RATIO = 0.25;
@@ -39,7 +36,7 @@ export type HistoryPair = {
   assistant: { id: string; sequence: number; content: string };
 };
 
-export type TokenBudget = {
+type TokenBudget = {
   contextTokens: number;
   outputTokenReserve: number;
   inputTokenTarget: number;
@@ -47,13 +44,13 @@ export type TokenBudget = {
   estimated: boolean;
 };
 
-export type ContextCitation = RetrievedChunk & {
+type ContextCitation = RetrievedChunk & {
   label: string;
   sentText: string;
   truncated: boolean;
 };
 
-export type ContextDiagnostics = {
+type ContextDiagnostics = {
   historyPairsConsidered: number;
   historyPairsIncluded: number;
   evidenceConsidered: number;
@@ -63,7 +60,7 @@ export type ContextDiagnostics = {
   reasons: string[];
 };
 
-export type AssembledContext = {
+type AssembledContext = {
   messages: ChatTurn[];
   citations: ContextCitation[];
   selectedEvidence: ContextCitation[];

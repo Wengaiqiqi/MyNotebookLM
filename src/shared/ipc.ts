@@ -83,7 +83,7 @@ export const modelRoutesInputSchema = z.object({ taskKind: modelTaskKindSchema }
 export const saveModelRoutesInputSchema = z.object({ taskKind: modelTaskKindSchema, profileIds: z.array(z.uuid()).min(1).max(16) }).strict();
 export const modelRouteAttemptsInputSchema = z.object({ projectId: z.uuid(), taskKind: modelTaskKindSchema.optional(), limit: z.number().int().positive().max(100).optional(), offset: z.number().int().nonnegative().max(100_000).optional() }).strict();
 export const noteListInputSchema = z.object({ projectId: z.uuid(), includeArchived: z.boolean().optional() }).strict();
-export const noteGenerateTitleInputSchema = z.object({ projectId: z.uuid(), noteId: z.uuid(), locale: z.enum(["zh-CN", "en"]), profileId: z.uuid().optional() }).strict();
+const noteGenerateTitleInputSchema = z.object({ projectId: z.uuid(), noteId: z.uuid(), locale: z.enum(["zh-CN", "en"]), profileId: z.uuid().optional() }).strict();
 export const transformationRulesInputSchema = z.object({ projectId: z.uuid() }).strict();
 export const transformationBuiltinInputSchema = z.object({ language: z.enum(["zh-CN", "en"]).optional() }).strict();
 export const transformationInsightsInputSchema = z.object({ projectId: z.uuid(), limit: z.number().int().positive().max(100).optional(), offset: z.number().int().nonnegative().max(100_000).optional() }).strict();
@@ -228,7 +228,7 @@ export const chatRequestEventSchemas = {
   })
 } as const;
 
-export const chatRequestEventTypeSchema = z.enum(Object.keys(chatRequestEventSchemas) as [(keyof typeof chatRequestEventSchemas), ...(keyof typeof chatRequestEventSchemas)[]]);
+const chatRequestEventTypeSchema = z.enum(Object.keys(chatRequestEventSchemas) as [(keyof typeof chatRequestEventSchemas), ...(keyof typeof chatRequestEventSchemas)[]]);
 export type ChatRequestEventType = keyof typeof chatRequestEventSchemas;
 export type ChatRequestEvent = z.infer<(typeof chatRequestEventSchemas)[ChatRequestEventType]>;
 

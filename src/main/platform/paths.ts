@@ -1,6 +1,6 @@
 import path from "node:path";
 
-export type AppPaths = Readonly<{
+type AppPaths = Readonly<{
   root: string;
   database: string;
   files: string;

@@ -36,7 +36,7 @@ export class TransformationVersionConflictError extends Error {
   }
 }
 
-export class TransformationProjectNotFoundError extends Error {
+class TransformationProjectNotFoundError extends Error {
   constructor(projectId: string) {
     super(`Transformation project not found: ${projectId}`);
     this.name = "TransformationProjectNotFoundError";

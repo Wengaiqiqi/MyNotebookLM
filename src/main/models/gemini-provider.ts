@@ -10,9 +10,9 @@ import type {
   ModelProvider
 } from "./provider";
 
-export const GEMINI_BASE_URL = "https://generativelanguage.googleapis.com";
+const GEMINI_BASE_URL = "https://generativelanguage.googleapis.com";
 
-export type GeminiProviderOptions = Readonly<{
+type GeminiProviderOptions = Readonly<{
   baseUrl?: string;
   apiKey?: string;
 }>;

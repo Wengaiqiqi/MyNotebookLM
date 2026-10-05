@@ -34,8 +34,8 @@ type QueryProvider = Pick<EmbeddingProvider, "embedBatch"> & Partial<Pick<Embedd
 type PreparedSearch = { spec: LanceSpace; filter: { projectId: string }; query: string; queryProvider: QueryProvider; vector: number[]; signal: AbortSignal; passSignal: boolean };
 type SearchRound = { rows: Row[]; vectorCount: number; textCount: number; candidateBytes: number; leadingScore?: number };
 
-export type ChatSearchStopReason = "budget" | "exhausted" | "relevance-tail" | "candidate-limit" | "resource-limit" | "cancelled";
-export type ChatSearchDiagnostics = {
+type ChatSearchStopReason = "budget" | "exhausted" | "relevance-tail" | "candidate-limit" | "resource-limit" | "cancelled";
+type ChatSearchDiagnostics = {
   stopReason: ChatSearchStopReason;
   rounds: number;
   vectorCandidateLimit: number;
@@ -250,12 +250,7 @@ export class RetrievalService {
       if (!batch.length) continue;
       const ids = batch.map((candidate) => candidate.chunkId);
       const statement = this.db.prepare(`SELECT sc.id chunk_id, sc.ordinal, sc.text, sc.locator_json, sc.content_hash, sr.id revision_id, s.id source_id, s.display_name source_display_name, s.kind source_kind FROM source_chunks sc JOIN source_revisions sr ON sr.id = sc.revision_id JOIN sources s ON s.id = sr.source_id WHERE sc.id IN (${ids.map(() => "?").join(",")}) AND s.project_id = ? AND s.status = 'active' AND s.current_revision_id = sr.id AND sr.state = 'ready'`);
-      const rows = typeof (statement as any).all === "function"
-        ? (statement as any).all(...ids, projectId) as Array<Record<string, unknown>>
-        : ids.flatMap((id) => {
-          const row = this.db.prepare("SELECT sc.id chunk_id, sc.ordinal, sc.text, sc.locator_json, sc.content_hash, sr.id revision_id, s.id source_id, s.display_name source_display_name, s.kind source_kind FROM source_chunks sc JOIN source_revisions sr ON sr.id = sc.revision_id JOIN sources s ON s.id = sr.source_id WHERE sc.id = ? AND s.project_id = ? AND s.status = 'active' AND s.current_revision_id = sr.id AND sr.state = 'ready'").get(id, projectId) as Record<string, unknown> | undefined;
-          return row ? [row] : [];
-        });
+      const rows = statement.all(...ids, projectId) as Array<Record<string, unknown>>;
       const byId = new Map(rows.map((row) => [String(row.chunk_id), row]));
       for (const candidate of batch) {
         const row = byId.get(candidate.chunkId);
