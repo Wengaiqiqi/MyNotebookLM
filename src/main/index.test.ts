@@ -341,12 +341,8 @@ describe("main application composition", () => {
       "C:\\data\\MyNotebookLM\\models\\huggingface",
       "C:\\data\\MyNotebookLM\\models\\huggingface/Xenova__multilingual-e5-small-761b726dd34fb83930e26aab4e9ac3899aa1fa78"
     );
-    expect(createTransformersEmbeddingRuntime).toHaveBeenNthCalledWith(
-      2,
-      "C:\\data\\MyNotebookLM\\models\\huggingface",
-      "C:\\data\\MyNotebookLM\\models\\huggingface/Xenova__multilingual-e5-small-761b726dd34fb83930e26aab4e9ac3899aa1fa78.partial"
-    );
-    expect(createLocalModelManager).toHaveBeenCalledWith("C:\\data\\MyNotebookLM\\models\\huggingface", expect.any(Function), expect.any(Function), expect.any(Function));
+    expect(createTransformersEmbeddingRuntime).toHaveBeenCalledOnce();
+    expect(createLocalModelManager).toHaveBeenCalledWith("C:\\data\\MyNotebookLM\\models\\huggingface", expect.any(Function), expect.any(Function));
     expect(LocalEmbeddingProvider).toHaveBeenCalledOnce();
     expect(mocks.IndexingService).toHaveBeenCalledWith(mocks.connection, expect.any(Function), expect.anything(), expect.any(Function));
   });

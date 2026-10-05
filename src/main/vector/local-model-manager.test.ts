@@ -14,6 +14,7 @@ describe("LocalModelManager", () => {
       {
         "dimension": 384,
         "files": {
+          "config.json": "cb99455288675345e1a4f411438d5d0adbba5fbd3a67ea4fb03c015433b996c1",
           "onnx/model_quantized.onnx": "f80102d3f2a1229f387d3c81909990d8945513e347b0eab049f7de3c6f98c193",
           "tokenizer.json": "0b44a9d7b51c3c62626640cda0e2c2f70fdacdc25bbbd68038369d14ebdf4c39",
           "tokenizer_config.json": "a1d6bc8734a6f635dc158508bef000f8e2e5a759c7d92f984b2c86e5ff53425b",
@@ -35,22 +36,20 @@ describe("LocalModelManager", () => {
     const [a, b] = await Promise.all([manager.ensureReady(), manager.ensureReady()]); expect(a).toEqual(b); expect(calls).toBe(2);
     await expect(readFile(path.join(root, "fake__model-rev1.partial"))).rejects.toThrow(); await rm(root, { recursive: true, force: true });
   });
-  it("keeps production staging self-check on its exact managed staging directory", async () => {
+  it("self-checks the model only after moving it into the managed directory", async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), "model-"));
     const active = managedActiveDirectory(root, manifest);
     const staging = managedStagingDirectory(root, manifest);
     const activeRuntime = createTransformersEmbeddingRuntime(root, active);
-    const stagingRuntime = createTransformersEmbeddingRuntime(root, staging);
     const download: ModelDownloader = async file => new TextEncoder().encode(file);
     const manager = new LocalModelManager(
       root,
       download,
       (directory, signal) => activeRuntime(directory, [], signal),
-      manifest,
-      (directory, signal) => stagingRuntime(directory, [], signal)
+      manifest
     );
 
-    await expect(manager.ensureReady()).resolves.toEqual([[1]]);
+    await expect(manager.ensureReady()).resolves.toEqual([]);
     await expect(readFile(path.join(active, "tokenizer.json"), "utf8")).resolves.toBe("tokenizer.json");
     await expect(readFile(staging)).rejects.toThrow();
     await rm(root, { recursive: true, force: true });
@@ -106,7 +105,7 @@ describe("LocalModelManager", () => {
   it("does not delete the backup until the new runtime succeeds", async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), "model-")); const active = path.join(root, "fake__model-rev1");
     await mkdir(path.join(active, "onnx"), { recursive: true }); await writeFile(path.join(active, "tokenizer.json"), "old"); await writeFile(path.join(active, "onnx/model.onnx"), "old");
-    const manager = new LocalModelManager(root, async file => new TextEncoder().encode(file.includes("tokenizer") ? "new" : "new"), async dir => { if (dir === active) throw new Error("old runtime failed"); throw new Error("new runtime failed"); }, manifest);
+    const manager = new LocalModelManager(root, async file => new TextEncoder().encode(file.includes("tokenizer") ? "new" : "new"), async () => { throw new Error("new runtime failed"); }, manifest);
     await expect(manager.ensureReady()).rejects.toThrow("new runtime failed");
     await expect(readFile(path.join(active, "tokenizer.json"), "utf8")).resolves.toBe("old");
     await rm(root, { recursive: true, force: true });
@@ -114,7 +113,7 @@ describe("LocalModelManager", () => {
   it("restores the old active directory when runtime fails after activation", async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), "model-")); const active = path.join(root, "fake__model-rev1");
     await mkdir(path.join(active, "onnx"), { recursive: true }); await writeFile(path.join(active, "tokenizer.json"), "old"); await writeFile(path.join(active, "onnx/model.onnx"), "old");
-    let calls = 0; const manager = new LocalModelManager(root, async file => new TextEncoder().encode(file.includes("tokenizer") ? "new" : "new"), async dir => { calls++; if (calls === 1) return {}; throw new Error("active runtime failed"); }, manifest);
+    const manager = new LocalModelManager(root, async file => new TextEncoder().encode(file.includes("tokenizer") ? "new" : "new"), async () => { throw new Error("active runtime failed"); }, manifest);
     await expect(manager.ensureReady()).rejects.toThrow("active runtime failed"); await expect(readFile(path.join(active, "tokenizer.json"), "utf8")).resolves.toBe("old");
     await rm(root, { recursive: true, force: true });
   });
@@ -122,15 +121,10 @@ describe("LocalModelManager", () => {
     const root = await mkdtemp(path.join(os.tmpdir(), "model-"));
     const active = managedActiveDirectory(root, manifest);
     const staging = managedStagingDirectory(root, manifest);
-    let calls = 0;
     const manager = new LocalModelManager(
       root,
       async file => new TextEncoder().encode(file),
-      async () => {
-        calls++;
-        if (calls === 1) return {};
-        throw new Error("active runtime failed");
-      },
+      async () => { throw new Error("active runtime failed"); },
       manifest
     );
 

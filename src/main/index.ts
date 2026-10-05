@@ -36,7 +36,7 @@ import { IndexingService, canonicalEmbeddingFingerprint } from "./vector/indexin
 import { SpaceRepository } from "./vector/space-repository";
 import { SpaceService } from "./vector/space-service";
 import { backupDatabase } from "./vector/vector-backup";
-import { createLocalModelManager, managedActiveDirectory, managedStagingDirectory } from "./vector/local-model-manager";
+import { createLocalModelManager, managedActiveDirectory } from "./vector/local-model-manager";
 import { LocalEmbeddingProvider, canonicalLocalModelPath, createLocalDirectoryEmbeddingProvider, createTransformersEmbeddingRuntime, isAuthoritativeLocalCapability } from "./vector/local-embedding-provider";
 import { LOCAL_MODEL_MANIFEST } from "./vector/local-model-manifest";
 import { createModelProvider } from "./models/model-service";
@@ -169,8 +169,8 @@ app.whenReady().then(async () => {
   }, optimize: async (raw: unknown) => { const value = raw as { taskId?: string; projectId?: string; space: { id: string; dimension: number }; signal?: AbortSignal }; const taskId = value.taskId ?? (value.projectId ? taskService.createTask({ projectId: value.projectId, sourceId: null, kind: "optimize" }).id : undefined); if (!taskId) throw new Error("optimize requires taskId or projectId"); taskService.start(taskId, "indexing"); try { taskService.advance(taskId, "indexing", 500); await lance.optimize(value.space, value.signal); taskService.complete(taskId); } catch (error) { if ((error as { code?: string }).code === "TASK_CANCELLED") { const current = taskService.getById(taskId); if (current?.state === "queued" || current?.state === "running") taskService.cancel(taskId); } else taskService.fail(taskId, { code: "INTERNAL", messageKey: "errors.internal", recoverable: false }); throw error; } } }, async () => backupDatabase(appDatabase!.connection, appPaths.database + ".space-backup-" + Date.now() + ".db"));
   await spaceService.recoverInterrupted();
   const localRuntime = createTransformersEmbeddingRuntime(appPaths.models, managedActiveDirectory(appPaths.models, LOCAL_MODEL_MANIFEST));
-  const stagingRuntime = createTransformersEmbeddingRuntime(appPaths.models, managedStagingDirectory(appPaths.models, LOCAL_MODEL_MANIFEST));
-  const localManager = createLocalModelManager(appPaths.models, async (directory, signal) => localRuntime(directory, [], signal), modelFetch, async (directory, signal) => stagingRuntime(directory, [], signal));
+  // The manager hands its result to localRuntime as the model, so resolve to the verified directory.
+  const localManager = createLocalModelManager(appPaths.models, async (directory, signal) => { await localRuntime(directory, [], signal); return directory; }, modelFetch);
   const localEmbeddingProvider = new LocalEmbeddingProvider(localManager, localRuntime);
   type SpaceRow = { provider: string; model_id: string; model_revision: string; dimension?: number; distance?: string; pooling?: string; preprocess_version?: string; chunking_version?: string; fingerprint?: string };
   type CompleteSpaceRow = SpaceRow & { dimension: number; distance: "cosine"; pooling: "mean"; preprocess_version: string; chunking_version: string };

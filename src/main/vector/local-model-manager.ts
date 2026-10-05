@@ -24,14 +24,14 @@ export function createLocalModelDownloader(fetcher: typeof fetch = modelFetch): 
     const bytes = new Uint8Array(await response.arrayBuffer()); onProgress(bytes.length ? 1 : 0); return bytes;
   };
 }
-export function createLocalModelManager<T>(root: string, runtime: ModelRuntime<T>, fetcher: typeof fetch = modelFetch, stagingRuntime: ModelRuntime<T> = runtime) {
-  return new LocalModelManager(root, createLocalModelDownloader(fetcher), runtime, LOCAL_MODEL_MANIFEST, stagingRuntime);
+export function createLocalModelManager<T>(root: string, runtime: ModelRuntime<T>, fetcher: typeof fetch = modelFetch) {
+  return new LocalModelManager(root, createLocalModelDownloader(fetcher), runtime, LOCAL_MODEL_MANIFEST);
 }
 class OfflineModelError extends Error { constructor() { super("本地模型未安装，当前处于离线模式"); this.name = "OfflineModelError"; } }
 
 export class LocalModelManager<T = unknown> {
   private loading: LoadingOperation<T> | undefined;
-  constructor(private readonly root: string, private readonly downloader: ModelDownloader, private readonly runtime: ModelRuntime<T>, private readonly manifest: ModelManifest = LOCAL_MODEL_MANIFEST, private readonly stagingRuntime: ModelRuntime<T> = runtime) {}
+  constructor(private readonly root: string, private readonly downloader: ModelDownloader, private readonly runtime: ModelRuntime<T>, private readonly manifest: ModelManifest = LOCAL_MODEL_MANIFEST) {}
   private activeDir() { return managedActiveDirectory(this.root, this.manifest); }
   private stagingDir() { return managedStagingDirectory(this.root, this.manifest); }
   async ensureReady(offline = false, onProgress: DownloadProgress = () => {}, signal = new AbortController().signal): Promise<T> {
@@ -77,7 +77,7 @@ export class LocalModelManager<T = unknown> {
     catch (e) { missing = (e as NodeJS.ErrnoException).code === "ENOENT"; if (offline) throw missing ? new OfflineModelError() : e; }
     const staging = this.stagingDir(); await mkdir(staging, { recursive: true });
     try { let done = 0; const files = Object.entries(this.manifest.files); for (const [file, expected] of files) { if (signal.aborted) throw signal.reason ?? new DOMException("Aborted", "AbortError"); const target = path.join(staging, file); await mkdir(path.dirname(target), { recursive: true }); let offset = 0; try { offset = (await stat(`${target}.part`)).size; } catch {} const bytes = await this.downloader(file, offset, v => onProgress((done + v) / files.length), signal); await appendFile(`${target}.part`, bytes); const complete = await readFile(`${target}.part`); if (expected !== "UNRESOLVED" && sha(complete) !== expected) { await rm(`${target}.part`, { force: true }); throw new Error(`模型文件校验失败: ${file}`); } await rename(`${target}.part`, target); done++; onProgress(done / files.length); }
-      await this.stagingRuntime(staging, signal);
+      // Load only after the move: on Windows an open ONNX file blocks renaming its directory.
       const backup = `${active}.old`; await rm(backup, { recursive: true, force: true }); let hadActive = true; try { await rename(active, backup); } catch (e) { if ((e as NodeJS.ErrnoException).code !== "ENOENT") throw e; hadActive = false; }
       try { await rename(staging, active); } catch (e) { if (hadActive) await rename(backup, active); throw e; }
       try { const result = await this.runtime(active, signal); await rm(backup, { recursive: true, force: true }); return result; } catch (e) {

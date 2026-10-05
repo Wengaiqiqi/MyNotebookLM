@@ -38,6 +38,8 @@ export function createTransformersEmbeddingRuntime(modelDir?: string, managedAct
     if (!singleton) {
       singleton = pipeline("feature-extraction", expected, {
         ...(requestedRevision ? { revision: requestedRevision } : {}),
+        // The managed manifest only ships onnx/model_quantized.onnx.
+        ...(managedActiveDir ? { dtype: "q8" as const } : {}),
         local_files_only: true
       });
       singletons.set(key, singleton);
@@ -46,7 +48,8 @@ export function createTransformersEmbeddingRuntime(modelDir?: string, managedAct
         if (singletons.get(key) === singleton) singletons.delete(key);
       });
     }
-    const extractor: any = await singleton; const result: any = await extractor(inputs, { pooling: "mean", normalize: true }); return (result.tolist?.() ?? result) as number[][];
+    // The manager probes with no inputs to verify the model loads; the tokenizer rejects an empty batch.
+    const extractor: any = await singleton; if (inputs.length === 0) return []; const result: any = await extractor(inputs, { pooling: "mean", normalize: true }); return (result.tolist?.() ?? result) as number[][];
   };
 }
 export function createLocalDirectoryEmbeddingProvider(selectedPath: string, modelId: string): EmbeddingProvider {
