@@ -16,6 +16,12 @@ describe("podcast speech", () => {
     }
   });
 
+  it("repairs bare ASCII quotes and raw newlines inside spoken lines, still rejecting truncated output", () => {
+    const raw = '<think>plan</think>{"title":"态度","turns":[{"speaker":"A","text":"价值在哪里？"},{"speaker":"B","text":"懂得说"我不知道"其实是\n一种能力。"}]}';
+    expect(parsePodcastScript(raw).turns[1]!.text).toBe('懂得说"我不知道"其实是\n一种能力。');
+    expect(() => parsePodcastScript(raw.slice(0, -10))).toThrow("errors.podcastScriptInvalid");
+  });
+
   it("preserves binary bytes and rejects incompatible or truncated WAV data", async () => {
     const wav = wave();
     const client = new ProviderHttpClient(async () => new Response(new Uint8Array(wav)));

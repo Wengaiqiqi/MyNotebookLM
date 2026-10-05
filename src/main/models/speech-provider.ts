@@ -15,9 +15,30 @@ export const podcastScriptSchema = z.object({
   .refine((script) => script.turns.reduce((size, turn) => size + turn.text.length, 0) <= 16_000);
 type SpeechTurn = z.infer<typeof podcastScriptSchema>["turns"][number];
 
+/** Models often quote speech inside a line with bare ASCII quotes (说"我不知道"). A quote
+ *  inside a string only closes it when JSON structure follows; otherwise escape it. */
+function escapeInnerQuotes(json: string): string {
+  let out = "", inString = false;
+  for (let i = 0; i < json.length; i++) {
+    const char = json[i]!;
+    if (inString && char === "\\") { out += char + (json[++i] ?? ""); continue; }
+    if (char === "\"") {
+      if (!inString) inString = true;
+      else if (/^\s*(?:[,:}\]]|$)/.test(json.slice(i + 1))) inString = false;
+      else { out += "\\\""; continue; }
+    } else if (inString && char === "\n") { out += "\\n"; continue; }
+    out += char;
+  }
+  return out;
+}
+
 export function parsePodcastScript(content: string): z.infer<typeof podcastScriptSchema> {
-  try { return podcastScriptSchema.parse(JSON.parse(content.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, ""))); }
-  catch { throw new RoutedGenerationError({ code: "PROVIDER", messageKey: "errors.podcastScriptInvalid", recoverable: true }); }
+  const json = content.replace(/<think>[\s\S]*?<\/think>/gi, "").trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "");
+  let parsed: unknown;
+  try { parsed = JSON.parse(json); } catch { try { parsed = JSON.parse(escapeInnerQuotes(json)); } catch { /* reported below */ } }
+  const script = podcastScriptSchema.safeParse(parsed);
+  if (!script.success) throw new RoutedGenerationError({ code: "PROVIDER", messageKey: "errors.podcastScriptInvalid", recoverable: true });
+  return script.data;
 }
 
 function invalidAudio(): never { throw new ProviderRequestError(classifyProviderError({ malformedResponse: true })); }
