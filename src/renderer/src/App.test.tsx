@@ -117,6 +117,25 @@ describe("App shell", () => {
     expect(screen.getAllByRole("button", { name: "新建项目" }).length).toBeGreaterThan(0);
   });
 
+  it("collapses the project list into a topbar button and remembers it", async () => {
+    (window as unknown as { myNotebook: DesktopApi }).myNotebook = mockApi();
+    const view = render(<App />);
+    fireEvent.click(await screen.findByRole("button", { name: "收起项目栏" }));
+
+    const expand = screen.getByRole("button", { name: "展开项目栏" });
+    // the expand button must sit inside the topbar, not over it: a button only
+    // layered above a drag region cannot be clicked in Electron
+    expect(expand.closest(".topbar")).toBeTruthy();
+    expect(screen.queryByPlaceholderText("搜索项目")).toBeNull();
+    expect(localStorage.getItem("mynotebooklm.sidebarCollapsed")).toBe("1");
+
+    view.unmount();
+    render(<App />);
+    fireEvent.click(await screen.findByRole("button", { name: "展开项目栏" }));
+    expect(screen.getByPlaceholderText("搜索项目")).toBeTruthy();
+    expect(localStorage.getItem("mynotebooklm.sidebarCollapsed")).toBeNull();
+  });
+
   it("shows the onboarding screen for first launch", async () => {
     (window as unknown as { myNotebook: DesktopApi }).myNotebook = mockApi({ onboardingCompleted: false });
     render(<App />);

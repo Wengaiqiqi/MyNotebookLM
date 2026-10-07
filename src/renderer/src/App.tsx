@@ -14,6 +14,8 @@ import Icon from "./ui/Icon";
 
 type View = "boot" | "onboarding" | "app";
 
+const sidebarCollapsedKey = "mynotebooklm.sidebarCollapsed";
+
 export default function App() {
   const { t, i18n } = useTranslation();
   const language: AppLanguage = i18n.resolvedLanguage === "en" ? "en" : "zh-CN";
@@ -28,6 +30,12 @@ export default function App() {
   // Model whose advanced configuration Settings should open on request.
   const [settingsModelId, setSettingsModelId] = useState<string | null>(null);
   const projects = useProjects(t);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => localStorage.getItem(sidebarCollapsedKey) === "1");
+
+  useEffect(() => {
+    if (sidebarCollapsed) localStorage.setItem(sidebarCollapsedKey, "1");
+    else localStorage.removeItem(sidebarCollapsedKey);
+  }, [sidebarCollapsed]);
 
   const refreshRoutes = useCallback(async () => {
     const result = await window.myNotebook.models.getDefaultRoutes().catch(() => undefined);
@@ -108,12 +116,12 @@ export default function App() {
 
   return (
     <>
-      <div className="app" data-view={view}>
+      <div className="app" data-view={view} data-sidebar={sidebarCollapsed ? "collapsed" : undefined}>
         {view === "boot" ? (
           <main className="main"><div className="boot"><span className="spinner" aria-hidden="true" /><span>{t("common.loading")}</span></div></main>
         ) : (
           <>
-            <Sidebar
+            {!sidebarCollapsed && <Sidebar
               projects={projects.projects}
               archived={projects.archived}
               selectedId={projects.selectedId}
@@ -128,8 +136,14 @@ export default function App() {
               settingsActive={settingsOpen}
               onLanguage={selectLanguage}
               onTheme={selectTheme}
-            />
+              onCollapse={() => setSidebarCollapsed(true)}
+            />}
             <header className="topbar drag">
+              {sidebarCollapsed && (
+                <button type="button" className="icon-btn" aria-label={t("project.expandSidebar")} title={t("project.expandSidebar")} onClick={() => setSidebarCollapsed(false)}>
+                  <Icon name="chevrons-right" />
+                </button>
+              )}
               {view === "app" && !settingsOpen && selectedProject && !selectedProject.archived && selectedProject.status === "active" ? (
                 <nav className="tabs" role="tablist" aria-label={t("project.sections")}>
                   {([
