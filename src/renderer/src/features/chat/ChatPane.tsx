@@ -530,7 +530,7 @@ function ChatUnavailable({ indexedCount, hasModel, onOpenSettings, onImport }: {
 }) {
   const { t } = useTranslation();
   return (
-    <section className="panel" aria-label={t("chat.ui.researchChat")}>
+    <section className="panel chat-unavailable" aria-label={t("chat.ui.researchChat")}>
       <div className="empty" style={{ height: "100%" }}>
         <span className="glyph" aria-hidden="true"><Icon name="sparkle" /></span>
         <h3>{t("chat.ui.unavailableTitle")}</h3>

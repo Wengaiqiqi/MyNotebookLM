@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { ProjectDto } from "../../../../shared/projects";
 import type { AppLanguage, AppTheme } from "../../i18n";
@@ -41,11 +41,22 @@ export default function Sidebar(props: SidebarProps) {
   const [filter, setFilter] = useState("");
   const [menu, setMenu] = useState<MenuState>();
   const [collapsed, setCollapsed] = useState(() => localStorage.getItem(collapsedKey) === "1");
+  // the toggle button is swapped for its counterpart, so hand focus over
+  // to keep keyboard users in place (only after a toggle, not on mount)
+  const toggleRef = useRef<HTMLButtonElement>(null);
+  const toggled = useRef(false);
 
   useEffect(() => {
     if (collapsed) localStorage.setItem(collapsedKey, "1");
     else localStorage.removeItem(collapsedKey);
+    if (toggled.current) toggleRef.current?.focus();
   }, [collapsed]);
+
+  function toggle(next: boolean): void {
+    toggled.current = true;
+    setMenu(undefined);
+    setCollapsed(next);
+  }
 
   const listed = useMemo(() => {
     const source = showArchived ? props.archived : props.projects;
@@ -81,8 +92,8 @@ export default function Sidebar(props: SidebarProps) {
 
   if (collapsed) {
     return (
-      <aside className="sidebar rail" aria-label={t("project.title")}>
-        <button type="button" className="icon-btn" aria-label={t("project.expandSidebar")} title={t("project.expandSidebar")} onClick={() => setCollapsed(false)}>
+      <aside className="sidebar rail drag" aria-label={t("project.title")}>
+        <button type="button" ref={toggleRef} className="icon-btn" aria-label={t("project.expandSidebar")} title={t("project.expandSidebar")} onClick={() => toggle(false)}>
           <Icon name="chevrons-right" />
         </button>
       </aside>
@@ -95,7 +106,7 @@ export default function Sidebar(props: SidebarProps) {
         <BrandMark />
         <span className="brand-name">{t("app.name")}</span>
         <span className="spacer" />
-        <button type="button" className="icon-btn" aria-label={t("project.collapseSidebar")} title={t("project.collapseSidebar")} onClick={() => { setMenu(undefined); setCollapsed(true); }}>
+        <button type="button" ref={toggleRef} className="icon-btn" aria-label={t("project.collapseSidebar")} title={t("project.collapseSidebar")} onClick={() => toggle(true)}>
           <Icon name="chevrons-left" />
         </button>
       </div>
