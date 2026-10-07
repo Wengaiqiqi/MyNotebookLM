@@ -24,7 +24,9 @@ const zhCN = {
     searchEmpty: "没有匹配的项目。",
     listEmpty: "还没有项目，创建第一个吧。",
     noArchived: "没有已归档的项目。",
-    archivedToast: "项目已归档。"
+    archivedToast: "项目已归档。",
+    collapseSidebar: "收起项目栏",
+    expandSidebar: "展开项目栏"
   },
   common: {
     cancel: "取消",

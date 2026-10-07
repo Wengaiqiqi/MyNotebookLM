@@ -32,6 +32,7 @@ interface MenuState {
 
 const MENU_WIDTH = 176;
 const MENU_GAP = 6;
+const collapsedKey = "mynotebooklm.sidebarCollapsed";
 
 export default function Sidebar(props: SidebarProps) {
   const { t, i18n } = useTranslation();
@@ -39,6 +40,12 @@ export default function Sidebar(props: SidebarProps) {
   const [showArchived, setShowArchived] = useState(false);
   const [filter, setFilter] = useState("");
   const [menu, setMenu] = useState<MenuState>();
+  const [collapsed, setCollapsed] = useState(() => localStorage.getItem(collapsedKey) === "1");
+
+  useEffect(() => {
+    if (collapsed) localStorage.setItem(collapsedKey, "1");
+    else localStorage.removeItem(collapsedKey);
+  }, [collapsed]);
 
   const listed = useMemo(() => {
     const source = showArchived ? props.archived : props.projects;
@@ -72,11 +79,25 @@ export default function Sidebar(props: SidebarProps) {
     setMenu(undefined);
   }
 
+  if (collapsed) {
+    return (
+      <aside className="sidebar rail" aria-label={t("project.title")}>
+        <button type="button" className="icon-btn" aria-label={t("project.expandSidebar")} title={t("project.expandSidebar")} onClick={() => setCollapsed(false)}>
+          <Icon name="chevrons-right" />
+        </button>
+      </aside>
+    );
+  }
+
   return (
     <aside className="sidebar" aria-label={t("project.title")}>
       <div className="sidebar-head drag">
         <BrandMark />
         <span className="brand-name">{t("app.name")}</span>
+        <span className="spacer" />
+        <button type="button" className="icon-btn" aria-label={t("project.collapseSidebar")} title={t("project.collapseSidebar")} onClick={() => { setMenu(undefined); setCollapsed(true); }}>
+          <Icon name="chevrons-left" />
+        </button>
       </div>
 
       <div className="sidebar-body">

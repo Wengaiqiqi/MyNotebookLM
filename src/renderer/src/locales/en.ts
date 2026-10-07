@@ -24,7 +24,9 @@ const en = {
     searchEmpty: "No projects match.",
     listEmpty: "No projects yet — create your first one.",
     noArchived: "No archived projects.",
-    archivedToast: "Project archived."
+    archivedToast: "Project archived.",
+    collapseSidebar: "Collapse project list",
+    expandSidebar: "Expand project list"
   },
   common: {
     cancel: "Cancel",
