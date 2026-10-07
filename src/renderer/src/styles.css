@@ -173,6 +173,17 @@ button:disabled { cursor: not-allowed; opacity: .5; }
 }
 .brand-mark img { display: block; width: 100%; height: 100%; object-fit: cover; }
 .sidebar-head .brand-name { font-weight: 650; letter-spacing: -.01em; font-size: 14px; }
+.sidebar-head .spacer { flex: 1; }
+.sidebar-head .icon-btn { margin-right: -8px; }
+
+/* collapsed project list: a narrow rail, the main area takes the freed width */
+.app:has(> .sidebar.rail) { grid-template-columns: 52px minmax(0, 1fr); }
+.sidebar.rail .sidebar-head { justify-content: center; padding: 0; }
+.sidebar-rail-body { flex: 1; min-height: 0; display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 10px 0 12px; }
+.sidebar-rail-body .spacer { flex: 1; }
+.sidebar-rail-body .icon-btn { width: 34px; height: 34px; border-radius: 9px; }
+.sidebar-rail-body .icon-btn svg { width: 16px; height: 16px; }
+.sidebar-rail-body .icon-btn[aria-current="page"] { background: var(--surface); color: var(--ink); box-shadow: var(--shadow-1); }
 
 .sidebar-body { flex: 1; min-height: 0; display: flex; flex-direction: column; padding: 14px 12px 8px; gap: 10px; }
 
