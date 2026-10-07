@@ -81,7 +81,7 @@ export default function Sidebar(props: SidebarProps) {
 
   if (collapsed) {
     return (
-      <aside className="sidebar rail" aria-label={t("project.title")}>
+      <aside className="sidebar rail drag" aria-label={t("project.title")}>
         <button type="button" className="icon-btn" aria-label={t("project.expandSidebar")} title={t("project.expandSidebar")} onClick={() => setCollapsed(false)}>
           <Icon name="chevrons-right" />
         </button>
