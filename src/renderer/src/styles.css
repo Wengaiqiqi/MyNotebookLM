@@ -457,6 +457,8 @@ button:disabled { cursor: not-allowed; opacity: .5; }
 .research { grid-template-columns: 264px minmax(0, 1fr) 300px; }
 .research.no-citations { grid-template-columns: 264px minmax(0, 1fr); }
 .research > * { min-width: 0; min-height: 0; }
+/* no citations panel while chat is unavailable: take its column too */
+.research > .chat-unavailable { grid-column: span 2; }
 
 .panel { display: flex; flex-direction: column; min-height: 0; border: 1px solid var(--line); border-radius: var(--radius-l); background: var(--surface); overflow: hidden; }
 .panel-head {

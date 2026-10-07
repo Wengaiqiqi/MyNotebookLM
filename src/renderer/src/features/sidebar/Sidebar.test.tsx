@@ -34,6 +34,7 @@ describe("Sidebar", () => {
     renderSidebar();
 
     fireEvent.click(screen.getByRole("button", { name: /collapse project list|收起项目栏/i }));
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: /expand project list|展开项目栏/i }));
     expect(screen.queryByRole("textbox")).toBeNull();
     expect(screen.getAllByRole("button")).toHaveLength(1);
     expect(localStorage.getItem("mynotebooklm.sidebarCollapsed")).toBe("1");
@@ -41,9 +42,11 @@ describe("Sidebar", () => {
     cleanup();
     renderSidebar();
     expect(screen.queryByRole("textbox")).toBeNull();
+    expect(document.activeElement).toBe(document.body);
 
     fireEvent.click(screen.getByRole("button", { name: /expand project list|展开项目栏/i }));
     expect(screen.getByRole("textbox")).toBeTruthy();
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: /collapse project list|收起项目栏/i }));
     expect(localStorage.getItem("mynotebooklm.sidebarCollapsed")).toBeNull();
   });
 });
