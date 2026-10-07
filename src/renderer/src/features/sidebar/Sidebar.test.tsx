@@ -6,7 +6,7 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import Sidebar from "./Sidebar";
 import "../../i18n";
 
-function renderSidebar(onOpenSettings = vi.fn()) {
+function renderSidebar() {
   return render(
     <Sidebar
       projects={[]}
@@ -18,7 +18,7 @@ function renderSidebar(onOpenSettings = vi.fn()) {
       onSelect={vi.fn()}
       onCreate={vi.fn()}
       onMenuAction={vi.fn()}
-      onOpenSettings={onOpenSettings}
+      onOpenSettings={vi.fn()}
       settingsActive={false}
       onLanguage={vi.fn()}
       onTheme={vi.fn()}
@@ -31,15 +31,12 @@ afterEach(() => cleanup());
 
 describe("Sidebar", () => {
   it("collapses to a rail, remembers it, and expands again", () => {
-    const onOpenSettings = vi.fn();
-    renderSidebar(onOpenSettings);
+    renderSidebar();
 
     fireEvent.click(screen.getByRole("button", { name: /collapse project list|收起项目栏/i }));
     expect(screen.queryByRole("textbox")).toBeNull();
+    expect(screen.getAllByRole("button")).toHaveLength(1);
     expect(localStorage.getItem("mynotebooklm.sidebarCollapsed")).toBe("1");
-
-    fireEvent.click(screen.getByRole("button", { name: /^(settings|设置)$/i }));
-    expect(onOpenSettings).toHaveBeenCalled();
 
     cleanup();
     renderSidebar();

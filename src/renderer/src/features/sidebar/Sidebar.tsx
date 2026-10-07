@@ -82,19 +82,9 @@ export default function Sidebar(props: SidebarProps) {
   if (collapsed) {
     return (
       <aside className="sidebar rail" aria-label={t("project.title")}>
-        <div className="sidebar-head drag"><BrandMark /></div>
-        <div className="sidebar-rail-body">
-          <button type="button" className="icon-btn" aria-label={t("project.expandSidebar")} title={t("project.expandSidebar")} onClick={() => setCollapsed(false)}>
-            <Icon name="chevrons-right" />
-          </button>
-          <button type="button" className="icon-btn" aria-label={t("project.create")} title={t("project.create")} disabled={props.busy || props.onboarding} onClick={props.onCreate}>
-            <Icon name="plus" />
-          </button>
-          <span className="spacer" />
-          <button type="button" className="icon-btn" aria-label={t("app.settings")} title={t("app.settings")} aria-current={props.settingsActive ? "page" : undefined} onClick={props.onOpenSettings}>
-            <Icon name="settings" />
-          </button>
-        </div>
+        <button type="button" className="icon-btn" aria-label={t("project.expandSidebar")} title={t("project.expandSidebar")} onClick={() => setCollapsed(false)}>
+          <Icon name="chevrons-right" />
+        </button>
       </aside>
     );
   }
