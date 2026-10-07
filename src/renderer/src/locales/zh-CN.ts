@@ -190,7 +190,7 @@ const zhCN = {
     nextPage: "下一页",
     page: "第 {{page}} 页",
     states: { started: "已开始", completed: "已完成", failed: "失败", cancelled: "已取消" },
-    tasks: { chat: "对话", "note-title": "笔记标题", summary: "摘要", "key-points": "要点", qa: "选择题测验", "mind-map": "思维导图", "custom-transformation": "自定义转换", podcast: "播客", embedding: "嵌入" }
+    tasks: { chat: "对话", "note-title": "笔记标题", summary: "摘要", "key-points": "要点", qa: "选择题测验", "mind-map": "思维导图", slides: "PPT", "custom-transformation": "自定义转换", podcast: "播客", embedding: "嵌入" }
   },
   vector: {
     eyebrow: "数据与索引",
@@ -225,6 +225,7 @@ const zhCN = {
     mindMapInvalidStructure: "导图的节点字段或层级不符合要求，自动修复后仍不正确，请重试或更换模型。",
     mindMapInvalidReferences: "导图包含资料中不存在的引用编号，自动修复后仍无法核实，请重试或更换模型。",
     podcastRouteMissing: "请在设置 → 任务路由 → 播客中添加至少一个文字生成模型和一个 TTS 模型。",
+    slidesInvalid: "模型返回的 PPT 内容格式不正确，请重试或更换模型。",
     podcastScriptInvalid: "生成的播客对话稿格式不正确或不包含两位说话者，请重试或更换文字模型。",
     podcastSpeechUnsupported: "此提供商暂不支持播客语音合成，请使用 OpenAI、OpenAI 兼容或 Gemini 的 TTS 模型。",
     podcastVoicesRequired: "请在运行转换中为两位主持人选择或填写音色。",
@@ -418,7 +419,20 @@ const zhCN = {
   workspace: {
     research: "研究",
     studio: "转换",
+    slides: "PPT",
     subtitle: "导入来源、提问并沉淀笔记"
+  },
+  slides: {
+    title: "PPT", generateTitle: "生成 PPT", sources: "资料", generate: "生成 PPT", decks: "我的 PPT",
+    noSources: "先在“研究”里导入资料，处理完成后就能生成 PPT。", noDecks: "还没有 PPT。勾选资料后点“生成 PPT”。",
+    slideCount: "{{count}} 页", untitled: "未命名演示", editor: "PPT 编辑器", selectDeck: "在左侧选择一份 PPT，或先生成一份。",
+    deckTitle: "演示标题", slideTitle: "幻灯片标题", theme: "配色", themes: { light: "简洁白", dark: "深色", ocean: "海蓝", warm: "暖橙" },
+    layout: "版式", layouts: { title: "封面", section: "章节页", bullets: "要点", "two-column": "双栏" },
+    list: "幻灯片列表", slideLabel: "第 {{index}} 页", addSlide: "新增一页", duplicate: "复制本页", deleteSlide: "删除本页",
+    moveUp: "上移", moveDown: "下移", newSlide: "新幻灯片", notes: "演讲者备注", notesPlaceholder: "写下讲这一页时要说的话…",
+    titlePlaceholder: "输入标题", subtitlePlaceholder: "输入副标题", bulletPlaceholder: "输入要点，回车新增一条", rightPlaceholder: "右栏要点",
+    export: "导出 PPTX", exportFailed: "导出失败，请重试。",
+    save: { saving: "保存中…", saved: "已自动保存", failed: "保存失败，请再编辑一次重试" }
   },
   mindmap: {
     title: "思维导图", generate: "生成思维导图", open: "打开导图", nodeCount: "{{count}} 个节点",

@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import type Database from "better-sqlite3";
-import type { InsightDto, InsightUsage } from "../../shared/transformations";
+import type { BuiltinKey, InsightDto, InsightUsage } from "../../shared/transformations";
 import { insightDtoSchema } from "../../shared/transformations";
 import type { TaskDto } from "../../shared/tasks";
 import type { ModelProfileSnapshot } from "../models/model-router";
@@ -18,10 +18,13 @@ import { resolveGenerationLimits } from "../models/generation-limits";
 import { checkTransformationFinish, prepareTransformationRequest, type TransformationInput } from "./transformation-input";
 import { MindMapOutputError, MindMapService, normalizeMindMapOutput } from "./mindmap-service";
 import { mindMapDocumentSchema, mindMapMarkdown } from "../../shared/mindmaps";
+import { slideDeckSchema, type SlideDeck } from "../../shared/slides";
+import { normalizeSlidesOutput, SlidesOutputError } from "./slides-output";
 
 const OUTPUT_BYTE_LIMIT = 2 * 1024 * 1024;
 const RENDERED_PROMPT_VERSION = "transformation-prompt-full-input-v2";
 
+type TransformationTaskKind = BuiltinKey | "custom-transformation";
 type InputKind = "source" | "sources" | "message" | "answer" | "note";
 type Rule = BuiltinTransformationDescriptor | { transformationId: string };
 
@@ -29,7 +32,7 @@ export type TransformationRunRequest = Readonly<{
   projectId: string;
   rule?: Rule;
   transformationId?: string;
-  builtinKey?: "summary" | "key-points" | "qa" | "podcast" | "mind-map";
+  builtinKey?: BuiltinKey;
   language?: "zh-CN" | "en";
   projectTarget?: true;
   sourceRevisionId?: string;
@@ -50,7 +53,7 @@ type TransformationServiceDeps = Readonly<{
   transformations: Pick<TransformationRepository, "get" | "list" | "create" | "update" | "remove">;
   notes: Pick<NoteRepository, "get" | "create">;
   generation: Pick<RoutedGeneration, "generateRouted">;
-  router: { resolve: (taskKind: "summary" | "key-points" | "qa" | "mind-map" | "custom-transformation" | "podcast", profileId?: string) => readonly ModelProfileSnapshot[] };
+  router: { resolve: (taskKind: TransformationTaskKind, profileId?: string) => readonly ModelProfileSnapshot[] };
   podcasts?: Pick<PodcastService, "render">;
   id?: () => string;
   now?: () => string;
@@ -149,7 +152,7 @@ function targetSnapshot(db: Database.Database, input: TransformationRunRequest):
   throw new Error("Transformation input is required");
 }
 
-function resolveRule(input: TransformationRunRequest, deps: TransformationServiceDeps): { id: string; version: number; prompt: string; transformationId: string | null; name: string; appliesTo: string; language?: "zh-CN" | "en"; taskKind: "summary" | "key-points" | "qa" | "mind-map" | "custom-transformation" | "podcast" } {
+function resolveRule(input: TransformationRunRequest, deps: TransformationServiceDeps): { id: string; version: number; prompt: string; transformationId: string | null; name: string; appliesTo: string; language?: "zh-CN" | "en"; taskKind: TransformationTaskKind } {
   const rule = input.rule ?? (input.transformationId ? { transformationId: input.transformationId } : input.builtinKey ? listBuiltinTransformations().find((item) => item.key === input.builtinKey && item.language === (input.language ?? "en")) : undefined);
   if (!rule) throw new Error("Transformation rule is required");
   if ("transformationId" in rule) {
@@ -179,6 +182,7 @@ export class TransformationService {
       WHEN s.rule_id LIKE 'builtin:key-points:%' THEN 'key-points'
       WHEN s.rule_id LIKE 'builtin:podcast:%' THEN 'podcast'
       WHEN s.rule_id LIKE 'builtin:mind-map:%' THEN 'mind-map'
+      WHEN s.rule_id LIKE 'builtin:slides:%' THEN 'slides'
       END AS builtin_key, EXISTS(SELECT 1 FROM podcast_audio pa WHERE pa.insight_id=i.id) AS has_audio,
       (SELECT a.model FROM model_route_attempts a WHERE a.operation_id=i.task_id AND a.project_id=i.project_id
         AND a.task_kind='podcast' AND a.state='completed' ORDER BY a.attempt_order DESC LIMIT 1) AS speech_model
@@ -419,6 +423,15 @@ export class TransformationService {
     return this.deps.notes.create({ id: this.deps.id?.() ?? randomUUID(), projectId, title: title.slice(0, 200), body: content });
   }
 
+  /** Slide decks are edited in place; the insight keeps its task and input history. */
+  saveSlides(input: { projectId: string; insightId: string; deck: SlideDeck }): void {
+    const deck = slideDeckSchema.parse(input.deck);
+    const result = this.deps.db.prepare(`UPDATE insights SET content = ?, updated_at = ? WHERE id = ? AND project_id = ?
+      AND task_id IN (SELECT task_id FROM transformation_task_snapshots WHERE rule_id LIKE 'builtin:slides:%')`)
+      .run(JSON.stringify(deck), this.deps.now?.() ?? new Date().toISOString(), input.insightId, input.projectId);
+    if (result.changes === 0) throw new TransformationInsightNotFoundError(input.insightId);
+  }
+
   deleteInsight(input: { projectId: string; insightId: string }): void {
     const result = this.deps.db.prepare("DELETE FROM insights WHERE id = ? AND project_id = ?").run(input.insightId, input.projectId);
     if (result.changes === 0) throw new TransformationInsightNotFoundError(input.insightId);
@@ -483,6 +496,13 @@ export class TransformationService {
         }
       }
     }
+    if (kind === "slides") {
+      try { return { content: JSON.stringify(normalizeSlidesOutput(outputText(content))) }; }
+      catch (reason) {
+        if (reason instanceof SlidesOutputError) throw new RoutedGenerationError({ code: "PROVIDER", messageKey: reason.messageKey, recoverable: true });
+        throw reason;
+      }
+    }
     if (kind !== "podcast") return { content: outputText(content) };
     if (!this.deps.podcasts) throw new RoutedGenerationError({ code: "VALIDATION", messageKey: "errors.podcastRouteMissing", recoverable: true });
     this.deps.tasks.advance(taskId, "generating", 450);
@@ -524,7 +544,7 @@ export class TransformationService {
       const persistedRoute = JSON.parse(snapshot.route_snapshot_json) as { taskKind?: string; profileId?: string | null; routes?: readonly RoutedProfile[] } | readonly RoutedProfile[];
       const routeObject = Array.isArray(persistedRoute) ? undefined : persistedRoute as { taskKind?: string; profileId?: string | null; routes?: readonly RoutedProfile[] };
       const isMindMap = snapshot.rule_id.startsWith("builtin:mind-map:");
-      const taskKind = isMindMap ? "mind-map" : routeObject?.taskKind ? routeObject.taskKind as "summary" | "key-points" | "qa" | "custom-transformation" | "podcast" : "custom-transformation";
+      const taskKind = isMindMap ? "mind-map" : routeObject?.taskKind ? routeObject.taskKind as TransformationTaskKind : "custom-transformation";
       const persistedRouteProfileId = routeObject?.profileId ?? undefined;
       const persistedRoutes = routeObject ? routeObject.routes ?? [] : persistedRoute;
       const profiles = this.deps.router.resolve(taskKind, persistedRouteProfileId);

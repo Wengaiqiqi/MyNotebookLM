@@ -5,6 +5,7 @@ import { TRANSFORMATION_CHANNELS, transformationBuiltinInputSchema, transformati
 import { builtinTransformationDtoSchema, createTransformationInputSchema, insightDtoSchema, podcastAudioSchema, transformationDtoSchema, transformationRunInputSchema, updateTransformationInputSchema } from "../../shared/transformations";
 import { taskDtoSchema, type TaskDto } from "../../shared/tasks";
 import { noteDtoSchema } from "../../shared/notes";
+import { saveSlidesInputSchema, type SlideDeck } from "../../shared/slides";
 import { listBuiltinTransformations } from "../notes/builtin-transformations";
 import type { TransformationService, TransformationRunRequest } from "../notes/transformation-service";
 import { RoutedGenerationError } from "../models/routed-generation";
@@ -22,6 +23,7 @@ type Service = {
   deleteInsight(input: { projectId: string; insightId: string }): unknown;
   convertToNote(input: { projectId: string; insightId: string }): unknown;
   getAudio(input: { projectId: string; insightId: string }): unknown;
+  saveSlides(input: { projectId: string; insightId: string; deck: SlideDeck }): unknown;
 };
 
 const empty = z.undefined();
@@ -60,6 +62,7 @@ export function registerTransformationHandlers(ipc: Ipc, service: Service): () =
   ipc.handle(TRANSFORMATION_CHANNELS.deleteInsight, (_event, input) => safe(transformationConvertInputSchema, voidResult, input, service.deleteInsight.bind(service)));
   ipc.handle(TRANSFORMATION_CHANNELS.convertToNote, (_event, input) => safe(transformationConvertInputSchema, note, input, service.convertToNote.bind(service)));
   ipc.handle(TRANSFORMATION_CHANNELS.getAudio, (_event, input) => safe(transformationConvertInputSchema, resultSchema(podcastAudioSchema), input, service.getAudio.bind(service)));
+  ipc.handle(TRANSFORMATION_CHANNELS.saveSlides, (_event, input) => safe(saveSlidesInputSchema, voidResult, input, service.saveSlides.bind(service)));
   const channels = Object.values(TRANSFORMATION_CHANNELS);
   return () => { for (const controller of controllers.values()) controller.abort(); controllers.clear(); channels.forEach((channel) => ipc.removeHandler(channel)); };
 }

@@ -65,7 +65,7 @@ export default function StudioPane({ projectId }: { projectId: string }) {
     .filter((task) => task.projectId === projectId)
     .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
     .filter((task, index, all) => all.findIndex((item) => item.id === task.id) === index), [feedTasks, submittedTasks, projectId]);
-  const ownedTasks = tasks.filter((task) => task.kind === "transformation" && (session.taskIds === null || session.taskIds.includes(task.id)));
+  const ownedTasks = tasks.filter((task) => task.kind === "transformation" && task.transformationKind !== "slides" && (session.taskIds === null || session.taskIds.includes(task.id)));
   const transformTask = ownedTasks.find((task) => task.state === "queued" || task.state === "running")
     ?? (session.taskIds !== null ? ownedTasks.find((task) => task.state === "failed") : undefined) ?? ownedTasks[0];
   useEffect(() => {
@@ -129,7 +129,7 @@ export default function StudioPane({ projectId }: { projectId: string }) {
   const chosenRule = rules.find((item) => item.id === ruleKey);
   const ruleOptions = [
     ...builtins
-      .filter((item) => item.key !== "key-points")
+      .filter((item) => item.key !== "key-points" && item.key !== "slides")
       .map((item) => ({ value: item.key, label: item.key === "summary" ? t("transformations.summary") : item.name })),
     ...rules
       .filter((item) => item.appliesTo !== "note" && item.appliesTo !== "sources")
@@ -146,6 +146,8 @@ export default function StudioPane({ projectId }: { projectId: string }) {
   }, [openMenu]);
 
   const readySources = useMemo(() => sources.filter(sourceReady), [sources]);
+  // Quizzes and slide decks have their own panels.
+  const studioInsights = insights.filter((item) => item.builtinKey !== "qa" && item.builtinKey !== "slides");
 
   async function run(): Promise<void> {
     const api: TransformApi = getApi().transformations;
@@ -467,15 +469,15 @@ export default function StudioPane({ projectId }: { projectId: string }) {
       <section className="panel studio-insights" aria-label={t("transformations.insights")}>
         <header className="panel-head">
           <h2>{t("transformations.insights")}</h2>
-          <span className="count">{insights.filter((item) => item.builtinKey !== "qa").length}</span>
+          <span className="count">{studioInsights.length}</span>
         </header>
         <div className="panel-body">
-          {insights.filter((item) => item.builtinKey !== "qa").length === 0 ? (
+          {studioInsights.length === 0 ? (
             <div className="empty" style={{ padding: "26px 12px" }}>
               <span className="glyph" aria-hidden="true"><Icon name="sparkle" /></span>
               <p>{t("transformations.noInsights")}</p>
             </div>
-          ) : insights.filter((item) => item.builtinKey !== "qa").map((insight) => {
+          ) : studioInsights.map((insight) => {
             const isMap = insight.builtinKey === "mind-map";
             const parsed = isMap ? (() => { try { return mindMapDocumentSchema.safeParse(JSON.parse(insight.content)); } catch { return null; } })() : null;
             const mapDocument = parsed?.success ? parsed.data : null;

@@ -5,9 +5,10 @@ import ChatPane from "../chat/ChatPane";
 import SourcesPanel from "../sources/SourcesPanel";
 import NotesPane from "../notes/NotesPane";
 import StudioPane from "../studio/StudioPane";
+import SlidesPane from "../slides/SlidesPane";
 import { useTaskFeed } from "../../hooks/useTaskFeed";
 
-export type Section = "research" | "notes" | "studio";
+export type Section = "research" | "notes" | "studio" | "slides";
 
 export default function Workspace({ projectId, section, routes, onOpenSettings, onOpenModelSettings }: {
   projectId: string;
@@ -59,6 +60,7 @@ export default function Workspace({ projectId, section, routes, onOpenSettings, 
       )}
       {section === "notes" && <NotesPane projectId={projectId} />}
       {section === "studio" && <StudioPane projectId={projectId} />}
+      {section === "slides" && <SlidesPane projectId={projectId} sources={sources} />}
     </div>
   );
 }

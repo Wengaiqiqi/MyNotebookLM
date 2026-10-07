@@ -14,6 +14,7 @@ import { ProviderRequestError } from "../models/http-client";
 import { classifyProviderError } from "../models/provider-errors";
 import { MindMapService, nodeChatContext } from "./mindmap-service";
 import { mindMapViewSchema } from "../../shared/mindmaps";
+import { slideDeckSchema } from "../../shared/slides";
 import { ConversationRepository } from "../chat/conversation-repository";
 
 const PROJECT = "11111111-1111-4111-8111-111111111111";
@@ -100,6 +101,30 @@ describe("TransformationService", () => {
     service.deleteInsight({ projectId: PROJECT, insightId: insight.id });
     expect(db.connection.prepare("SELECT deleted_at FROM conversations WHERE id=?").get(first.id)).toMatchObject({ deleted_at: expect.any(String) });
     expect(db.connection.prepare("SELECT * FROM mind_map_conversations").all()).toEqual([]);
+  });
+
+  it("generates an editable slide deck on the slides route and saves edits in place", async () => {
+    const kinds: string[] = [];
+    baseDeps.generation = { generateRouted: async function* (kind: string) {
+      kinds.push(kind);
+      yield* successful('<think>plan</think>```json\n{"title":"研究汇报","slides":[{"layout":"title","title":"研究汇报","bullets":["副标题"]},{"layout":"bullets","title":"背景","bullets":["他说"重要"的事"],"notes":"讲解"}]}\n```');
+    } };
+    service = new TransformationService(baseDeps);
+    const insight = await service.run({ projectId: PROJECT, builtinKey: "slides", language: "zh-CN", sourceRevisionId: REVISION });
+    expect(kinds).toEqual(["slides"]);
+    expect(baseDeps.taskRepository.findById(insight.taskId)?.transformationKind).toBe("slides");
+    expect(service.listInsights({ projectId: PROJECT })[0]?.builtinKey).toBe("slides");
+    const deck = slideDeckSchema.parse(JSON.parse(insight.content));
+    expect(deck).toMatchObject({ title: "研究汇报", theme: "light", slides: [{ layout: "title" }, { layout: "bullets", bullets: ['他说"重要"的事'], notes: "讲解" }] });
+
+    service.saveSlides({ projectId: PROJECT, insightId: insight.id, deck: { ...deck, theme: "dark", title: "改过的标题" } });
+    expect(JSON.parse(service.listInsights({ projectId: PROJECT })[0]!.content)).toMatchObject({ theme: "dark", title: "改过的标题" });
+    expect(() => service.saveSlides({ projectId: SOURCE, insightId: insight.id, deck })).toThrow(/not found/i);
+
+    baseDeps.generation = { generateRouted: async function* () { yield* successful("这不是 JSON"); } };
+    await expect(new TransformationService(baseDeps).run({ projectId: PROJECT, builtinKey: "slides", language: "en", sourceRevisionId: REVISION })).rejects.toMatchObject({ error: { messageKey: "errors.slidesInvalid", recoverable: true } });
+    const plain = await new TransformationService({ ...baseDeps, generation: { generateRouted: async function* () { yield* successful(); } } }).run({ projectId: PROJECT, builtinKey: "summary", language: "en", sourceRevisionId: REVISION });
+    expect(() => service.saveSlides({ projectId: PROJECT, insightId: plain.id, deck })).toThrow(/not found/i);
   });
 
   it("fails malformed maps without saving an insight and retries the same saved input", async () => {

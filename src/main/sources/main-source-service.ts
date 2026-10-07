@@ -97,6 +97,7 @@ export class MainSourceService {
       kind: row.kind as TaskDto["kind"], state: row.state as TaskDto["state"], stage: row.stage as TaskDto["stage"],
       ...(String(row.transformation_rule_id ?? "").startsWith("builtin:podcast:") ? { transformationKind: "podcast" as const } : {}),
       ...(String(row.transformation_rule_id ?? "").startsWith("builtin:mind-map:") ? { transformationKind: "mind-map" as const } : {}),
+      ...(String(row.transformation_rule_id ?? "").startsWith("builtin:slides:") ? { transformationKind: "slides" as const } : {}),
       progress: Number(row.progress_1000), attempt: Number(row.attempt),
       error: errorCode ? { code: errorCode, messageKey: safeTaskMessageKey(errorCode, row.error_message), recoverable: isRetryableCode(errorCode) } : null,
       idempotencyKey: row.idempotency_key ? String(row.idempotency_key) : null, createdAt: String(row.created_at), updatedAt: String(row.updated_at)

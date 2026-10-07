@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { saveSlidesInputSchema } from "../shared/slides";
 import { MINDMAP_CHANNELS, mindMapDtoSchema, mindMapInputSchema, mindMapNodeInputSchema, mindMapReferenceInputSchema, mindMapSaveViewInputSchema } from "../shared/mindmaps";
 import {
   internalFailure,
@@ -406,7 +407,8 @@ export function createDesktopApi(ipc: IpcInvoker): DesktopApi {
       listInsights: (input) => invokeResult(ipc, TRANSFORMATION_CHANNELS.listInsights, transformationInsightsInputSchema, insightResultSchema, input),
       deleteInsight: (input) => invokeResult(ipc, TRANSFORMATION_CHANNELS.deleteInsight, transformationConvertInputSchema, voidResultSchema, input),
       convertToNote: (input) => invokeResult(ipc, TRANSFORMATION_CHANNELS.convertToNote, transformationConvertInputSchema, noteResultSchema, input),
-      getAudio: (input) => invokeResult(ipc, TRANSFORMATION_CHANNELS.getAudio, transformationConvertInputSchema, resultSchema(podcastAudioSchema), input)
+      getAudio: (input) => invokeResult(ipc, TRANSFORMATION_CHANNELS.getAudio, transformationConvertInputSchema, resultSchema(podcastAudioSchema), input),
+      saveSlides: (input) => invokeResult(ipc, TRANSFORMATION_CHANNELS.saveSlides, saveSlidesInputSchema, voidResultSchema, input)
     }
   };
 }

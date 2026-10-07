@@ -27,6 +27,7 @@ it("upgrades map routes independently while retaining existing routes and attemp
     db = openAppDatabase(databasePath, migrations);
     const upgraded = new SettingsRepository(db.connection);
     expect(upgraded.getRoute("mind-map").map((item) => item.profileId)).toEqual([profile.id, fallback.id]);
+    expect(upgraded.getRoute("slides").map((item) => item.profileId)).toEqual([profile.id, fallback.id]);
     upgraded.replaceRoute("mind-map", [fallback.id]);
     expect(upgraded.getRoute("chat").map((item) => item.profileId)).toEqual([profile.id, fallback.id]);
     expect(upgraded.getRoute("custom-transformation").map((item) => item.profileId)).toEqual([fallback.id]);

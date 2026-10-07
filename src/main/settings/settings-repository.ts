@@ -65,6 +65,7 @@ const defaultGenerationTasks = [
   "key-points",
   "qa",
   "mind-map",
+  "slides",
   "custom-transformation"
 ] as const;
 
@@ -362,7 +363,7 @@ export class SettingsRepository {
       this.db.prepare(`
         DELETE FROM model_routes
         WHERE task_kind IN ('chat', 'note-title', 'summary', 'key-points', 'qa',
-          'mind-map', 'custom-transformation', 'embedding')
+          'mind-map', 'slides', 'custom-transformation', 'embedding')
       `).run();
       const insert = this.db.prepare(`
         INSERT INTO model_routes(task_kind, position, profile_id) VALUES (?, 0, ?)

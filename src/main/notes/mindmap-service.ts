@@ -119,7 +119,7 @@ function scanObject(text: string, start: number): { json: string; end: number } 
   return null;
 }
 
-function modelJson(raw: string): unknown {
+export function modelJson(raw: string): unknown {
   const cleaned = raw.replace(/<think>[\s\S]*?<\/think>/gi, "").trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "");
   try { return JSON.parse(cleaned); } catch { /* Accept one complete JSON object surrounded by commentary. */ }
   const candidates: unknown[] = [];

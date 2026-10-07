@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { modelTaskKindSchema, providerKindSchema } from "./models";
 
+export const builtinKeySchema = z.enum(["summary", "key-points", "qa", "podcast", "mind-map", "slides"]);
 export const transformationAppliesToSchema = z.enum(["source", "sources", "message", "answer", "note"]);
 const transformationNameSchema = z.string().trim().min(1).max(100);
 const allowedPlaceholder = /\{\{(?:content|source_title|project_name|language)\}\}/g;
@@ -39,7 +40,7 @@ export const updateTransformationInputSchema = createTransformationInputSchema.e
 }).strict();
 const transformationIdInputSchema = z.object({ projectId: z.uuid(), id: z.uuid() }).strict();
 export const builtinTransformationDtoSchema = z.object({
-  key: z.enum(["summary", "key-points", "qa", "podcast", "mind-map"]), language: z.enum(["zh-CN", "en"]), name: z.string().trim().min(1).max(100),
+  key: builtinKeySchema, language: z.enum(["zh-CN", "en"]), name: z.string().trim().min(1).max(100),
   appliesTo: transformationAppliesToSchema, prompt: z.string().trim().min(1)
 }).strict();
 
@@ -49,7 +50,7 @@ export const insightUsageSchema = z.object({
   totalTokens: z.number().int().nonnegative()
 }).strict();
 export const insightDtoSchema = z.object({
-  builtinKey: z.enum(["summary", "key-points", "qa", "podcast", "mind-map"]).nullable().optional(),
+  builtinKey: builtinKeySchema.nullable().optional(),
   hasAudio: z.boolean().optional(),
   speechModel: z.string().trim().min(1).max(200).nullable().optional(),
   id: z.uuid(),
@@ -72,7 +73,7 @@ export const insightDtoSchema = z.object({
 export const transformationRunInputSchema = z.object({
   projectId: z.uuid(),
   transformationId: z.uuid().optional(),
-  builtinKey: z.enum(["summary", "key-points", "qa", "podcast", "mind-map"]).optional(),
+  builtinKey: builtinKeySchema.optional(),
   language: z.enum(["zh-CN", "en"]).optional(),
   projectTarget: z.literal(true).optional(),
   sourceRevisionId: z.uuid().optional(),
@@ -100,6 +101,7 @@ export const transformationRunInputSchema = z.object({
   if (value.sourceRevisionId !== undefined && value.sourceRevisionIds !== undefined) context.addIssue({ code: "custom", path: ["sourceRevisionIds"], message: "Use one source target form" });
 })
 
+export type BuiltinKey = z.infer<typeof builtinKeySchema>;
 export type TransformationAppliesTo = z.infer<typeof transformationAppliesToSchema>;
 export const podcastAudioSchema = z.object({ data: z.string().min(1).max(90_000_000), mimeType: z.literal("audio/wav") }).strict();
 export type PodcastAudioDto = z.infer<typeof podcastAudioSchema>;

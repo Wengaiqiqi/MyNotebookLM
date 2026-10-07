@@ -35,6 +35,7 @@ export const modelTaskKindSchema = z.enum([
   "key-points",
   "qa",
   "mind-map",
+  "slides",
   "custom-transformation",
   "podcast",
   "embedding"

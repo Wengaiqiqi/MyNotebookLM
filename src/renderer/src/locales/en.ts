@@ -190,7 +190,7 @@ const en = {
     nextPage: "Next",
     page: "Page {{page}}",
     states: { started: "Started", completed: "Completed", failed: "Failed", cancelled: "Cancelled" },
-    tasks: { chat: "Chat", "note-title": "Note title", summary: "Summary", "key-points": "Key points", qa: "Quiz", "mind-map": "Mind map", "custom-transformation": "Custom transformation", podcast: "Podcast", embedding: "Embedding" }
+    tasks: { chat: "Chat", "note-title": "Note title", summary: "Summary", "key-points": "Key points", qa: "Quiz", "mind-map": "Mind map", slides: "Slides", "custom-transformation": "Custom transformation", podcast: "Podcast", embedding: "Embedding" }
   },
   vector: {
     eyebrow: "Data & index",
@@ -225,6 +225,7 @@ const en = {
     mindMapInvalidStructure: "The map has invalid node fields or hierarchy and automatic repair failed. Retry or choose another model.",
     mindMapInvalidReferences: "The map contains references absent from the source material and automatic repair could not verify them. Retry or choose another model.",
     podcastRouteMissing: "Add at least one text model and one TTS model in Settings → Task routing → Podcast.",
+    slidesInvalid: "The model returned slides in an invalid format. Retry or choose another model.",
     podcastScriptInvalid: "The podcast script is invalid or does not include two speakers. Retry or choose another text model.",
     podcastSpeechUnsupported: "This provider does not support podcast speech synthesis. Use an OpenAI, OpenAI-compatible or Gemini TTS model.",
     podcastVoicesRequired: "Select or enter a voice for each host in Run transformation.",
@@ -418,7 +419,20 @@ const en = {
   workspace: {
     research: "Research",
     studio: "Studio",
+    slides: "Slides",
     subtitle: "Import sources, ask questions, capture notes"
+  },
+  slides: {
+    title: "Slides", generateTitle: "Generate slides", sources: "Sources", generate: "Generate slides", decks: "My decks",
+    noSources: "Import sources in Research first; once they are processed you can generate slides.", noDecks: "No decks yet. Pick sources and click Generate slides.",
+    slideCount: "{{count}} slides", untitled: "Untitled deck", editor: "Slide editor", selectDeck: "Select a deck on the left, or generate one.",
+    deckTitle: "Deck title", slideTitle: "Slide title", theme: "Theme", themes: { light: "Light", dark: "Dark", ocean: "Ocean", warm: "Warm" },
+    layout: "Layout", layouts: { title: "Cover", section: "Section", bullets: "Bullets", "two-column": "Two columns" },
+    list: "Slide list", slideLabel: "Slide {{index}}", addSlide: "Add slide", duplicate: "Duplicate", deleteSlide: "Delete slide",
+    moveUp: "Move up", moveDown: "Move down", newSlide: "New slide", notes: "Speaker notes", notesPlaceholder: "What to say on this slide…",
+    titlePlaceholder: "Add a title", subtitlePlaceholder: "Add a subtitle", bulletPlaceholder: "Add a point; Enter adds another", rightPlaceholder: "Right column",
+    export: "Export PPTX", exportFailed: "Export failed. Please try again.",
+    save: { saving: "Saving…", saved: "Saved automatically", failed: "Save failed; edit again to retry" }
   },
   mindmap: {
     title: "Mind map", generate: "Generate mind map", open: "Open map", nodeCount: "{{count}} nodes",

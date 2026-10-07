@@ -8,8 +8,13 @@ describe("built-in transformations", () => {
     expect(maps.map((rule) => rule.language)).toEqual(["zh-CN", "en"]);
     for (const map of maps) { expect(transformationPromptSchema.safeParse(map.prompt).success).toBe(true); expect(map.prompt).toContain("[CHUNK:"); }
   });
+  it("provides valid bilingual slide templates with the flat slide format", () => {
+    const decks = listBuiltinTransformations().filter((rule) => rule.key === "slides");
+    expect(decks.map((rule) => rule.language)).toEqual(["zh-CN", "en"]);
+    for (const deck of decks) { expect(transformationPromptSchema.safeParse(deck.prompt).success).toBe(true); expect(deck.prompt).toContain('"slides":[{"layout"'); }
+  });
   it("contains immutable bilingual summary, key-points and Q&A descriptors", () => {
-    expect(listBuiltinTransformations().filter((rule) => rule.key !== "podcast" && rule.key !== "mind-map")).toMatchInlineSnapshot(`
+    expect(listBuiltinTransformations().filter((rule) => rule.key !== "podcast" && rule.key !== "mind-map" && rule.key !== "slides")).toMatchInlineSnapshot(`
       [
         {
           "appliesTo": "source",

@@ -37,6 +37,7 @@ function toTaskDto(row: TaskRow): TaskDto {
     kind: row.kind,
     ...(row.transformation_rule_id?.startsWith("builtin:podcast:") ? { transformationKind: "podcast" as const } : {}),
     ...(row.transformation_rule_id?.startsWith("builtin:mind-map:") ? { transformationKind: "mind-map" as const } : {}),
+    ...(row.transformation_rule_id?.startsWith("builtin:slides:") ? { transformationKind: "slides" as const } : {}),
     state: row.state,
     stage: row.stage,
     progress: row.progress_1000,

@@ -135,7 +135,8 @@ export default function App() {
                   {([
                     ["research", "chat", t("workspace.research")],
                     ["notes", "notes", t("notes.titlePage")],
-                    ["studio", "sparkle", t("workspace.studio")]
+                    ["studio", "sparkle", t("workspace.studio")],
+                    ["slides", "slides", t("workspace.slides")]
                   ] as const).map(([id, icon, label]) => (
                     <button key={id} type="button" role="tab" aria-selected={section === id} onClick={() => setSection(id)}>
                       <Icon name={icon} />

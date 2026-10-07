@@ -76,7 +76,8 @@ export const NOTE_CHANNELS = {
 export const TRANSFORMATION_CHANNELS = {
   listRules: "transformations:v1:list-rules", createRule: "transformations:v1:create-rule", updateRule: "transformations:v1:update-rule", deleteRule: "transformations:v1:delete-rule",
   listBuiltins: "transformations:v1:list-builtins", run: "transformations:v1:run", cancel: "transformations:v1:cancel", retry: "transformations:v1:retry",
-  listInsights: "transformations:v1:list-insights", deleteInsight: "transformations:v1:delete-insight", convertToNote: "transformations:v1:convert-to-note", getAudio: "transformations:v1:get-audio"
+  listInsights: "transformations:v1:list-insights", deleteInsight: "transformations:v1:delete-insight", convertToNote: "transformations:v1:convert-to-note", getAudio: "transformations:v1:get-audio",
+  saveSlides: "transformations:v1:save-slides"
 } as const;
 
 export const modelRoutesInputSchema = z.object({ taskKind: modelTaskKindSchema }).strict();
@@ -284,6 +285,7 @@ export interface DesktopApi {
     listBuiltins(input?: { language?: "zh-CN" | "en" }): Promise<Result<BuiltinTransformationDto[]>>; run(input: TransformationRunInput): Promise<Result<TaskDto>>; cancel(input: { projectId: string; taskId: string }): Promise<Result<TaskDto>>; retry(input: { projectId: string; taskId: string }): Promise<Result<TaskDto>>;
     listInsights(input: { projectId: string; limit?: number; offset?: number }): Promise<Result<InsightDto[]>>; deleteInsight(input: { projectId: string; insightId: string }): Promise<Result<void>>; convertToNote(input: { projectId: string; insightId: string }): Promise<Result<NoteDto>>;
     getAudio(input: { projectId: string; insightId: string }): Promise<Result<import("./transformations").PodcastAudioDto>>;
+    saveSlides(input: { projectId: string; insightId: string; deck: import("./slides").SlideDeck }): Promise<Result<void>>;
   };
   credentials: {
     set(input: CredentialInput): Promise<Result<CredentialStatusDto>>;
