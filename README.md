@@ -2,6 +2,8 @@
 
 本地优先的 Windows 桌面研究助手，思路类似 NotebookLM：把文档和网页导入到项目中，基于这些来源进行带引用的问答，并生成笔记、测验、思维导图和播客。
 
+https://github.com/user-attachments/assets/af147c97-fd69-4ce3-9bdf-6d4b8c673b98
+
 ## 功能
 
 - **来源导入**：txt、Markdown、CSV（UTF-8、UTF-16 或 GBK/GB18030 编码）、PDF、Word、PowerPoint、Excel，以及网页 URL。
